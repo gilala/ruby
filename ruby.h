@@ -34,16 +34,11 @@ extern "C" {
 #include <stddef.h>
 #include <stdio.h>
 
-/* need to include <ctype.h> to use these macros */
-#undef ISPRINT
-#define ISPRINT(c) isprint((unsigned char)(c))
-#define ISSPACE(c) isspace((unsigned char)(c))
-#define ISUPPER(c) isupper((unsigned char)(c))
-#define ISLOWER(c) islower((unsigned char)(c))
-#define ISALNUM(c) isalnum((unsigned char)(c))
-#define ISALPHA(c) isalpha((unsigned char)(c))
-#define ISDIGIT(c) isdigit((unsigned char)(c))
-#define ISXDIGIT(c) isxdigit((unsigned char)(c))
+#include "m17n.h"
+#define ISSPACE(c) m17n_isspace(ruby_default_encoding, (c))
+#define ISALPHA(c) m17n_isalpha(ruby_default_encoding, (c))
+#define ISALNUM(c) m17n_isalnum(ruby_default_encoding, (c))
+#define ISDIGIT(c) m17n_isdigit(ruby_default_encoding, (c))
 
 #ifndef __STDC__
 # define volatile

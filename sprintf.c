@@ -326,28 +326,40 @@ rb_f_sprintf(argc, argv)
 		}
 		len = RSTRING(str)->len;
 		if (flags&(FPREC|FWIDTH)) {
-		    slen = m17n_strlen(enc, RSTRING(str)->ptr, RSTRING(str)->ptr+len);
+		    slen = m17n_swidth(enc, RSTRING(str)->ptr, RSTRING(str)->ptr+len);
 		    if (slen < 0) {
 			rb_raise(rb_eArgError, "invalid mbstring sequence");
 		    }
 		}
 		if (flags&FPREC) {
 		    if (prec < slen) {
+			int i, n;
 			char *p;
 
 			slen = prec;
-			p = m17n_nth(enc, RSTRING(str)->ptr,
-				          RSTRING(str)->ptr + RSTRING(str)->len,
-				     prec);
-			if (p == (char*)-1) {
-			    rb_raise(rb_eArgError, "invalid mbstring sequence");
+			for (i=1; 1; i++) {
+			    p = m17n_nth(enc, RSTRING(str)->ptr,
+					 RSTRING(str)->ptr + RSTRING(str)->len,
+					 i);
+			    if (p == (char*)-1) {
+				rb_raise(rb_eArgError, "invalid mbstring sequence");
+			    }
+			    n = m17n_swidth(enc, RSTRING(str)->ptr, p);
+			    if (n == prec) break;
+			    if (n > prec) {
+				p = m17n_nth(enc, RSTRING(str)->ptr,
+					     RSTRING(str)->ptr + RSTRING(str)->len,
+					     i-1);
+				slen = m17n_swidth(enc, RSTRING(str)->ptr, p);
+				break;
+			    }
 			}
 			len = p - RSTRING(str)->ptr;
 		    }
 		}
 		if (flags&FWIDTH) {
 		    if (width > slen) {
-			CHECK(width - slen + len);
+			CHECK(width + len);
 			width -= slen;
 			if (!(flags&FMINUS)) {
 			    while (width--) {
@@ -364,7 +376,18 @@ rb_f_sprintf(argc, argv)
 			break;
 		    }
 		}
+		CHECK(len);
 		PUSH(RSTRING(str)->ptr, len);
+		if (flags&FPREC) {
+		    if (prec > slen) {
+			int n = prec - slen;
+
+			CHECK(n);
+			while (n--) {
+			    buf[blen++] = ' ';
+			}
+		    }
+		}
 	    }
 	    break;
 

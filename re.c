@@ -70,8 +70,9 @@ rb_reg_expr_str(str, s, len)
 		rb_str_cat(str, p, 1);
 	    }
 	    else if (ismbchar(*p)) {
-	    	rb_str_cat(str, p, mbclen(*p));
-		p += mbclen(*p);
+		int len = m17n_mbcspan(enc, p, pend);
+	    	rb_str_cat(str, p, len);
+		p += len;
 		continue;
 	    }
 	    else if (m17n_isprint(enc, *p)) {
@@ -469,6 +470,7 @@ rb_reg_nth_match(nth, match)
     len = end - start;
     str = rb_str_new(RSTRING(RMATCH(match)->str)->ptr + start, len);
     if (OBJ_TAINTED(match)) OBJ_TAINT(str);
+    rb_m17n_copy_encoding(str, RMATCH(match)->str);
     return str;
 }
 
@@ -483,19 +485,29 @@ VALUE
 rb_reg_match_pre(match)
     VALUE match;
 {
+    VALUE str;
+
     if (NIL_P(match)) return Qnil;
     if (RMATCH(match)->BEG(0) == -1) return Qnil;
-    return rb_str_new(RSTRING(RMATCH(match)->str)->ptr, RMATCH(match)->BEG(0));
+    str = rb_str_new(RSTRING(RMATCH(match)->str)->ptr, RMATCH(match)->BEG(0));
+    if (OBJ_TAINTED(match)) OBJ_TAINT(str);
+    rb_m17n_copy_encoding(str, RMATCH(match)->str);
+    return str;
 }
 
 VALUE
 rb_reg_match_post(match)
     VALUE match;
 {
+    VALUE str;
+
     if (NIL_P(match)) return Qnil;
     if (RMATCH(match)->BEG(0) == -1) return Qnil;
-    return rb_str_new(RSTRING(RMATCH(match)->str)->ptr+RMATCH(match)->END(0),
-		      RSTRING(RMATCH(match)->str)->len-RMATCH(match)->END(0));
+    str = rb_str_new(RSTRING(RMATCH(match)->str)->ptr+RMATCH(match)->END(0),
+		     RSTRING(RMATCH(match)->str)->len-RMATCH(match)->END(0));
+    if (OBJ_TAINTED(match)) OBJ_TAINT(str);
+    rb_m17n_copy_encoding(str, RMATCH(match)->str);
+    return str;
 }
 
 VALUE
@@ -761,7 +773,7 @@ rb_reg_initialize_m(argc, argv, self)
     VALUE *argv;
     VALUE self;
 {
-    m17n_encoding *enc;
+    m17n_encoding *enc = ruby_default_encoding;
     VALUE src;
     int flag = 0;
 
@@ -852,7 +864,7 @@ rb_reg_s_quote(argc, argv)
 
     for (; s < send; s++) {
 	if (ismbchar(*s)) {
-	    int n = mbclen(*s);
+	    int n = m17n_mbcspan(enc, s, send);
 
 	    while (n-- && s < send)
 		*t++ = *s++;
@@ -917,11 +929,12 @@ rb_reg_regsub(str, src, regs)
     while (s < e) {
 	char *ss = s;
 
-	c = *s++;
+	c = *s;
 	if (ismbchar(c)) {
-	    s += mbclen(c) - 1;
+	    s += m17n_mbcspan(enc, s, e);
 	    continue;
 	}
+	s++;
 	if (c != '\\' || s == e) continue;
 
 	if (!val) val = rb_str_new(p, ss-p);

@@ -87,7 +87,7 @@ str_memcmp(p1, p2, len, enc)
     if (!ruby_ignorecase) {
 	return memcmp(p1, p2, len);
     }
-    return m17n_memcmp(p1, p2, len, enc);
+    return m17n_casecmp(p1, p2, len, enc);
 }
 
 void
@@ -102,16 +102,16 @@ rb_m17n_enc_check(str1, str2, enc)
     enc2 = rb_m17n_get_encoding(str2);
 
     if (enc1->index == 0 && m17n_asciicompat(enc2)) {
-	*enc = enc2;
+	if (enc) *enc = enc2;
     }
     else if (enc2->index == 0 && m17n_asciicompat(enc1)) {
-	*enc = enc1;
+	if (enc) *enc = enc1;
     }
     else if (enc1 != enc2) {
 	rb_raise(rb_eArgError, "character encodings differ");
     }
     else {
-	*enc = enc1;
+	if (enc) *enc = enc1;
     }
 }
 
@@ -237,6 +237,7 @@ rb_str_new4(orig)
 	}
 	OBJ_FREEZE(str);
 	RBASIC(str)->klass = klass;
+	rb_m17n_copy_encoding(str, orig);
 	return str;
     }
     else {
@@ -247,9 +248,9 @@ rb_str_new4(orig)
 	str->ptr = str_ptr(orig);
 	RSTRING(orig)->orig = (VALUE)str;
 	str->orig = 0;
-	rb_m17n_associate_encoding((VALUE)str, rb_m17n_get_encoding(orig));
 	OBJ_INFECT(str, orig);
 	OBJ_FREEZE(str);
+	rb_m17n_copy_encoding((VALUE)str, orig);
 
 	return (VALUE)str;
     }
@@ -416,7 +417,7 @@ rb_str_length(str)
 }
 
 static VALUE
-rb_str_size(str)
+rb_str_bufsize(str)
     VALUE str;
 {
     return INT2NUM(str_len(str));
@@ -437,6 +438,7 @@ rb_str_plus(str1, str2)
 {
     VALUE str3;
 
+    rb_m17n_enc_check(str1, str2, 0);
     if (TYPE(str2) != T_STRING) str2 = rb_str_to_str(str2);
     str3 = rb_str_new(0, str_len(str1)+str_len(str2));
     memcpy(str_ptr(str3), str_ptr(str1), str_len(str1));
@@ -518,7 +520,7 @@ str_sublen(str, len, enc)
     int len;
     m17n_encoding *enc;
 {
-    if (m17n_mbmaxlen(enc) == 1) return len;
+    if (m17n_mbmaxlen(enc) == 1 || len < 0) return len;
     else {
 	char *p = str_ptr(str);
 	char *e = p + len;
@@ -526,7 +528,7 @@ str_sublen(str, len, enc)
 
 	i = 0;
 	while (p < e) {
-	    p += mbclen(*p);
+	    p += m17n_mbcspan(enc, p, e);
 	    i++;
 	}
 	return i;
@@ -706,48 +708,16 @@ int
 rb_str_hash(str)
     VALUE str;
 {
-    m17n_encoding *enc = rb_m17n_get_encoding(str);
     register long len = str_len(str);
     register char *p = str_ptr(str);
     register int key = 0;
 
-#ifdef HASH_ELFHASH
-    register unsigned int g;
-
     while (len--) {
-	key = (key << 4) + *p++;
-	if (g = key & 0xF0000000)
-	    key ^= g >> 24;
-	key &= ~g;
-    }
-#elif HASH_PERL
-    if (ruby_ignorecase) {
-	while (len--) {
-	    key = key*33 + toupper(*p);
-	    p++;
-	}
-    }
-    else {
-	while (len--) {
-	    key = key*33 + *p++;
-	}
+	key = key*65599 + *p;
+	p++;
     }
     key = key + (key>>5);
-#else
-    if (ruby_ignorecase) {
-	while (len--) {
-	    key = key*65599 + m17n_toupper(enc, *p);
-	    p++;
-	}
-    }
-    else {
-	while (len--) {
-	    key = key*65599 + *p;
-	    p++;
-	}
-    }
-    key = key + (key>>5);
-#endif
+
     return key;
 }
 
@@ -868,7 +838,7 @@ rb_str_index(str, sub, offset)
 	    return offset;
 	}
 	offset++;
-	s += m17n_mbclen(enc, *s);
+	s += m17n_mbcspan(enc, s, e);
     }
     return -1;
 }
@@ -975,13 +945,14 @@ rb_str_rindex(argc, argv, str)
 	sbeg = str_ptr(str);
 	e = str_end(str);
 	t = str_ptr(sub);
-	do {
+	for (;;) {
 	    s = str_nth(enc, sbeg, e, pos);
 	    if (str_memcmp(s, t, len, enc) == 0) {
 		return INT2NUM(pos);
 	    }
+	    if (pos == 0) break;
 	    pos--;
-	} while (sbeg <= s);
+	}
 	break;
 
       case T_FIXNUM:
@@ -1048,7 +1019,7 @@ rb_str_succ(orig)
     e = str_end(str);
 
     while (sbeg <= s) {
-	int c = m17n_codepoint(enc, s, e);
+	unsigned int c = m17n_codepoint(enc, s, e);
 	if (m17n_isalnum(enc, c)) {
 	    if ((c = succ_char(s)) == 0) break;
 	    n = s - sbeg;
@@ -1321,7 +1292,8 @@ rb_str_aset_m(argc, argv, str)
 	beg = NUM2INT(argv[0]);
 	len = NUM2INT(argv[1]);
 	if (len < 0) rb_raise(rb_eIndexError, "negative length %d", len);
-	slen = str_strlen(str);
+	rb_m17n_enc_check(str, argv[2], &enc);
+	slen = str_strlen(str, enc);
 	if (beg < 0) {
 	    beg += slen;
 	}
@@ -1334,7 +1306,6 @@ rb_str_aset_m(argc, argv, str)
 	if (beg + len > slen) {
 	    len = slen - beg;
 	}
-	rb_m17n_enc_check(str, argv[2], &enc);
 	b = str_nth(enc, str_ptr(str), str_end(str), beg) - str_ptr(str);
 	l = str_nth(enc, str_ptr(str), str_end(str), beg+len) - str_ptr(str) - b;
 	rb_str_replace(str, b, l, argv[2]);
@@ -1527,7 +1498,7 @@ str_gsub(argc, argv, str, bang)
 	     * Always consume at least one character of the input string
 	     * in order to prevent infinite loops.
 	     */
-	    len = mbclen(str_ptr(str)[END(0)]);
+	    len = m17n_mbcspan(enc, str_ptr(str)+END(0), str_end(str));
 	    if (str_len(str) > END(0)) {
 		memcpy(bp, str_ptr(str)+END(0), len);
 		bp += len;
@@ -1772,14 +1743,14 @@ rb_str_inspect(str)
     m17n_encoding *enc = rb_m17n_get_encoding(str);
     char *p, *pend;
     VALUE result = rb_str_new2("\"");
-    char s[5];
+    char s[8];
 
     p = str_ptr(str); pend = p + str_len(str);
     while (p < pend) {
-	char c = *p++;
+	char c = *p;
 	if (ismbchar(c) && p < pend) {
-	    int len = mbclen(c);
-	    rb_str_cat(result, p - 1, len);
+	    int len = m17n_mbcspan(enc, p, pend);
+	    rb_str_cat(result, p, len);
 	    p += len - 1;
 	}
 	else if (c == '"'|| c == '\\') {
@@ -1822,6 +1793,7 @@ rb_str_inspect(str)
 	    sprintf(s, "\\%03o", c & 0377);
 	    rb_str_cat2(result, s);
 	}
+	p++;
     }
     rb_str_cat2(result, "\"");
 
@@ -2595,13 +2567,13 @@ rb_str_split_m(argc, argv, str)
 	    regs = RMATCH(rb_backref_get())->regs;
 	    if (start == end && BEG(0) == END(0)) {
 		if (last_null == 1) {
-		    tmp = rb_str_new(str_ptr(str)+beg, mbclen(str_ptr(str)[beg]));
+		    tmp = rb_str_new(str_ptr(str)+beg, m17n_mbcspan(enc, str_ptr(str)+beg, str_end(str)));
 		    rb_m17n_copy_encoding(tmp, str);
 		    rb_ary_push(result, tmp);
 		    beg = start;
 		}
 		else {
-		    start += mbclen(str_ptr(str)[start]);
+		    start += m17n_mbcspan(enc, str_ptr(str)+start, str_end(str));
 		    last_null = 1;
 		    continue;
 		}
@@ -2734,6 +2706,25 @@ rb_str_each_byte(str)
 
     for (i=0; i<str_len(str); i++) {
 	rb_yield(INT2FIX(str_ptr(str)[i] & 0xff));
+    }
+    return str;
+}
+
+static VALUE
+rb_str_each_char(str)
+    VALUE str;
+{
+    m17n_encoding *enc = rb_m17n_get_encoding(str);
+    char *p, *pend;
+    unsigned int c;
+
+    p = RSTRING(str)->ptr;
+    pend = p + str_len(str);
+
+    while (p < pend) {
+	c = m17n_codepoint(enc, p, pend);
+	rb_yield(INT2FIX(c));
+	p += m17n_codelen(enc, c);
     }
     return str;
 }
@@ -2928,7 +2919,7 @@ scan_once(str, pat, start)
 	    /*
 	     * Always consume at least one character of the input string
 	     */
-	    *start = END(0)+mbclen(str_ptr(str)[END(0)]);
+	    *start = END(0)+m17n_mbcspan(enc, str_ptr(str)+END(0),str_end(str));
 	}
 	else {
 	    *start = END(0);
@@ -3082,22 +3073,62 @@ rb_str_sum(argc, argv, str)
 }
 
 static VALUE
+space_pad(str, pre, post, c, enc)
+    VALUE str;
+    int pre;
+    int post;
+    int c;
+    m17n_encoding *enc;
+{
+    long width = m17n_swidth(enc, str_ptr(str), str_end(str));
+    VALUE res;
+    long offset = 0, capa, i, clen;
+
+    if (width < 0) return str;	/* can't calculate column width */
+
+    clen = m17n_codelen(enc, c);
+    capa = str_len(str)+(pre+post)*clen;
+    res = rb_str_new(0, capa);
+    rb_m17n_copy_encoding(res, str);
+
+    for (i=0; i<pre; i++) {
+	if (offset + clen >= capa) {
+	    capa *= 2;
+	    rb_str_resize(res, capa);
+	}
+	m17n_mbcput(enc, c, str_ptr(res)+offset);
+	offset += clen;
+    }
+    if (offset + str_len(str) > capa) {
+	capa *= 2;
+	rb_str_resize(res, capa);
+    }
+    memcpy(str_ptr(res)+offset, str_ptr(str), str_len(str));
+    offset += str_len(str);
+    for (i=0; i<post; i++) {
+	if (offset + clen >= capa) {
+	    capa *= 2;
+	    rb_str_resize(res, capa);
+	}
+	m17n_mbcput(enc, c, str_ptr(res)+offset);
+	offset += clen;
+    }
+    rb_str_resize(res, offset);
+    return res;
+}
+
+static VALUE
 rb_str_ljust(str, w)
     VALUE str;
     VALUE w;
 {
+    m17n_encoding *enc = rb_m17n_get_encoding(str);
     long width = NUM2LONG(w);
-    VALUE res;
-    char *p, *pend;
 
-    if (width < 0 || str_len(str) >= width) return str;
-    res = rb_str_new(0, width);
-    memcpy(str_ptr(res), str_ptr(str), str_len(str));
-    p = str_end(res); pend = str_ptr(res) + width;
-    while (p < pend) {
-	*p++ = ' ';
-    }
-    return res;
+    if (width < 0) return str;
+    width -= str_strlen(str, enc);
+    if (width < 0) return str;
+    return space_pad(str, 0, width, ' ', enc);
 }
 
 static VALUE
@@ -3105,18 +3136,13 @@ rb_str_rjust(str, w)
     VALUE str;
     VALUE w;
 {
+    m17n_encoding *enc = rb_m17n_get_encoding(str);
     long width = NUM2LONG(w);
-    VALUE res;
-    char *p, *pend;
 
-    if (width < 0 || str_len(str) >= width) return str;
-    res = rb_str_new(0, width);
-    p = str_ptr(res); pend = p + width - str_len(str);
-    while (p < pend) {
-	*p++ = ' ';
-    }
-    memcpy(pend, str_ptr(str), str_len(str));
-    return res;
+    if (width < 0) return str;
+    width -= str_strlen(str, enc);
+    if (width < 0) return str;
+    return space_pad(str, width, 0, ' ', enc);
 }
 
 static VALUE
@@ -3124,24 +3150,15 @@ rb_str_center(str, w)
     VALUE str;
     VALUE w;
 {
+    m17n_encoding *enc = rb_m17n_get_encoding(str);
     long width = NUM2LONG(w);
-    VALUE res;
-    char *p, *pend;
     long n;
 
-    if (width < 0 || str_len(str) >= width) return str;
-    res = rb_str_new(0, width);
-    n = (width - str_len(str))/2;
-    p = str_ptr(res); pend = p + n;
-    while (p < pend) {
-	*p++ = ' ';
-    }
-    memcpy(pend, str_ptr(str), str_len(str));
-    p = pend + str_len(str); pend = str_ptr(res) + width;
-    while (p < pend) {
-	*p++ = ' ';
-    }
-    return res;
+    if (width < 0) return str;
+    width -= str_strlen(str, enc);
+    if (width < 0) return str;
+    n = width/2;
+    return space_pad(str, n, width - n, ' ', enc);
 }
 
 void
@@ -3163,7 +3180,7 @@ Init_String()
     rb_include_module(rb_cString, rb_mComparable);
     rb_include_module(rb_cString, rb_mEnumerable);
     rb_define_singleton_method(rb_cString, "new", rb_str_s_new, -1);
-    rb_define_method(rb_cString, "initialize", rb_str_initialize, 1);
+    rb_define_method(rb_cString, "initialize", rb_str_initialize, -1);
     rb_define_method(rb_cString, "clone", rb_str_clone, 0);
     rb_define_method(rb_cString, "dup", rb_str_dup, 0);
     rb_define_method(rb_cString, "<=>", rb_str_cmp_m, 1);
@@ -3177,7 +3194,8 @@ Init_String()
     rb_define_method(rb_cString, "[]", rb_str_aref_m, -1);
     rb_define_method(rb_cString, "[]=", rb_str_aset_m, -1);
     rb_define_method(rb_cString, "length", rb_str_length, 0);
-    rb_define_method(rb_cString, "size", rb_str_size, 0);
+    rb_define_method(rb_cString, "size", rb_str_length, 0);
+    rb_define_method(rb_cString, "buffer_size", rb_str_bufsize, 0);
     rb_define_method(rb_cString, "empty?", rb_str_empty, 0);
     rb_define_method(rb_cString, "=~", rb_str_match, 1);
     rb_define_method(rb_cString, "~", rb_str_match2, 0);
@@ -3251,6 +3269,7 @@ Init_String()
     rb_define_method(rb_cString, "each_line", rb_str_each_line, -1);
     rb_define_method(rb_cString, "each", rb_str_each_line, -1);
     rb_define_method(rb_cString, "each_byte", rb_str_each_byte, 0);
+    rb_define_method(rb_cString, "each_char", rb_str_each_char, 0);
 
     rb_define_method(rb_cString, "sum", rb_str_sum, -1);
 

@@ -6,7 +6,7 @@
   $Date$
   created at: Thu Dec 28 16:29:43 JST 2000
 
-  Copyright (C) 1993-2001 Yukihiro Matsumoto
+  Copyright (C) 2000-2001 Yukihiro Matsumoto
 
 **********************************************************************/
 
@@ -21,9 +21,12 @@
 
 #define uchar unsigned char
 
+#define CHAR_IN_RANGE(c, l, h) ((uchar)(c) - (uchar)(l) <= (uchar)(h) - (uchar)(l))
+
 static int num_encodings = 1;
 m17n_encoding **m17n_encoding_table = 0;
 
+static int any_swidth _((const uchar *p, const uchar *e, const m17n_encoding* enc));
 static int any_strlen _((const uchar *p, const uchar *e, const m17n_encoding* enc));
 static uchar *any_nth _((uchar *p, const uchar *e, int n, const m17n_encoding* enc));
 
@@ -45,6 +48,8 @@ m17n_define_encoding(name)
     memcpy(enc, m17n_encoding_table[0], sizeof(m17n_encoding));
     /* ..but strlen() */
     m17n_encoding_func_strlen(enc, any_strlen);
+    /* ..and swidth() */
+    m17n_encoding_func_swidth(enc, any_swidth);
     /* ..and nth() */
     m17n_encoding_func_nth(enc, any_nth);
     /* mbmaxlen is unknown (i.e. 0) */
@@ -53,6 +58,30 @@ m17n_define_encoding(name)
     enc->name = name;
     enc->index = num_encodings-1;
     m17n_encoding_table[enc->index] = enc;
+    return enc;
+}
+
+m17n_encoding*
+m17n_copy_encoding(name, orig)
+    const char *name;
+    m17n_encoding *orig;
+{
+    m17n_encoding *enc;
+
+    if (!m17n_encoding_table) {
+	m17n_init();
+    }
+    num_encodings++;
+    m17n_encoding_table = realloc(m17n_encoding_table,
+				  sizeof(m17n_encoding*)*num_encodings);
+    enc = malloc(sizeof(m17n_encoding));
+
+    /* copy table */
+    memcpy(enc, orig, sizeof(m17n_encoding));
+    enc->name = name;
+    enc->index = num_encodings-1;
+    m17n_encoding_table[enc->index] = enc;
+    
     return enc;
 }
 
@@ -232,6 +261,42 @@ asc_mbcput(c, p, enc)
 }
 
 static int
+asc_cwidth(c, enc)
+    unsigned int c;
+    const m17n_encoding *enc;
+{
+    return 1;
+}
+
+static int
+asc_swidth(p, e, enc)
+    const uchar *p, *e;
+    const m17n_encoding *enc;
+{
+    return e - p;
+}
+
+static int
+any_swidth(p, e, enc)
+    const uchar *p, *e;
+    const m17n_encoding *enc;
+{
+    uchar *s = p;
+    int c, cw, w = 0;
+
+    while (s<e) {
+	c = m17n_codepoint(enc, s, e);
+	cw = m17n_cwidth(enc, c);
+	if (cw < 0) {
+	    return -w;
+	}
+	w += cw;
+	s += m17n_codelen(enc, c);
+    }
+    return w;
+}
+
+static int
 any_strlen(p, e, enc)
     const uchar *p, *e;
     const m17n_encoding *enc;
@@ -319,6 +384,17 @@ latin1_ctype(c, code, enc)
     return latin1_ctype_table[c] & code;
 }
 
+static int
+latin1_cwidth(c, enc)
+    unsigned int c;
+    const m17n_encoding *enc;
+{
+    if (c > 0xff) return -1;
+    if (latin1_ctype_table[c] & (M17N_P|M17N_U|M17N_L|M17N_N|M17N_S))
+	return 1;
+    return -1;
+}
+
 uchar latin1_toupper_table[] = {
       0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15,
      16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
@@ -404,8 +480,21 @@ eucjp_islead(c, enc)
     int c;
     const m17n_encoding *enc;
 {
-    if (0xa1 <= c && c <= 0xfe) return 0;
-    return 1;
+    return !CHAR_IN_RANGE(c, 0xa1, 0xfe);
+}
+
+static int
+eucjp_cwidth(c, enc)
+    unsigned int c;
+    const m17n_encoding *enc;
+{
+    if (c < 0x20) return -1;
+    if (c < 0x80) {
+	if (m17n_isprint(enc, c)) return 1;
+	return -1;
+    }
+    if ((c&0xff00) == 0x8e00) return 1;
+    return 2;
 }
 
 static unsigned int
@@ -471,8 +560,8 @@ jis_mbcput(c, p, enc)
     }
 }
 
-#define issjis1(c) ((0x81<=(c) && (c)<=0x9f) || (0xe0<=(c) && (c)<=0xfc))
-#define issjis2(c) ((0x40<=(c) && (c)<=0x7e) || (0x80<=(c) && (c)<=0xfc))
+#define issjis1(c) CHAR_IN_RANGE((c)^0x20, 0x81^0x20, 0xfc^0x20)
+#define issjis2(c) (CHAR_IN_RANGE((c), 0x40, 0xfc) && (c)!=0x7f)
 
 static int
 sjis_mbclen(c, enc)
@@ -487,10 +576,7 @@ sjis_mbcspan(p, e, enc)
     const uchar *p, *e;
     const m17n_encoding *enc;
 {
-    return issjis1(p[0]) && e-p >= 2 &&
-	   issjis2(p[1]) ? 2 :
-	   (p[0] & 0x80) ? 0 :
-	   1;
+    return issjis1(p[0]) ? (e-p >= 2 && issjis2(p[1]) ? 2 : 0) : 1;
 }
 
 static int
@@ -506,8 +592,30 @@ sjis_ctype(c, code, enc)
     unsigned int c, code;
     const m17n_encoding *enc;
 {
-    if (0x9f < c && c < 0xe0) return 0120 & code;
+    if (c > 0xff) return M17N_W & code;
+    if (0x9f < c && c < 0xe0) return (M17N_W|M17N_P) & code;
     return asc_ctype_table[c] & code;
+}
+
+static int
+sjis_cwidth(c, enc)
+    unsigned int c;
+    const m17n_encoding *enc;
+{
+    int c1, c2;
+
+    if (c < 0x20) return -1;
+    if (c < 0x80) {
+	if (m17n_isprint(enc, c)) return 1;
+	return -1;
+    }
+    c1 = (c >> 8) & 0xff;
+    if (issjis1(c1)) {
+	c2 = c & 0xff;
+	if (issjis2(c2)) return 2;
+	return -1;
+    }
+    return 1;
 }
 
 static const uchar utf8_mbctab[] = {
@@ -565,8 +673,7 @@ utf8_islead(c, enc)
     int c;
     const m17n_encoding *enc;
 {
-    if (c < 0x80 || (c & 0xc0) == 0xc0) return 1;
-    return 0;
+    return (c & 0xc0) != 0x80;
 }
 
 static unsigned int
@@ -669,12 +776,17 @@ m17n_init()
     m17n_encoding_func_codepoint(enc, asc_codepoint);
     m17n_encoding_func_firstbyte(enc, asc_firstbyte);
     m17n_encoding_func_mbcput(enc, asc_mbcput);
+    m17n_encoding_func_cwidth(enc, asc_cwidth);
+    m17n_encoding_func_swidth(enc, asc_swidth);
+
+    enc = m17n_copy_encoding("binary", enc);
 
     enc = m17n_define_encoding("latin1");
     m17n_encoding_mbmaxlen(enc, 1);
     m17n_encoding_func_ctype(enc, latin1_ctype);
     m17n_encoding_func_toupper(enc, latin1_toupper);
     m17n_encoding_func_tolower(enc, latin1_tolower);
+    m17n_encoding_func_cwidth(enc, latin1_cwidth);
 
     enc = m17n_define_encoding("euc-jp");
     m17n_encoding_mbmaxlen(enc, 3);
@@ -685,6 +797,7 @@ m17n_init()
     m17n_encoding_func_codepoint(enc, jis_codepoint);
     m17n_encoding_func_firstbyte(enc, jis_firstbyte);
     m17n_encoding_func_mbcput(enc, jis_mbcput);
+    m17n_encoding_func_cwidth(enc, eucjp_cwidth);
 
     enc = m17n_define_encoding("sjis");
     m17n_encoding_mbmaxlen(enc, 2);
@@ -696,6 +809,7 @@ m17n_init()
     m17n_encoding_func_codepoint(enc, jis_codepoint);
     m17n_encoding_func_firstbyte(enc, jis_firstbyte);
     m17n_encoding_func_mbcput(enc, jis_mbcput);
+    m17n_encoding_func_cwidth(enc, sjis_cwidth);
 
     enc = m17n_define_encoding("utf-8");
     m17n_encoding_mbmaxlen(enc, 6);
@@ -709,16 +823,29 @@ m17n_init()
 }
 
 int
-m17n_memcmp(p1, p2, len, enc)
+m17n_casecmp(p1, p2, len, enc)
     const char *p1, *p2;
     long len;
     const m17n_encoding *enc;
 {
-    int tmp;
+    int tmp, clen;
+    unsigned int a, b;
 
-    while (len--) {
-	if (tmp = m17n_toupper(enc, (unsigned)*p1++) -
-	          m17n_toupper(enc, (unsigned)*p2++))
+    while (len > 0) {
+	clen = m17n_mbcspan(enc, p1, p1+len);
+	if (clen == 0) return memcmp(p1, p2, len);
+	if (clen != m17n_mbcspan(enc, p2, p2+len)) {
+	    if ((unsigned)*p1 != (unsigned)*p2)
+		return ((unsigned)*p1 - (unsigned)*p2);
+	    a = m17n_codepoint(enc, p1, p1+len);
+	    b = m17n_codepoint(enc, p2, p2+len);
+	    return a - b;
+	}
+	len -= clen;
+	a = m17n_codepoint(enc, p1, p1+clen);
+	b = m17n_codepoint(enc, p2, p2+clen);
+	p1 += clen; p2 += clen;
+	if (tmp = m17n_toupper(enc, a) - m17n_toupper(enc, b))
 	    return tmp;
     }
     return 0;

@@ -301,11 +301,12 @@ VALUE rb_f_sprintf _((int, VALUE*));
 /* string.c */
 struct m17n_encoding *ruby_default_encoding;
 struct m17n_encoding *rb_m17n_get_encoding _((VALUE obj));
-void rb_m17n_associate_encoding _((VALUE obj, struct m17n_encoding* enc));
-void rb_m17n_enc_check _((VALUE str1, VALUE str2, struct m17n_encoding **encp));
+void rb_m17n_associate_encoding _((VALUE, struct m17n_encoding*));
+void rb_m17n_copy_encoding _((VALUE, VALUE));
+void rb_m17n_enc_check _((VALUE, VALUE, struct m17n_encoding **));
 int rb_str_sublen _((VALUE, int));
-VALUE rb_enc_get_encoding _((VALUE obj));
-VALUE rb_enc_set_encoding _((VALUE obj, VALUE encoding));
+VALUE rb_enc_get_encoding _((VALUE));
+VALUE rb_enc_set_encoding _((VALUE, VALUE));
 VALUE rb_str_new _((const char*, long));
 VALUE rb_str_new2 _((const char*));
 VALUE rb_str_new3 _((VALUE));

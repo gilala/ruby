@@ -46,12 +46,15 @@ typedef struct m17n_encoding {
     unsigned int (*tolower) _((unsigned int c, const struct m17n_encoding* enc));
     unsigned int (*codepoint) _((const unsigned char *p, const unsigned char *e, const struct m17n_encoding* enc));
     int (*firstbyte) _((unsigned int c, const struct m17n_encoding* enc));
-    void (*mbcput) _((unsigned int c, unsigned char *p, const struct m17n_encoding* enc));
+    int (*mbcput) _((unsigned int c, unsigned char *p, const struct m17n_encoding* enc));
+    int (*cwidth) _((unsigned int c, const struct m17n_encoding* enc));
+    int (*swidth) _((const unsigned char *p, const unsigned char *e, const struct m17n_encoding* enc));
 } m17n_encoding;
 
 extern m17n_encoding **m17n_encoding_table;
 
 m17n_encoding *m17n_define_encoding _((const char *name));
+m17n_encoding *m17n_copy_encoding _((const char *name, m17n_encoding *enc));
 
 #define m17n_encoding_to_index(enc) (enc)->index
 #define m17n_index_to_encoding(index) m17n_encoding_table[index]
@@ -71,6 +74,8 @@ m17n_encoding *m17n_find_encoding _((const char *name));
 #define m17n_encoding_func_codepoint(enc,func) (enc)->codepoint = (func)
 #define m17n_encoding_func_firstbyte(enc,func) (enc)->firstbyte = (func)
 #define m17n_encoding_func_mbcput(enc,func) (enc)->mbcput = (func)
+#define m17n_encoding_func_cwidth(enc,func) (enc)->cwidth = (func)
+#define m17n_encoding_func_swidth(enc,func) (enc)->swidth = (func)
 
 #define m17n_mbmaxlen(enc) (enc)->mbmaxlen
 #define m17n_asciicompat(enc) (enc)->asciicompat
@@ -83,6 +88,8 @@ m17n_encoding *m17n_find_encoding _((const char *name));
 #define m17n_codepoint(enc,p,e) (*(enc)->codepoint)((p),(e),(enc))
 #define m17n_firstbyte(enc,c) (*(enc)->firstbyte)((c),(enc))
 #define m17n_mbcput(enc,c,p) (*(enc)->mbcput)((c),(p),(enc))
+#define m17n_cwidth(enc,c) (*(enc)->cwidth)((c),(enc))
+#define m17n_swidth(enc,p,e) (*(enc)->swidth)((p),(e),(enc))
 
 #define M17N_U      01      /* Upper case */
 #define M17N_L      02      /* Lower case */
@@ -107,6 +114,6 @@ m17n_encoding *m17n_find_encoding _((const char *name));
 #define m17n_toupper(enc,c) (*(enc)->toupper)((c),(enc))
 #define m17n_tolower(enc,c) (*(enc)->tolower)((c),(enc))
 
-int m17n_memcmp _((const char *p1, const char *p2, long len, const m17n_encoding *enc));
+int m17n_casecmp _((const char *p1, const char *p2, long len, const m17n_encoding *enc));
 
 #endif /* M17N_H */

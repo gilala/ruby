@@ -876,16 +876,39 @@ int_succ(num)
 }
 
 static VALUE
-int_chr(num)
+int_chr(argc, argv, num)
+    int argc;
+    VALUE *argv;
     VALUE num;
 {
-    char c;
+    m17n_encoding *enc;
+    char *buf;
     long i = NUM2LONG(num);
+    int len;
 
-    if (i < 0 || 0xff < i)
+    if (argc > 0) {
+	VALUE ename;
+
+	rb_scan_args(argc, argv, "1", &ename);
+	enc = m17n_find_encoding(STR2CSTR(ename));
+    }
+    else {
+	enc = ruby_default_encoding;
+    }
+    if (i < 0) {
+      error:
 	rb_raise(rb_eRangeError, "%d out of char range", i);
-    c = i;
-    return rb_str_new(&c, 1);
+    }
+    len = m17n_codelen(enc, i);
+    if (len == 0 || len > m17n_mbmaxlen(enc)) goto error;
+    if (len == 1) {
+	char c = i;
+	return rb_str_new(&c, 1);
+    }
+    buf = ALLOCA_N(char, len);
+    m17n_mbcput(enc, i, buf);
+    if (i != m17n_codepoint(enc, buf, buf+len)) goto error;
+    return rb_str_new(buf, len);
 }
 
 static VALUE
@@ -1562,7 +1585,7 @@ Init_Numeric()
     rb_include_module(rb_cInteger, rb_mPrecision);
     rb_define_method(rb_cInteger, "succ", int_succ, 0);
     rb_define_method(rb_cInteger, "next", int_succ, 0);
-    rb_define_method(rb_cInteger, "chr", int_chr, 0);
+    rb_define_method(rb_cInteger, "chr", int_chr, -1);
     rb_define_method(rb_cInteger, "to_i", int_to_i, 0);
     rb_define_method(rb_cInteger, "to_int", int_to_i, 0);
     rb_define_method(rb_cInteger, "floor", int_to_i, 0);

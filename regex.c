@@ -21,7 +21,7 @@
 /* Perl5 extension added by matz <matz@caelum.co.jp> */
 /* UTF-8 extension added Jan 16 1999 by Yoshida Masato  <yoshidam@tau.bekkoame.ne.jp> */
 /* modified for Ruby by matz@netlab.co.jp */
-/* M17n modify by matz@zetabits.com */
+/* M17n modify by matz@netlab.jp */
 
 #include "config.h"
 
@@ -371,8 +371,8 @@ enum regexpcode
 
 #define PATFETCH_MBC(c)							\
   do {									\
-    if (p + mbclen(c) - 1 >= pend) goto end_of_pattern;			\
-    MBC2WC(c, p, pend);					\
+    if (m17n_mbcspan(enc, p, pend) == 0) goto end_of_pattern;		\
+    MBC2WC(c, p, pend);							\
   } while(0)
 
 #define WC2MBC1ST(c) m17n_firstbyte(enc, (c))
@@ -1476,7 +1476,6 @@ re_compile_pattern(pattern, size, bufp)
 	    int ch;
 	    char is_alnum = STREQ(str, "alnum");
 	    char is_alpha = STREQ(str, "alpha");
-	    char is_blank = STREQ(str, "blank");
 	    char is_cntrl = STREQ(str, "cntrl");
 	    char is_digit = STREQ(str, "digit");
 	    char is_graph = STREQ(str, "graph");
@@ -2272,19 +2271,18 @@ re_compile_pattern(pattern, size, bufp)
     bufp->must = calculate_must_string(bufp->buffer, b);
   }
   if (bufp->must) {
-    if (!m17n_islead(enc, bufp->must[1])) {
-      bufp->options |= RE_OPTIMIZE_NO_BM;
-    }
-    else {
-      int i;
-      int len = (unsigned char)bufp->must[0];
+    int i;
+    int len = (unsigned char)bufp->must[0];
 
-      for (i=1; i<len; i++) {
-	if ((unsigned char)bufp->must[i] == 0xff) {
-	  bufp->options |= RE_OPTIMIZE_NO_BM;
-	  break;
-	}
+    for (i=1; i<len; i++) {
+      if ((unsigned char)bufp->must[i] == 0xff) {
+	bufp->options |= RE_OPTIMIZE_NO_BM;
+	bufp->options &= ~RE_OPTIMIZE_EXACTN;
+	break;
       }
+    }
+    if (!m17n_islead(enc, bufp->must[1])) {
+      bufp->options &= ~RE_OPTIMIZE_EXACTN;
     }
     if (!(bufp->options & RE_OPTIMIZE_NO_BM)) {
       bufp->must_skip = (int *) xmalloc((1 << BYTEWIDTH)*sizeof(int));
@@ -2651,11 +2649,7 @@ re_compile_fastmap(bufp)
       {
       case exactn:
 	if (p[1] == 0xff) {
-	  if (TRANSLATE_P())
-	    fastmap[m17n_toupper(enc, p[2])] = 2;
-	  else
-	    fastmap[p[2]] = 2;
-	  bufp->options |= RE_OPTIMIZE_BMATCH;
+	  fastmap[p[2]] = 2;
 	}
 	else if (TRANSLATE_P())
 	  fastmap[m17n_toupper(enc, p[1])] = 1;
@@ -2835,7 +2829,6 @@ re_compile_fastmap(bufp)
 		 single-byte chars.  We must reject them. */
 	      if (c < 0x100) {
 		fastmap[beg] = 2;
-		bufp->options |= RE_OPTIMIZE_BMATCH;
 	      }
 	      else if (ismbchar(beg))
 		fastmap[beg] = 1;
@@ -2939,7 +2932,7 @@ re_adjust_startpos(bufp, string, size, startpos, range)
   }
 
   /* Adjust startpos for mbc string */
-  if (enc->index != 0 && startpos>0 && !(bufp->options&RE_OPTIMIZE_BMATCH)) {
+  if (m17n_mbmaxlen(enc) > 1 && startpos > 0) {
     int i = 0;
 
     if (range > 0) {
@@ -3315,7 +3308,7 @@ re_search(bufp, string, size, startpos, range, regs)
 #define AT_STRINGS_BEG(d)  ((d) == string)
 #define AT_STRINGS_END(d)  ((d) == dend)
 
-#define IS_A_LETTER(d) (m17n_mbclen(enc, *d) == 1 ? m17n_iswchar(enc, *d) : 1)
+#define IS_A_LETTER(d) m17n_iswchar(enc, m17n_codepoint(enc, d, dend))
 #define PREV_IS_A_LETTER(d) ((enc->index == 3)?	/* SJIS hack */		\
 			     IS_A_LETTER((d)-(!AT_STRINGS_BEG((d)-1)&&	\
 					      ismbchar((d)[-2])?2:1)):	\
@@ -3614,7 +3607,7 @@ re_match(bufp, string_arg, size, pos, regs)
 	    /* Compare that many; failure if mismatch, else move
 	       past them.  */
 	    if ((options & RE_OPTION_IGNORECASE) 
-		? m17n_memcmp(d, d2, mcnt, enc) 
+		? m17n_casecmp(d, d2, mcnt, enc) 
 		: memcmp(d, d2, mcnt))
 	      goto fail;
 	    d += mcnt, d2 += mcnt;

@@ -37,6 +37,7 @@ char *strstr _((const char*,const char*));
 #endif
 
 #include "util.h"
+#include "m17n.h"
 
 #ifndef HAVE_STDLIB_H
 char *getenv();

@@ -1330,10 +1330,10 @@ VALUE
 rb_io_binmode(io)
     VALUE io;
 {
-#if defined(NT) || defined(DJGPP) || defined(__CYGWIN__) || defined(__human68k__) || defined(__EMX__)
     OpenFile *fptr;
 
     GetOpenFile(io, fptr);
+#if defined(NT) || defined(DJGPP) || defined(__CYGWIN__) || defined(__human68k__) || defined(__EMX__)
 #ifdef __human68k__
     if (fptr->f)
 	fmode(fptr->f, _IOBIN);
@@ -1348,6 +1348,7 @@ rb_io_binmode(io)
 
     fptr->mode |= FMODE_BINMODE;
 #endif
+    fptr->enc = m17n_find_encoding("binary");
     return io;
 }
 
@@ -1668,8 +1669,8 @@ pipe_open(pname, mode)
 {
     int modef = rb_io_mode_flags(mode);
     OpenFile *fptr;
-
 #if defined(NT) || defined(DJGPP) || defined(__human68k__)
+
     FILE *f = popen(pname, mode);
 
     if (!f) rb_sys_fail(pname);

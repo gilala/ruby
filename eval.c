@@ -1417,27 +1417,6 @@ ev_const_get(cref, id)
 }
 
 static VALUE
-ev_const_set(cref, id, val)
-    NODE *cref;
-    ID id;
-    VALUE val;
-{
-    NODE *cbase = cref;
-
-    while (cbase && cbase->nd_clss != rb_cObject) {
-	struct RClass *klass = RCLASS(cbase->nd_clss);
-
-	if (klass->iv_tbl && st_lookup(klass->iv_tbl, id, 0)) {
-	    st_insert(klass->iv_tbl, id, val);
-	    return val;
-	}
-	cbase = cbase->nd_next;
-    }
-    rb_const_assign(cbase->nd_clss, id, val);
-    return val;
-}
-
-static VALUE
 rb_mod_nesting()
 {
     NODE *cbase = RNODE(ruby_frame->cbase);
