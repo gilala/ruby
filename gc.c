@@ -53,10 +53,17 @@ static void
 mem_error(mesg)
     char *mesg;
 {
+    static int recurse = 0;
+
     if (rb_safe_level() >= 4) {
 	rb_raise(rb_eNoMemError, mesg);
     }
-    rb_fatal(mesg);
+    if (recurse == 0) {
+	recurse++;
+	rb_fatal(mesg);
+    }
+    fprintf(stderr, "[FATAL] failed to allocate memory\n");
+    exit(1);
 }
 
 void *
@@ -308,7 +315,7 @@ rb_data_object_alloc(klass, datap, dmark, dfree)
 extern st_table *rb_class_tbl;
 VALUE *rb_gc_stack_start = 0;
 
-static INLINE int
+static inline int
 is_pointer_to_heap(ptr)
     void *ptr;
 {
@@ -768,7 +775,7 @@ obj_free(obj)
 	}
 	break;
       case T_STRING:
-#define STR_NO_ORIG FL_USER2	/* copied from string.c */
+#define STR_NO_ORIG FL_USER0	/* copied from string.c */
 	if (!RANY(obj)->as.string.orig || FL_TEST(obj, STR_NO_ORIG)) {
 	    RUBY_CRITICAL(free(RANY(obj)->as.string.ptr));
 	}
@@ -1145,8 +1152,6 @@ static VALUE
 undefine_final(os, obj)
     VALUE os, obj;
 {
-    VALUE table;
-
     if (finalizer_table) {
 	st_delete(finalizer_table, &obj, 0);
     }
@@ -1224,7 +1229,8 @@ rb_gc_call_finalizer_at_exit()
 	p = heaps[i]; pend = p + HEAP_SLOTS;
 	while (p < pend) {
 	    if (FL_TEST(p, FL_FINALIZE)) {
-		p->as.free.flag = 0;
+		FL_UNSET(p, FL_FINALIZE);
+		p->as.basic.klass = 0;
 		run_final((VALUE)p);
 	    }
 	    p++;
@@ -1252,21 +1258,22 @@ static VALUE
 id2ref(obj, id)
     VALUE obj, id;
 {
-    unsigned long ptr;
+    unsigned long ptr, p0;
 
     rb_secure(4);
-    ptr = NUM2UINT(id);
+    p0 = ptr = NUM2UINT(id);
     if (FIXNUM_P(ptr)) return (VALUE)ptr;
+    if (SYMBOL_P(ptr)) return (VALUE)ptr;
     if (ptr == Qtrue) return Qtrue;
     if (ptr == Qfalse) return Qfalse;
     if (ptr == Qnil) return Qnil;
 
     ptr = id ^ FIXNUM_FLAG;	/* unset FIXNUM_FLAG */
     if (!is_pointer_to_heap(ptr)) {
-	rb_raise(rb_eRangeError, "0x%x is not id value", ptr);
+	rb_raise(rb_eRangeError, "0x%x is not id value", p0);
     }
     if (BUILTIN_TYPE(ptr) == 0) {
-	rb_raise(rb_eRangeError, "0x%x is recycled object", ptr);
+	rb_raise(rb_eRangeError, "0x%x is recycled object", p0);
     }
     return (VALUE)ptr;
 }

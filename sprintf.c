@@ -13,7 +13,7 @@
 **********************************************************************/
 
 #include "ruby.h"
-#include <ctype.h>
+#include "m17n.h"
 #include <math.h>
 
 #define BIT_DIGITS(N)   (((N)*146)/485 + 1)  /* log2(10) =~ 146/485 */
@@ -137,7 +137,7 @@ remove_sign_bits(str, base)
 #define GETASTER(val) { \
     t = p++; \
     n = 0; \
-    for (; p < end && ISDIGIT(*p); p++) { \
+    for (; p < end && m17n_isdigit(enc, *p); p++) { \
 	n = 10 * n + (*p - '0'); \
     } \
     if (p >= end) { \
@@ -161,6 +161,7 @@ rb_f_sprintf(argc, argv)
     int argc;
     VALUE *argv;
 {
+    m17n_encoding *enc;
     VALUE fmt;
     char *buf, *p, *end;
     int blen, bsiz;
@@ -174,6 +175,7 @@ rb_f_sprintf(argc, argv)
 
     fmt = GETARG();
     if (OBJ_TAINTED(fmt)) tainted = 1;
+    enc = rb_m17n_get_encoding(fmt);
     p = rb_str2cstr(fmt, &blen);
     end = p + blen;
     blen = 0;
@@ -185,7 +187,6 @@ rb_f_sprintf(argc, argv)
 	int n;
 
 	for (t = p; t < end && *t != '%'; t++) ;
-	CHECK(t - p);
 	PUSH(p, t - p);
 	if (t >= end) {
 	    /* end of fmt string */
@@ -197,7 +198,7 @@ rb_f_sprintf(argc, argv)
       retry:
 	switch (*p) {
 	  default:
-	    if (ISPRINT(*p))
+	    if (m17n_isprint(enc, *p))
 		rb_raise(rb_eArgError, "malformed format string - %%%c", *p);
 	    else
 		rb_raise(rb_eArgError, "malformed format string");
@@ -231,7 +232,7 @@ rb_f_sprintf(argc, argv)
 	  case '1': case '2': case '3': case '4':
 	  case '5': case '6': case '7': case '8': case '9':
 	    n = 0;
-	    for (; p < end && ISDIGIT(*p); p++) {
+	    for (; p < end && m17n_isdigit(enc, *p); p++) {
 		n = 10 * n + (*p - '0');
 	    }
 	    if (p >= end) {
@@ -277,7 +278,7 @@ rb_f_sprintf(argc, argv)
 		goto retry;
 	    }
 
-	    for (; p < end && ISDIGIT(*p); p++) {
+	    for (; p < end && m17n_isdigit(enc, *p); p++) {
 		prec = 10 * prec + (*p - '0');
 	    }
 	    if (p >= end) {
@@ -298,13 +299,16 @@ rb_f_sprintf(argc, argv)
 	  case 'c':
 	    {
 		VALUE val = GETARG();
-		char c;
+		int c, n;
 
 		if (!(flags & FMINUS))
 		    while (--width > 0)
 			PUSH(" ", 1);
-		c = NUM2INT(val) & 0xff;
-		PUSH(&c, 1);
+		c = NUM2INT(val);
+		n = m17n_codelen(enc, c);
+		CHECK(n);
+		m17n_mbcput(enc, c, &buf[blen]);
+		blen += n;
 		while (--width > 0)
 		    PUSH(" ", 1);
 	    }
@@ -313,20 +317,38 @@ rb_f_sprintf(argc, argv)
 	  case 's':
 	    {
 		VALUE arg = GETARG();
-		int len;
+		int len, slen;
 
 		str = rb_obj_as_string(arg);
 		if (OBJ_TAINTED(str)) tainted = 1;
+		if (enc->index != 0) {
+		    rb_m17n_enc_check(fmt, str, &enc);
+		}
 		len = RSTRING(str)->len;
+		if (flags&(FPREC|FWIDTH)) {
+		    slen = m17n_strlen(enc, RSTRING(str)->ptr, RSTRING(str)->ptr+len);
+		    if (slen < 0) {
+			rb_raise(rb_eArgError, "invalid mbstring sequence");
+		    }
+		}
 		if (flags&FPREC) {
-		    if (prec < len) {
-			len = prec;
+		    if (prec < slen) {
+			char *p;
+
+			slen = prec;
+			p = m17n_nth(enc, RSTRING(str)->ptr,
+				          RSTRING(str)->ptr + RSTRING(str)->len,
+				     prec);
+			if (p == (char*)-1) {
+			    rb_raise(rb_eArgError, "invalid mbstring sequence");
+			}
+			len = p - RSTRING(str)->ptr;
 		    }
 		}
 		if (flags&FWIDTH) {
-		    if (width > len) {
-			CHECK(width);
-			width -= len;
+		    if (width > slen) {
+			CHECK(width - slen + len);
+			width -= slen;
 			if (!(flags&FMINUS)) {
 			    while (width--) {
 				buf[blen++] = ' ';
@@ -342,9 +364,7 @@ rb_f_sprintf(argc, argv)
 			break;
 		    }
 		}
-		CHECK(len);
-		memcpy(&buf[blen], RSTRING(str)->ptr, len);
-		blen += len;
+		PUSH(RSTRING(str)->ptr, len);
 	    }
 	    break;
 
@@ -514,7 +534,7 @@ rb_f_sprintf(argc, argv)
 		if (*p == 'X') {
 		    char *pp = s;
 		    while (*pp) {
-			*pp = toupper(*pp);
+			*pp = m17n_toupper(enc, *pp);
 			pp++;
 		    }
 		}
@@ -529,9 +549,7 @@ rb_f_sprintf(argc, argv)
 		if (sc) PUSH(&sc, 1);
 		if (prefix) {
 		    int plen = strlen(prefix);
-		    CHECK(plen);
-		    strcpy(&buf[blen], prefix);
-		    blen += plen;
+		    PUSH(prefix, plen);
 		    if (pos) pos += plen;
 		}
 		if (!(flags & FMINUS)) {
@@ -556,9 +574,7 @@ rb_f_sprintf(argc, argv)
 		while (len < prec--) {
 		    buf[blen++] = s[0]=='.'?'.':'0';
 		}
-		CHECK(len);
-		strcpy(&buf[blen], s);
-		blen += len;
+		PUSH(s, len);
 		CHECK(width);
 		while (width-->0) {
 		    buf[blen++] = ' ';

@@ -22,9 +22,12 @@
 /* Multi-byte extension added May, 1993 by t^2 (Takahiro Tanimoto)
    Last change: May 21, 1993 by t^2  */
 /* modified for Ruby by matz@netlab.co.jp */
+/* M17n modify by matz@zetabits.com */
 
 #ifndef __REGEXP_LIBRARY
 #define __REGEXP_LIBRARY
+
+#include "m17n.h"
 
 /* symbol mangling for ruby */
 #ifdef RUBY
@@ -35,9 +38,8 @@
 # define re_free_pattern ruby_re_free_pattern
 # define re_free_registers ruby_re_free_registers
 # define re_match ruby_re_match
-# define re_mbcinit ruby_re_mbcinit
 # define re_search ruby_re_search
-# define re_set_casetable ruby_re_set_casetable
+# define re_set_default_encoding ruby_re_set_default_encoding
 # define register_info_type ruby_register_info_type
 #endif
 
@@ -105,8 +107,8 @@ void re_mbcinit ();
 #endif
 
 #undef ismbchar
-#define ismbchar(c) re_mbctab[(unsigned char)(c)]
-#define mbclen(c)   (re_mbctab[(unsigned char)(c)]+1)
+#define ismbchar(c) (m17n_mbclen(enc,(c))>1)
+#define mbclen(c)   m17n_mbclen(enc,(c))
 
 /* Structure used in re_match() */
 
@@ -123,6 +125,7 @@ typedef union
 
 struct re_pattern_buffer
   {
+    m17n_encoding *encoding;
     char *buffer;	/* Space holding the compiled pattern commands.  */
     int allocated;	/* Size of space that `buffer' points to. */
     int used;		/* Length of portion of buffer actually occupied  */
@@ -191,23 +194,23 @@ typedef struct
 
 #ifdef __STDC__
 
-extern char *re_compile_pattern (const char *, int, struct re_pattern_buffer *);
-void re_free_pattern (struct re_pattern_buffer *);
+extern char *re_compile_pattern (const char*, int, struct re_pattern_buffer*);
+void re_free_pattern (struct re_pattern_buffer*);
 /* Is this really advertised?  */
-extern int re_adjust_startpos (struct re_pattern_buffer *, const char*, int, int, int);
-extern void re_compile_fastmap (struct re_pattern_buffer *);
-extern int re_search (struct re_pattern_buffer *, const char*, int, int, int,
-		      struct re_registers *);
-extern int re_match (struct re_pattern_buffer *, const char *, int, int,
-		     struct re_registers *);
-extern void re_set_casetable (const char *table);
+extern int re_adjust_startpos (struct re_pattern_buffer*, const char*, int, int, int);
+extern void re_compile_fastmap (struct re_pattern_buffer*);
+extern int re_search (struct re_pattern_buffer*, const char*, int, int, int,
+		      struct re_registers*);
+extern int re_match (struct re_pattern_buffer*, const char*, int, int,
+		     struct re_registers*);
+extern void re_set_default_encoding (m17n_encoding* enc);
 extern void re_copy_registers (struct re_registers*, struct re_registers*);
 extern void re_free_registers (struct re_registers*);
 
 #ifndef RUBY
 /* 4.2 bsd compatibility.  */
-extern char *re_comp (const char *);
-extern int re_exec (const char *);
+extern char *re_comp (const char*);
+extern int re_exec (const char*);
 #endif
 
 #else /* !__STDC__ */
@@ -219,7 +222,7 @@ extern int re_adjust_startpos ();
 extern void re_compile_fastmap ();
 extern int re_search ();
 extern int re_match ();
-extern void re_set_casetable ();
+extern void re_set_default_encoding ();
 extern void re_copy_registers ();
 extern void re_free_registers ();
 

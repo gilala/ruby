@@ -14,6 +14,7 @@
 
 #include "ruby.h"
 #include "st.h"
+#include "m17n.h"
 #include <stdio.h>
 #include <errno.h>
 
@@ -286,6 +287,9 @@ rb_obj_taint(obj)
     VALUE obj;
 {
     rb_secure(4);
+    if (OBJ_FROZEN(obj)) {
+	rb_error_frozen("object");
+    }
     OBJ_TAINT(obj);
     return obj;
 }
@@ -295,6 +299,9 @@ rb_obj_untaint(obj)
     VALUE obj;
 {
     rb_secure(3);
+    if (OBJ_FROZEN(obj)) {
+	rb_error_frozen("object");
+    }
     FL_UNSET(obj, FL_TAINT);
     return obj;
 }
@@ -951,9 +958,10 @@ rb_Float(val)
         {
 	    char *q, *p, *end;
 	    double d;
+	    m17n_encoding *enc = rb_m17n_get_encoding(val);
 
 	    q = p = STR2CSTR(val);
-	    while (*p && ISSPACE(*p)) p++;
+	    while (*p && m17n_isspace(enc, *p)) p++;
 	  again:
 	    d = strtod(p, &end);
 	    if (p == end) {
@@ -972,14 +980,14 @@ rb_Float(val)
 			}
 			*n++ = *p++;
 		    }
-		    while (*last && (*last == '_' || ISSPACE(*last)))
+		    while (*last && (*last == '_' || m17n_isspace(enc, *last)))
 			last++;
 		    if (!*last) goto bad;
 		    *n = '\0';
 		    p = buf;
 		    goto again;
 		}
-		while (*end && ISSPACE(*end)) end++;
+		while (*end && m17n_isspace(enc, *end)) end++;
 		if (*end) goto bad;
 	    }
 	    if (errno == ERANGE) {

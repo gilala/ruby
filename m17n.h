@@ -33,6 +33,7 @@ typedef struct m17n_encoding {
     int index;
 
     int mbmaxlen;
+    int asciicompat;
 
     int (*strlen) _((const unsigned char *p, const unsigned char *e, const struct m17n_encoding* enc));
     int (*mbclen) _((int c, const struct m17n_encoding* enc));
@@ -57,6 +58,7 @@ m17n_encoding *m17n_define_encoding _((const char *name));
 m17n_encoding *m17n_find_encoding _((const char *name));
 
 #define m17n_encoding_mbmaxlen(enc,n) (enc)->mbmaxlen = (n)
+#define m17n_encoding_asciicompat(enc,n) (enc)->asciicompat = (n)
 #define m17n_encoding_func_strlen(enc,func) (enc)->strlen = (func)
 #define m17n_encoding_func_mbclen(enc,func) (enc)->mbclen = (func)
 #define m17n_encoding_func_codelen(enc,func) (enc)->codelen = (func)
@@ -71,6 +73,7 @@ m17n_encoding *m17n_find_encoding _((const char *name));
 #define m17n_encoding_func_mbcput(enc,func) (enc)->mbcput = (func)
 
 #define m17n_mbmaxlen(enc) (enc)->mbmaxlen
+#define m17n_asciicompat(enc) (enc)->asciicompat
 #define m17n_strlen(enc,p,e) (*(enc)->strlen)((p),(e),(enc))
 #define m17n_mbclen(enc,c) (*(enc)->mbclen)((c)&0xff,(enc))
 #define m17n_codelen(enc,c) (*(enc)->codelen)((c),(enc))
@@ -87,17 +90,17 @@ m17n_encoding *m17n_find_encoding _((const char *name));
 #define M17N_S      010     /* Spacing character */
 #define M17N_P      020     /* Punctuation */
 #define M17N_C      040     /* Control character */
-#define M17N_B      0100    /* Blank */
+#define M17N_W      0100    /* non alpha-numeral Word character */
 #define M17N_X      0200    /* heXadecimal digit */
 
-#define m17n_isprint(enc,c) (*(enc)->ctype)((c),(M17N_P|M17N_U|M17N_L|M17N_N|M17N_B),(enc))
+#define m17n_isprint(enc,c) (*(enc)->ctype)((c),(M17N_P|M17N_U|M17N_L|M17N_N|M17N_S),(enc))
 #define m17n_isspace(enc,c) (*(enc)->ctype)((c),(M17N_S),(enc))
-#define m17n_isblank(enc,c) (*(enc)->ctype)((c),(M17N_B),(enc))
 #define m17n_ispunct(enc,c) (*(enc)->ctype)((c),(M17N_P),(enc))
 #define m17n_isupper(enc,c) (*(enc)->ctype)((c),(M17N_U),(enc))
 #define m17n_islower(enc,c) (*(enc)->ctype)((c),(M17N_L),(enc))
 #define m17n_isalnum(enc,c) (*(enc)->ctype)((c),(M17N_U|M17N_L|M17N_N),(enc))
 #define m17n_isalpha(enc,c) (*(enc)->ctype)((c),(M17N_U|M17N_L),(enc))
+#define m17n_iswchar(enc,c) (*(enc)->ctype)((c),(M17N_U|M17N_L|M17N_N|M17N_W),(enc))
 #define m17n_isdigit(enc,c) (*(enc)->ctype)((c),(M17N_N),(enc))
 #define m17n_isxdigit(enc,c) (*(enc)->ctype)((c),(M17N_X),(enc))
 #define m17n_iscntrl(enc,c) (*(enc)->ctype)((c),(M17N_C),(enc))

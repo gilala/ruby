@@ -682,6 +682,7 @@ r_symlink(arg)
 	return id;
     }
     rb_raise(rb_eTypeError, "bad symbol");
+    return 0;			/* not reached */
 }
 
 static ID

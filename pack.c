@@ -11,8 +11,7 @@
 **********************************************************************/
 
 #include "ruby.h"
-#include <sys/types.h>
-#include <ctype.h>
+#include "m17n.h"
 
 #define SIZE16 2
 #define SIZE32 4
@@ -328,6 +327,7 @@ static VALUE
 pack_pack(ary, fmt)
     VALUE ary, fmt;
 {
+    m17n_encoding *enc = m17n_index_to_encoding(0);
     static char *nul10 = "\0\0\0\0\0\0\0\0\0\0";
     static char *spc10 = "          ";
     char *p, *pend;
@@ -343,6 +343,8 @@ pack_pack(ary, fmt)
     p = rb_str2cstr(fmt, &plen);
     pend = p + plen;
     res = rb_str_new(0, 0);
+    /* encoding set to binary (ascii) */
+    rb_m17n_associate_encoding(res, enc);
 
     items = RARRAY(ary)->len;
     idx = 0;
@@ -355,7 +357,7 @@ pack_pack(ary, fmt)
 	natint = 0;
 #endif
 
-	if (ISSPACE(type)) continue;
+	if (m17n_isspace(enc, type)) continue;
         if (*p == '_' || *p == '!') {
 	    char *natstr = "sSiIlL";
 
@@ -373,7 +375,7 @@ pack_pack(ary, fmt)
 	    len = strchr("@Xxu", type) ? 0 : items;
             p++;
 	}
-	else if (ISDIGIT(*p)) {
+	else if (m17n_isdigit(enc, *p)) {
 	    len = strtoul(p, (char**)&p, 10);
 	}
 	else {
@@ -486,7 +488,7 @@ pack_pack(ary, fmt)
 			len = plen;
 		    }
 		    for (i=0; i++ < len; ptr++) {
-			if (ISALPHA(*ptr))
+			if (m17n_isalpha(enc, *ptr))
 			    byte |= (((*ptr & 15) + 9) & 15) << 4;
 			else
 			    byte |= (*ptr & 15) << 4;
@@ -518,7 +520,7 @@ pack_pack(ary, fmt)
 			len = plen;
 		    }
 		    for (i=0; i++ < len; ptr++) {
-			if (ISALPHA(*ptr))
+			if (m17n_isalpha(enc, *ptr))
 			    byte |= ((*ptr & 15) + 9) & 15;
 			else
 			    byte |= *ptr & 15;
@@ -826,7 +828,7 @@ pack_pack(ary, fmt)
 	  case 'm':
 	    ptr = rb_str2cstr(NEXTFROM, &plen);
 
-	    if (len <= 1)
+	    if (len <= 2)
 		len = 45;
 	    else
 		len = len / 3 * 3;
@@ -1074,6 +1076,7 @@ static VALUE
 pack_unpack(str, fmt)
     VALUE str, fmt;
 {
+    m17n_encoding *enc = m17n_index_to_encoding(0);
     static char *hexdigits = "0123456789abcdef0123456789ABCDEFx";
     char *s, *send;
     char *p, *pend;
@@ -1116,7 +1119,7 @@ pack_unpack(str, fmt)
 	    len = send - s;
 	    p++;
 	}
-	else if (ISDIGIT(*p)) {
+	else if (m17n_isdigit(enc, *p)) {
 	    len = strtoul(p, (char**)&p, 10);
 	}
 	else {
@@ -1763,7 +1766,7 @@ utf8_to_uv(p, lenp)
     if (n != 0) {
 	uv &= (1<<(BYTEWIDTH-2-n)) - 1;
 	while (n--) {
-	    uv = uv << 6 | *p++ & ((1<<6)-1);
+	    uv = uv << 6 | (*p++ & ((1<<6)-1));
 	}
     }
     return uv;

@@ -6,7 +6,7 @@
   $Date$
   created at: Fri Nov 12 16:47:09 JST 1993
 
-  Copyright (C) 1993-2000 Yukihiro Matsumoto
+  Copyright (C) 1993-2001 Yukihiro Matsumoto
 
 **********************************************************************/
 
@@ -15,6 +15,7 @@
 
 #include <stdio.h>
 #include <errno.h>
+#include "m17n.h"
 
 typedef struct OpenFile {
     FILE *f;			/* stdio ptr for read/write */
@@ -24,6 +25,7 @@ typedef struct OpenFile {
     int lineno;			/* number of lines read */
     char *path;			/* pathname for file */
     void (*finalize)();		/* finalize proc */
+    m17n_encoding *enc;
 } OpenFile;
 
 #define FMODE_READABLE  1
@@ -43,6 +45,7 @@ typedef struct OpenFile {
     fp->lineno = 0;\
     fp->path = NULL;\
     fp->finalize = 0;\
+    fp->enc = ruby_default_encoding;\
 } while (0)
 
 #define GetReadFile(fptr) ((fptr)->f)

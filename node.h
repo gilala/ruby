@@ -120,6 +120,7 @@ enum node_type {
     NODE_DMETHOD,
     NODE_BMETHOD,
     NODE_MEMO,
+    NODE_IFUNC,
     NODE_LAST
 };
 
@@ -234,6 +235,7 @@ typedef struct RNode {
 #define NEW_DEFN(i,a,d,p) rb_node_newnode(NODE_DEFN,p,i,NEW_RFUNC(a,d))
 #define NEW_DEFS(r,i,a,d) rb_node_newnode(NODE_DEFS,r,i,NEW_RFUNC(a,d))
 #define NEW_CFUNC(f,c) rb_node_newnode(NODE_CFUNC,f,c,0)
+#define NEW_IFUNC(f,c) rb_node_newnode(NODE_IFUNC,f,c,0)
 #define NEW_RFUNC(b1,b2) NEW_SCOPE(block_append(b1,b2))
 #define NEW_SCOPE(b) rb_node_newnode(NODE_SCOPE,local_tbl(),cur_cref,(b))
 #define NEW_BLOCK(a) rb_node_newnode(NODE_BLOCK,a,0,0)

@@ -6,7 +6,7 @@
   $Date$
   created at: Fri Oct 15 18:08:59 JST 1993
 
-  Copyright (C) 1993-2000 Yukihiro Matsumoto
+  Copyright (C) 1993-2001 Yukihiro Matsumoto
   Copyright (C) 2000  Network Applied Communication Laboratory, Inc.
   Copyright (C) 2000  Information-technology Promotion Agency, Japan
 
@@ -96,7 +96,9 @@ extern char *ruby_inplace_mode;
 struct timeval rb_time_interval _((VALUE));
 
 static VALUE filename, current_file;
-static int gets_lineno;
+static int argf_lineno;
+static VALUE argf_encname = Qnil;
+
 static int init_p = 0, next_p = 0, first_p = 1;
 static VALUE lineno;
 
@@ -182,6 +184,26 @@ rb_read_check(fp)
     if (!READ_DATA_PENDING(fp)) {
 	rb_thread_wait_fd(fileno(fp));
     }
+}
+
+static VALUE
+rb_io_str_new(p, len, fptr)
+    const char *p;
+    long len;
+    OpenFile *fptr;
+{
+    VALUE s = rb_tainted_str_new(p, len);
+    if (fptr->enc) {
+	rb_m17n_associate_encoding(s, fptr->enc);
+    }
+    return s;
+}
+
+static m17n_encoding*
+io_encoding(fptr)
+    OpenFile *fptr;
+{
+    return fptr->enc ? fptr->enc : ruby_default_encoding;
 }
 
 static int
@@ -363,7 +385,7 @@ rb_io_rewind(io)
     if (fseek(fptr->f, 0L, 0) != 0) rb_sys_fail(fptr->path);
     clearerr(fptr->f);
     if (io == current_file) {
-	gets_lineno -= fptr->lineno;
+	argf_lineno -= fptr->lineno;
     }
     fptr->lineno = 0;
 
@@ -395,7 +417,7 @@ rb_io_eof(io)
 }
 
 static VALUE
-rb_io_sync(io)
+rb_io_get_sync(io)
     VALUE io;
 {
     OpenFile *fptr;
@@ -512,7 +534,7 @@ read_all(port)
     {
 	if (st.st_size == 0) {
 	    getc(fptr->f);	/* force EOF */
-	    return rb_str_new(0, 0);
+	    return rb_io_str_new(0, 0, fptr);
 	}
 	else {
 	    long pos = ftell(fptr->f);
@@ -521,7 +543,7 @@ read_all(port)
 	    }
 	}
     }
-    str = rb_tainted_str_new(0, siz);
+    str = rb_io_str_new(0, siz, fptr);
     READ_CHECK(fptr->f);
     for (;;) {
 	n = io_fread(RSTRING(str)->ptr+bytes, siz-bytes, fptr->f);
@@ -534,7 +556,7 @@ read_all(port)
 	siz += BUFSIZ;
 	rb_str_resize(str, siz);
     }
-    if (bytes == 0) return rb_str_new(0,0);
+    if (bytes == 0) return rb_io_str_new(0, 0, fptr);
     if (bytes != siz) rb_str_resize(str, bytes);
 
     return str;
@@ -563,7 +585,7 @@ io_read(argc, argv, io)
     rb_io_check_readable(fptr);
 
     if (feof(fptr->f)) return Qnil;
-    str = rb_str_new(0, len);
+    str = rb_io_str_new(0, len, fptr);
     if (len == 0) return str;
 
     READ_CHECK(fptr->f);
@@ -574,7 +596,6 @@ io_read(argc, argv, io)
     }
     RSTRING(str)->len = n;
     RSTRING(str)->ptr[n] = '\0';
-    OBJ_TAINT(str);
 
     return str;
 }
@@ -688,7 +709,7 @@ rb_io_gets_internal(argc, argv, io)
 	if (append)
 	    rb_str_cat(str, buf, cnt);
 	else
-	    str = rb_str_new(buf, cnt);
+	    str = rb_io_str_new(buf, cnt, fptr);
 
 	if (c != EOF &&
 	    (!rslen ||
@@ -716,7 +737,6 @@ rb_io_gets_internal(argc, argv, io)
     if (!NIL_P(str)) {
 	fptr->lineno++;
 	lineno = INT2FIX(fptr->lineno);
-	OBJ_TAINT(str);
     }
 
     return str;
@@ -766,7 +786,7 @@ rb_io_gets(io)
     if (append)
 	rb_str_cat(str, buf, cnt);
     else
-	str = rb_str_new(buf, cnt);
+	str = rb_io_str_new(buf, cnt, fptr);
 
     if (c != EOF && RSTRING(str)->ptr[RSTRING(str)->len-1] != '\n') {
 	append = 1;
@@ -777,7 +797,6 @@ rb_io_gets(io)
     if (!NIL_P(str)) {
 	fptr->lineno++;
 	lineno = INT2FIX(fptr->lineno);
-	OBJ_TAINT(str);
     }
 
     return str;
@@ -798,7 +817,7 @@ rb_io_gets_m(argc, argv, io)
 }
 
 static VALUE
-rb_io_lineno(io)
+rb_io_get_lineno(io)
     VALUE io;
 {
     OpenFile *fptr;
@@ -826,23 +845,73 @@ lineno_setter(val, id, var)
     ID id;
     VALUE *var;
 {
-    gets_lineno = NUM2INT(val);
-    *var = INT2FIX(gets_lineno);
+    argf_lineno = NUM2INT(val);
+    *var = INT2FIX(argf_lineno);
 }
 
 static VALUE
 argf_set_lineno(argf, val)
     VALUE argf, val;
 {
-    gets_lineno = NUM2INT(val);
-    lineno = INT2FIX(gets_lineno);
+    argf_lineno = NUM2INT(val);
+    lineno = INT2FIX(argf_lineno);
     return Qnil;
 }
 
 static VALUE
-argf_lineno()
+argf_get_lineno()
 {
     return lineno;
+}
+
+static VALUE
+rb_io_get_encoding(io)
+    VALUE io;
+{
+    OpenFile *fptr;
+
+    GetOpenFile(io, fptr);
+    if (fptr->enc) {
+	return rb_str_new2(fptr->enc->name);
+    }
+    return Qnil;
+}
+
+static VALUE
+rb_io_set_encoding(io, encname)
+    VALUE io, encname;
+{
+    OpenFile *fptr;
+    m17n_encoding *enc;
+
+    if (NIL_P(encname)) {
+	enc = ruby_default_encoding;
+    }
+    else {
+	enc = m17n_find_encoding(STR2CSTR(encname));
+	if (!enc) {
+	    rb_raise(rb_eArgError, "undefined encoding `%s'", STR2CSTR(encname));
+	}
+    }
+    GetOpenFile(io, fptr);
+    fptr->enc = enc;
+
+    return encname;
+}
+
+static VALUE
+argf_set_encoding(argf, encname)
+    VALUE argf, encname;
+{
+    rb_io_set_encoding(current_file, encname);
+    argf_encname = encname;
+    return Qnil;
+}
+
+static VALUE
+argf_get_encoding()
+{
+    return argf_encname;
 }
 
 static VALUE
@@ -963,7 +1032,61 @@ rb_getc(f)
 }
 
 static VALUE
+io_readchar(io)
+    VALUE io;
+{
+    m17n_encoding *enc;
+    OpenFile *fptr;
+    char *buf;
+    FILE *f;
+    int c, i, n;
+
+    GetOpenFile(io, fptr);
+    rb_io_check_readable(fptr);
+    f = fptr->f;
+    enc = io_encoding(fptr);
+    n = m17n_mbmaxlen(enc);
+    if (n == 0) n = 6;
+    buf = ALLOCA_N(char, n);
+
+  retry:
+    READ_CHECK(f);
+    c = rb_getc(f);
+    if (c == EOF) {
+      eof:
+	if (ferror(f)) {
+	    if (errno == EINTR) goto retry;
+	    rb_sys_fail(fptr->path);
+	}
+	return Qnil;
+    }
+    buf[0] = c;
+
+    n = m17n_mbclen(enc, c);
+    for (i=1; i<n; i++) {
+	c = rb_getc(f);
+	if (c == EOF) goto eof;
+	buf[i] = c;
+    }
+
+    c = m17n_codepoint(enc, buf, buf+n);
+    return INT2NUM(c);
+}
+
+static VALUE
 rb_io_readchar(io)
+    VALUE io;
+{
+    VALUE c = io_readchar(io);
+
+    if (NIL_P(c)) {
+	rb_eof_error();
+    }
+    return c;
+}
+
+static VALUE
+rb_io_readbyte(io)
     VALUE io;
 {
     VALUE c = rb_io_getc(io);
@@ -1185,7 +1308,7 @@ rb_io_sysread(io, len)
     if (READ_DATA_PENDING(fptr->f)) {
 	rb_raise(rb_eIOError, "sysread for buffered IO");
     }
-    str = rb_str_new(0, ilen);
+    str = rb_io_str_new(0, ilen, fptr);
 
     rb_thread_wait_fd(fileno(fptr->f));
     TRAP_BEG;
@@ -1199,7 +1322,6 @@ rb_io_sysread(io, len)
 
     RSTRING(str)->len = n;
     RSTRING(str)->ptr[n] = '\0';
-    OBJ_TAINT(str);
 
     return str;
 }
@@ -1921,7 +2043,6 @@ static VALUE
 rb_io_clone(io)
     VALUE io;
 {
-    VALUE klass;
     OpenFile *fptr, *orig;
     int fd;
     char *mode;
@@ -2283,7 +2404,7 @@ prep_stdio(f, mode, klass)
     return (VALUE)io;
 }
 
-static VALUE
+static void
 prep_path(io, path)
     VALUE io;
     char *path;
@@ -2415,7 +2536,7 @@ next_argv()
 	}
 	init_p = 1;
 	first_p = 0;
-	gets_lineno = 0;
+	argf_lineno = 0;
     }
 
   retry:
@@ -2444,7 +2565,7 @@ next_argv()
 		    }
 		    fstat(fileno(fr), &st);
 		    if (*ruby_inplace_mode) {
-			str = rb_str_new2(fn);
+			str = rb_tainted_str_new2(fn);
 #ifdef NO_LONG_FNAME
                         ruby_add_suffix(str, ruby_inplace_mode);
 #else
@@ -2495,6 +2616,8 @@ next_argv()
 		prep_path(current_file, fn);
 	    }
 	    if (binmode) rb_io_binmode(current_file);
+	    if (!NIL_P(argf_encname))
+		rb_io_set_encoding(current_file, argf_encname);
 	}
 	else {
 	    init_p = 0;
@@ -2537,8 +2660,8 @@ rb_f_gets_internal(argc, argv)
 	next_p = 1;
 	goto retry;
     }
-    gets_lineno++;
-    lineno = INT2FIX(gets_lineno);
+    argf_lineno++;
+    lineno = INT2FIX(argf_lineno);
 
     return line;
 }
@@ -2573,8 +2696,8 @@ rb_gets()
     }
     rb_lastline_set(line);
     if (!NIL_P(line)) {
-	gets_lineno++;
-	lineno = INT2FIX(gets_lineno);
+	argf_lineno++;
+	lineno = INT2FIX(argf_lineno);
     }
 
     return line;
@@ -2996,7 +3119,7 @@ rb_io_s_pipe()
 {
 #ifndef __human68k__
     int pipes[2];
-    VALUE r, w, ary;
+    VALUE r, w;
 
 #ifdef NT
     if (_pipe(pipes, 1024, O_BINARY) == -1)
@@ -3219,6 +3342,27 @@ argf_getc()
 static VALUE
 argf_readchar()
 {
+    VALUE c;
+
+  retry:
+    if (!next_argv()) rb_eof_error();
+    if (TYPE(current_file) != T_FILE) {
+	c = rb_funcall3(current_file, rb_intern("readchar"), 0, 0);
+    }
+    else {
+	c = io_readchar(current_file);
+    }
+    if (NIL_P(c) && next_p != -1) {
+	any_close(current_file);
+	next_p = 1;
+	goto retry;
+    }
+    return c;
+}
+
+static VALUE
+argf_readbyte()
+{
     VALUE c = argf_getc();
 
     if (NIL_P(c)) {
@@ -3299,7 +3443,7 @@ argf_close()
     if (next_p != -1) {
 	next_p = 1;
     }
-    gets_lineno = 0;
+    argf_lineno = 0;
     return argf;
 }
 
@@ -3400,11 +3544,14 @@ Init_IO()
     rb_define_alias(rb_cIO, "to_i", "fileno");
     rb_define_method(rb_cIO, "to_io", rb_io_to_io, 0);
 
-    rb_define_method(rb_cIO, "sync",   rb_io_sync, 0);
+    rb_define_method(rb_cIO, "sync",   rb_io_get_sync, 0);
     rb_define_method(rb_cIO, "sync=",  rb_io_set_sync, 1);
 
-    rb_define_method(rb_cIO, "lineno",   rb_io_lineno, 0);
+    rb_define_method(rb_cIO, "lineno",   rb_io_get_lineno, 0);
     rb_define_method(rb_cIO, "lineno=",  rb_io_set_lineno, 1);
+
+    rb_define_method(rb_cIO, "encoding",   rb_io_get_encoding, 0);
+    rb_define_method(rb_cIO, "encoding=",  rb_io_set_encoding, 1);
 
     rb_define_method(rb_cIO, "readlines",  rb_io_readlines, -1);
 
@@ -3414,6 +3561,7 @@ Init_IO()
     rb_define_method(rb_cIO, "readline",  rb_io_readline, -1);
     rb_define_method(rb_cIO, "getc",  rb_io_getc, 0);
     rb_define_method(rb_cIO, "readchar",  rb_io_readchar, 0);
+    rb_define_method(rb_cIO, "readbyte",  rb_io_readbyte, 0);
     rb_define_method(rb_cIO, "ungetc",rb_io_ungetc, 1);
     rb_define_method(rb_cIO, "<<",    rb_io_addstr, 1);
     rb_define_method(rb_cIO, "flush", rb_io_flush, 0);
@@ -3475,6 +3623,7 @@ Init_IO()
     rb_define_singleton_method(argf, "readline", rb_f_readline, -1);
     rb_define_singleton_method(argf, "getc", argf_getc, 0);
     rb_define_singleton_method(argf, "readchar", argf_readchar, 0);
+    rb_define_singleton_method(argf, "readbyte", argf_readbyte, 0);
     rb_define_singleton_method(argf, "tell", argf_tell, 0);
     rb_define_singleton_method(argf, "seek", argf_seek, 2);
     rb_define_singleton_method(argf, "rewind", argf_rewind, 0);
@@ -3491,8 +3640,11 @@ Init_IO()
     rb_define_singleton_method(argf, "close", argf_close, 0);
     rb_define_singleton_method(argf, "closed?", argf_closed, 0);
 
-    rb_define_singleton_method(argf, "lineno",   argf_lineno, 0);
-    rb_define_singleton_method(argf, "lineno=",  argf_set_lineno, 1);
+    rb_define_singleton_method(argf, "lineno",  argf_get_lineno, 0);
+    rb_define_singleton_method(argf, "lineno=", argf_set_lineno, 1);
+
+    rb_define_singleton_method(argf, "encoding",  argf_get_encoding, 0);
+    rb_define_singleton_method(argf, "encoding=", argf_set_encoding, 1);
 
     current_file = rb_stdin;
     rb_global_variable(&current_file);

@@ -11,8 +11,9 @@
 **********************************************************************/
 
 #include "ruby.h"
+#include "m17n.h"
+
 #include <math.h>
-#include <ctype.h>
 
 VALUE rb_cBignum;
 
@@ -190,6 +191,7 @@ rb_cstr2inum(str, base)
     const char *str;
     int base;
 {
+    m17n_encoding *enc = m17n_index_to_encoding(0);
     const char *s = str;
     char *end;
     int badcheck = (base==0)?1:0;
@@ -200,7 +202,7 @@ rb_cstr2inum(str, base)
     VALUE z;
     BDIGIT *zds;
 
-    while (*str && ISSPACE(*str)) str++;
+    while (*str && m17n_isspace(enc, *str)) str++;
 
     if (str[0] == '+') {
 	str++;
@@ -249,7 +251,7 @@ rb_cstr2inum(str, base)
 	if (*end == '_') goto bigparse;
 	if (badcheck) {
 	    if (end == str) goto bad; /* no number */
-	    while (*end && ISSPACE(*end)) end++;
+	    while (*end && m17n_isspace(enc, *end)) end++;
 	    if (*end) {		      /* trailing garbage */
 	      bad:
 		rb_raise(rb_eArgError, "invalid value for Integer: \"%s\"", s);
@@ -322,8 +324,8 @@ rb_cstr2inum(str, base)
     if (badcheck) {
 	str--;
 	if (s+1 < str && str[-1] == '_') goto bad;
-	if (ISSPACE(c)) {
-	    while (*str && ISSPACE(*str)) str++;
+	if (m17n_isspace(enc, c)) {
+	    while (*str && m17n_isspace(enc, *str)) str++;
 	}
 	if (*str) goto bad;
     }
@@ -814,7 +816,7 @@ bigdivrem(x, y, divp, modp)
 
     yds = BDIGITS(y);
     if (ny == 0 && yds[0] == 0) rb_num_zerodiv();
-    if (nx < ny	|| nx == ny && BDIGITS(x)[nx - 1] < BDIGITS(y)[ny - 1]) {
+    if (nx < ny	|| (nx == ny && BDIGITS(x)[nx - 1] < BDIGITS(y)[ny - 1])) {
 	if (divp) *divp = rb_int2big(0);
 	if (modp) *modp = x;
 	return;
@@ -831,8 +833,10 @@ bigdivrem(x, y, divp, modp)
 	    t2 %= dd;
 	}
 	RBIGNUM(z)->sign = RBIGNUM(x)->sign==RBIGNUM(y)->sign;
-	if (!RBIGNUM(x)->sign) t2 = -(long)t2;
-	if (modp) *modp = rb_int2big((long)t2);
+	if (modp) {
+	    *modp = rb_uint2big((unsigned long)t2);
+	    RBIGNUM(*modp)->sign = RBIGNUM(x)->sign;
+	}
 	if (divp) *divp = z;
 	return;
     }

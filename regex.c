@@ -20,6 +20,8 @@
 /* removed gapped buffer support, multiple syntax support by matz <matz@nts.co.jp> */
 /* Perl5 extension added by matz <matz@caelum.co.jp> */
 /* UTF-8 extension added Jan 16 1999 by Yoshida Masato  <yoshidam@tau.bekkoame.ne.jp> */
+/* modified for Ruby by matz@netlab.co.jp */
+/* M17n modify by matz@zetabits.com */
 
 #include "config.h"
 
@@ -31,10 +33,6 @@
 
 /* We write fatal error messages on standard error.  */
 #include <stdio.h>
-
-/* isalpha(3) etc. are used for the character classes.  */
-#include <ctype.h>
-#include <sys/types.h>
 
 #ifndef PARAMS
 # if defined __GNUC__ || (defined __STDC__ && __STDC__)
@@ -164,6 +162,8 @@ char *alloca();
 /* Get the interface, including the syntax bits.  */
 #include "regex.h"
 
+#define enc bufp->encoding
+
 /* Subroutines for re_compile_pattern.  */
 static void store_jump _((char*, int, char*));
 static void insert_jump _((int, char*, char*, char*));
@@ -171,23 +171,10 @@ static void store_jump_n _((char*, int, char*, unsigned));
 static void insert_jump_n _((int, char*, char*, char*, unsigned));
 static void insert_op _((int, char*, char*));
 static void insert_op_2 _((int, char*, char*, int, int));
-static int memcmp_translate _((unsigned char*, unsigned char*, int));
 
-/* Define the syntax stuff, so we can do the \<, \>, etc.  */
-
-/* This must be nonzero for the wordchar and notwordchar pattern
-   commands in re_match.  */
-#define Sword  1
-#define Sword2 2
-
-#define SYNTAX(c) re_syntax_table[c]
-
-static char re_syntax_table[256];
-static void init_syntax_once _((void));
-static const unsigned char *translate = 0;
 static void init_regs _((struct re_registers*, unsigned int));
-static void bm_init_skip _((int *, unsigned char*, int, const unsigned char*));
-static int current_mbctype = MBCTYPE_ASCII;
+static void bm_init_skip _((int*, unsigned char*, int, m17n_encoding*));
+static m17n_encoding *default_encoding = 0;
 
 #undef P
 
@@ -195,76 +182,17 @@ static int current_mbctype = MBCTYPE_ASCII;
 #include "util.h"
 #endif
 
-static void
-init_syntax_once()
-{
-   register int c;
-   static int done = 0;
-
-   if (done)
-     return;
-
-   memset(re_syntax_table, 0, sizeof re_syntax_table);
-
-   for (c=0; c<=0x7f; c++)
-     if (isalnum(c)) 
-       re_syntax_table[c] = Sword;
-   re_syntax_table['_'] = Sword;
-
-   for (c=0x80; c<=0xff; c++)
-     if (isalnum(c)) 
-       re_syntax_table[c] = Sword2;
-   done = 1;
-}
-
-void
-re_set_casetable(table)
-     const char *table;
-{
-  translate = (const unsigned char*)table;
-}
-
-/* Jim Meyering writes:
-
-   "... Some ctype macros are valid only for character codes that
-   isascii says are ASCII (SGI's IRIX-4.0.5 is one such system --when
-   using /bin/cc or gcc but without giving an ansi option).  So, all
-   ctype uses should be through macros like ISPRINT...  If
-   STDC_HEADERS is defined, then autoconf has verified that the ctype
-   macros don't need to be guarded with references to isascii. ...
-   Defining isascii to 1 should let any compiler worth its salt
-   eliminate the && through constant folding."
-   Solaris defines some of these symbols so we must undefine them first.  */
-
-#undef ISASCII
-#if defined STDC_HEADERS || (!defined isascii && !defined HAVE_ISASCII)
-# define ISASCII(c) 1
-#else
-# define ISASCII(c) isascii(c)
-#endif
-
-#ifdef isblank
-# define ISBLANK(c) (ISASCII(c) && isblank(c))
-#else
-# define ISBLANK(c) ((c) == ' ' || (c) == '\t')
-#endif
-#ifdef isgraph
-# define ISGRAPH(c) (ISASCII(c) && isgraph(c))
-#else
-# define ISGRAPH(c) (ISASCII(c) && isprint(c) && !isspace(c))
-#endif
-
-#undef ISPRINT
-#define ISPRINT(c) (ISASCII(c) && isprint(c))
-#define ISDIGIT(c) (ISASCII(c) && isdigit(c))
-#define ISALNUM(c) (ISASCII(c) && isalnum(c))
-#define ISALPHA(c) (ISASCII(c) && isalpha(c))
-#define ISCNTRL(c) (ISASCII(c) && iscntrl(c))
-#define ISLOWER(c) (ISASCII(c) && islower(c))
-#define ISPUNCT(c) (ISASCII(c) && ispunct(c))
-#define ISSPACE(c) (ISASCII(c) && isspace(c))
-#define ISUPPER(c) (ISASCII(c) && isupper(c))
-#define ISXDIGIT(c) (ISASCII(c) && isxdigit(c))
+#define ISGRAPH(c) (m17n_isprint(enc,(c)) && !m17n_isspace(enc,(c)))
+#define ISPRINT(c) m17n_isprint(enc,(c))
+#define ISDIGIT(c) m17n_isdigit(enc,(c))
+#define ISALNUM(c) m17n_isalnum(enc,(c))
+#define ISALPHA(c) m17n_isalpha(enc,(c))
+#define ISCNTRL(c) m17n_iscntrl(enc,(c))
+#define ISLOWER(c) m17n_islower(enc,(c))
+#define ISPUNCT(c) m17n_ispunct(enc,(c))
+#define ISSPACE(c) m17n_isspace(enc,(c))
+#define ISUPPER(c) m17n_isupper(enc,(c))
+#define ISXDIGIT(c) m17n_isxdigit(enc,(c))
 
 #ifndef NULL
 # define NULL (void *)0
@@ -414,26 +342,11 @@ enum regexpcode
        (source) += 2; } while (0)
 
 
-/* Specify the precise syntax of regexps for compilation.  This provides
-   for compatibility for various utilities which historically have
-   different, incompatible syntaxes.
-
-   The argument SYNTAX is a bit-mask comprised of the various bits
-   defined in regex.h.  */
-
-long
-re_set_syntax(syntax)
-  long syntax;
-{
-    /* obsolete */
-    return 0;
-}
-
 
 /* Macros for re_compile_pattern, which is found below these definitions.  */
 
-#define TRANSLATE_P() ((options&RE_OPTION_IGNORECASE) && translate)
-#define MAY_TRANSLATE() ((bufp->options&(RE_OPTION_IGNORECASE|RE_MAY_IGNORECASE)) && translate)
+#define TRANSLATE_P() ((options&RE_OPTION_IGNORECASE) && enc)
+#define MAY_TRANSLATE() ((bufp->options&(RE_OPTION_IGNORECASE|RE_MAY_IGNORECASE)) && enc)
 /* Fetch the next character in the uncompiled pattern---translating it 
    if necessary.  Also cast from a signed character in the constant
    string passed to us by the user to an unsigned char that we can use
@@ -441,7 +354,7 @@ re_set_syntax(syntax)
 #define PATFETCH(c)							\
   do {if (p == pend) goto end_of_pattern;				\
     c = (unsigned char) *p++; 						\
-    if (TRANSLATE_P()) c = (unsigned char)translate[c];	\
+    if (TRANSLATE_P()) c = (unsigned char)m17n_toupper(enc, (c));	\
   } while (0)
 
 /* Fetch the next character in the uncompiled pattern, with no
@@ -454,70 +367,30 @@ re_set_syntax(syntax)
 /* Go backwards one character in the pattern.  */
 #define PATUNFETCH p--
 
-#define MBC2WC(c, p)							\
-  do {									\
-    if (current_mbctype == MBCTYPE_UTF8) {				\
-      int n = mbclen(c) - 1;						\
-      c &= (1<<(BYTEWIDTH-2-n)) - 1;					\
-      while (n--) {							\
-	c = c << 6 | *p++ & ((1<<6)-1);					\
-      }									\
-    }									\
-    else {								\
-      c <<= 8;								\
-      c |= (unsigned char)*(p)++;					\
-    }									\
-  } while (0)
+#define MBC2WC(c,p,e) (c) = m17n_codepoint(enc, (p), (e))
 
 #define PATFETCH_MBC(c)							\
   do {									\
     if (p + mbclen(c) - 1 >= pend) goto end_of_pattern;			\
-    MBC2WC(c, p);							\
+    MBC2WC(c, p, pend);					\
   } while(0)
 
-#define WC2MBC1ST(c)							\
- ((c<0x100)?(c):((current_mbctype != MBCTYPE_UTF8)?(((c)>>8)&0xff):utf8_firstbyte(c)))
-
-static unsigned int
-utf8_firstbyte(c)
-     unsigned long c;
-{
-  if (c < 0x80) return c;
-  if (c <= 0x7ff) return ((c>>6)&0xff)|0xc0;
-  if (c <= 0xffff) return ((c>>12)&0xff)|0xe0;
-  if (c <= 0x1fffff) return ((c>>18)&0xff)|0xf0;
-  if (c <= 0x3ffffff) return ((c>>24)&0xff)|0xf8;
-  if (c <= 0x7fffffff) return ((c>>30)&0xff)|0xfc;
-#if SIZEOF_INT > 4
-  if (c <= 0xfffffffff) return 0xfe;
-#else
-  return 0xfe;
-#endif
-}
+#define WC2MBC1ST(c) m17n_firstbyte(enc, (c))
 
 static void
-print_mbc(c)
+print_mbc(c, encode)
      unsigned int c;
+     m17n_encoding *encode;
 {
-  if (current_mbctype == MBCTYPE_UTF8) {
-    if (c < 0x80)
-      printf("%c", c);
-    else if (c <= 0x7ff)
-      printf("%c%c", utf8_firstbyte(c), c&0x3f);
-    else if (c <= 0xffff)
-      printf("%c%c%c", utf8_firstbyte(c), (c>>6)&0x3f, c&0x3f);
-    else if (c <= 0x1fffff) 
-      printf("%c%c%c%c", utf8_firstbyte(c), (c>>12)&0x3f, (c>>6)&0x3f, c&0x3f);
-    else if (c <= 0x3ffffff)
-      printf("%c%c%c%c%c", utf8_firstbyte(c), (c>>18)&0x3f, (c>>12)&0x3f, (c>>6)&0x3f, c&0x3f);
-    else if (c <= 0x7fffffff)
-      printf("%c%c%c%c%c%c", utf8_firstbyte(c), (c>>24)&0x3f, (c>>18)&0x3f, (c>>12)&0x3f, (c>>6)&0x3f, c&0x3f);
-  }
-  else if (c < 0xff) {
+  if (c < 0xff) {
     printf("\\%o", c);
   }
   else {
-    printf("%c%c", c>>BYTEWIDTH, c&0xff);
+    char buf[16];
+
+    memset(buf, 0, sizeof buf);
+    m17n_mbcput(encode, c, buf);
+    printf("%s", buf);
   }
 }
 
@@ -563,8 +436,7 @@ print_mbc(c)
 
 /* Set the bit for character C in a character set list.  */
 #define SET_LIST_BIT(c)							\
-  (b[(unsigned char)(c) / BYTEWIDTH]					\
-   |= 1 << ((unsigned char)(c) % BYTEWIDTH))
+  (b[(unsigned char)(c) / BYTEWIDTH] |= 1 << ((unsigned char)(c) % BYTEWIDTH))
 
 /* Get the next unsigned number in the uncompiled pattern.  */
 #define GET_UNSIGNED_NUMBER(num) 					\
@@ -719,9 +591,10 @@ is_in_list(c, b)
 }
 
 static void
-print_partial_compiled_pattern(start, end)
+print_partial_compiled_pattern(start, end, encode)
     unsigned char *start;
     unsigned char *end;
+    m17n_encoding *encode;
 {
   int mcnt, mcnt2;
   unsigned char *p = start;
@@ -834,9 +707,9 @@ print_partial_compiled_pattern(start, end)
 	mcnt = EXTRACT_UNSIGNED_AND_INCR(p);
 	printf("/");
 	while (mcnt--) {
-	  print_mbc(EXTRACT_MBC_AND_INCR(p));
+	  print_mbc(EXTRACT_MBC_AND_INCR(p), encode);
 	  printf("-");
-	  print_mbc(EXTRACT_MBC_AND_INCR(p));
+	  print_mbc(EXTRACT_MBC_AND_INCR(p), encode);
 	}
 	break;
       }
@@ -970,7 +843,7 @@ print_compiled_pattern(bufp)
 {
   unsigned char *buffer = (unsigned char*)bufp->buffer;
 
-  print_partial_compiled_pattern(buffer, buffer + bufp->used);
+  print_partial_compiled_pattern(buffer, buffer + bufp->used, bufp->encoding);
 }
 
 static char*
@@ -1266,8 +1139,12 @@ re_compile_pattern(pattern, size, bufp)
   bufp->must_skip = 0;
   bufp->stclass = 0;
 
-  /* Initialize the syntax table.  */
-  init_syntax_once();
+  if (!bufp->encoding) {
+      if (!default_encoding) {
+	  return "encoding is not set";
+      }
+      bufp->encoding = default_encoding;
+  }
 
   if (bufp->allocated == 0) {
     bufp->allocated = INIT_BUF_SIZE;
@@ -1430,7 +1307,7 @@ re_compile_pattern(pattern, size, bufp)
 	unsigned last = (unsigned)-1;
 
 	if ((size = EXTRACT_UNSIGNED(&b[(1 << BYTEWIDTH) / BYTEWIDTH]))
-	    || current_mbctype) {
+	    || m17n_mbmaxlen(enc) > 1) {
 	  /* Ensure the space is enough to hold another interval
 	     of multi-byte chars in charset(_not)?.  */
 	  size = (1 << BYTEWIDTH) / BYTEWIDTH + 2 + size*8 + 8;
@@ -1466,11 +1343,10 @@ re_compile_pattern(pattern, size, bufp)
 	  switch (c) {
 	  case 'w':
 	    for (c = 0; c < (1 << BYTEWIDTH); c++) {
-	      if (SYNTAX(c) == Sword ||
-		  (!current_mbctype && SYNTAX(c) == Sword2))
+	      if (m17n_isalnum(enc, c))
 		SET_LIST_BIT(c);
 	    }
-	    if (current_mbctype) {
+	    if (m17n_mbmaxlen(enc) > 1) {
 	      set_list_bits(0x80, 0xffffffff, b);
 	    }
 	    last = -1;
@@ -1478,9 +1354,7 @@ re_compile_pattern(pattern, size, bufp)
 
 	  case 'W':
 	    for (c = 0; c < (1 << BYTEWIDTH); c++) {
-	      if (SYNTAX(c) != Sword &&
-		  (current_mbctype && !re_mbctab[c] ||
-		  !current_mbctype && SYNTAX(c) != Sword2))
+	      if (m17n_codelen(enc, c) == 1 && !m17n_isalnum(enc, c))
 		SET_LIST_BIT(c);
 	    }
 	    last = -1;
@@ -1497,7 +1371,7 @@ re_compile_pattern(pattern, size, bufp)
 	    for (c = 0; c < 256; c++)
 	      if (!ISSPACE(c))
 		SET_LIST_BIT(c);
-	    if (current_mbctype)
+	    if (m17n_mbmaxlen(enc) > 1)
 	      set_list_bits(0x80, 0xffffffff, b);
 	    last = -1;
 	    continue;
@@ -1512,7 +1386,7 @@ re_compile_pattern(pattern, size, bufp)
 	    for (c = 0; c < 256; c++)
 	      if (!ISDIGIT(c))
 		SET_LIST_BIT(c);
-	    if (current_mbctype)
+	    if (m17n_mbmaxlen(enc) > 1)
 	      set_list_bits(0x80, 0xffffffff, b);
 	    last = -1;
 	    continue;
@@ -1628,7 +1502,6 @@ re_compile_pattern(pattern, size, bufp)
 	    for (ch = 0; ch < 1 << BYTEWIDTH; ch++) {
 	      if (   (is_alnum  && ISALNUM(ch))
 		  || (is_alpha  && ISALPHA(ch))
-		  || (is_blank  && ISBLANK(ch))
 		  || (is_cntrl  && ISCNTRL(ch))
 		  || (is_digit  && ISDIGIT(ch))
 		  || (is_graph  && ISGRAPH(ch))
@@ -1646,13 +1519,13 @@ re_compile_pattern(pattern, size, bufp)
 	    c1++;
 	    while (c1--)    
 	      PATUNFETCH;
-	    SET_LIST_BIT(TRANSLATE_P()?translate['[']:'[');
-	    SET_LIST_BIT(TRANSLATE_P()?translate[':']:':');
+	    SET_LIST_BIT(TRANSLATE_P()?m17n_toupper(enc, '['):'[');
+	    SET_LIST_BIT(TRANSLATE_P()?m17n_toupper(enc, ':'):':');
 	    had_char_class = 0;
 	    last = ':';
 	  }
 	}
-	else if (had_mbchar == 0 && (!current_mbctype || !had_num_literal)) {
+	else if (had_mbchar == 0 && (m17n_mbmaxlen(enc) == 1 || !had_num_literal)) {
 	  SET_LIST_BIT(c);
 	  had_num_literal = 0;
 	}
@@ -2398,23 +2271,26 @@ re_compile_pattern(pattern, size, bufp)
   if (!bufp->must) {
     bufp->must = calculate_must_string(bufp->buffer, b);
   }
-  if (current_mbctype == MBCTYPE_SJIS) bufp->options |= RE_OPTIMIZE_NO_BM;
-  else if (bufp->must) {
-    int i;
-    int len = (unsigned char)bufp->must[0];
+  if (bufp->must) {
+    if (!m17n_islead(enc, bufp->must[1])) {
+      bufp->options |= RE_OPTIMIZE_NO_BM;
+    }
+    else {
+      int i;
+      int len = (unsigned char)bufp->must[0];
 
-    for (i=1; i<len; i++) {
-      if ((unsigned char)bufp->must[i] == 0xff ||
-	  (current_mbctype && ismbchar(bufp->must[i]))) {
-	bufp->options |= RE_OPTIMIZE_NO_BM;
-	break;
+      for (i=1; i<len; i++) {
+	if ((unsigned char)bufp->must[i] == 0xff) {
+	  bufp->options |= RE_OPTIMIZE_NO_BM;
+	  break;
+	}
       }
     }
     if (!(bufp->options & RE_OPTIMIZE_NO_BM)) {
       bufp->must_skip = (int *) xmalloc((1 << BYTEWIDTH)*sizeof(int));
       bm_init_skip(bufp->must_skip, (unsigned char*)bufp->must+1,
 		   (unsigned char)bufp->must[0],
-		   (unsigned char*)(MAY_TRANSLATE()?translate:0));
+		   (MAY_TRANSLATE()?enc:0));
     }
   }
 
@@ -2586,12 +2462,12 @@ insert_op_2(op, there, current_end, num_1, num_2)
 }
 
 
-#define trans_eq(c1, c2, translate) (translate?(translate[c1]==translate[c2]):((c1)==(c2)))
+#define trans_eq(c1, c2, encode) (encode?(m17n_toupper(encode, (c1))==m17n_toupper(encode, (c2))):((c1)==(c2)))
 static int
-slow_match(little, lend, big, bend, translate)
+slow_match(little, lend, big, bend, encode)
      unsigned char *little, *lend;
      unsigned char *big, *bend;
-     unsigned char *translate;
+     m17n_encoding *encode;
 {
   int c;
 
@@ -2599,19 +2475,20 @@ slow_match(little, lend, big, bend, translate)
     c = *little++;
     if (c == 0xff)
       c = *little++;
-    if (!trans_eq(*big++, c, translate)) break;
+    if (!trans_eq(*big++, c, encode)) break;
   }
   if (little == lend) return 1;
   return 0;
 }
 
 static int
-slow_search(little, llen, big, blen, translate)
+slow_search(little, llen, big, blen, encode, translate)
      unsigned char *little;
      int llen;
      unsigned char *big;
      int blen;
-     char *translate;
+     m17n_encoding *encode;
+     int translate;
 {
   unsigned char *bsave = big;
   unsigned char *bend = big + blen;
@@ -2623,8 +2500,8 @@ slow_search(little, llen, big, blen, translate)
     c = little[1];
     fescape = 1;
   }
-  else if (translate && !ismbchar(c)) {
-    c = translate[c];
+  else if (translate && m17n_mbclen(encode, c) == 1) {
+    c = m17n_toupper(encode, c);
   }
 
   while (big < bend) {
@@ -2635,44 +2512,50 @@ slow_search(little, llen, big, blen, translate)
 	big++;
       }
     }
-    else if (translate && !ismbchar(c)) {
+    else if (translate && m17n_mbclen(encode, c) == 1) {
       while (big < bend) {
-	if (ismbchar(*big)) big+=mbclen(*big)-1;
-	else if (translate[*big] == c) break;
+	int n = m17n_mbclen(encode, *big);
+	if (n > 1)
+	  big+=n-1;
+	else if (m17n_toupper(encode, *big) == c) break;
 	big++;
       }
     }
     else {
       while (big < bend) {
+	int n;
+
 	if (*big == c) break;
-	if (ismbchar(*big)) big+=mbclen(*big)-1;
+	n = m17n_mbclen(encode, *big);
+	if (n > 1)
+	  big += n-1;
 	big++;
       }
     }
 
-    if (slow_match(little, little+llen, big, bend, translate))
+    if (slow_match(little, little+llen, big, bend, encode))
       return big - bsave;
 
-    big+=mbclen(*big);
+    big+=m17n_mbclen(encode, *big);
   }
   return -1;
 }
 
 static void
-bm_init_skip(skip, pat, m, translate)
+bm_init_skip(skip, pat, m, encode)
      int *skip;
      unsigned char *pat;
      int m;
-     const unsigned char *translate;
+     m17n_encoding *encode;
 {
   int j, c;
 
   for (c=0; c<256; c++) {
     skip[c] = m;
   }
-  if (translate) {
+  if (encode) {
     for (j=0; j<m-1; j++) {
-      skip[translate[pat[j]]] = m-1-j;
+      skip[m17n_toupper(encode, pat[j])] = m-1-j;
     }
   }
   else {
@@ -2683,13 +2566,14 @@ bm_init_skip(skip, pat, m, translate)
 }
 
 static int
-bm_search(little, llen, big, blen, skip, translate)
+bm_search(little, llen, big, blen, skip, encode, translate)
      unsigned char *little;
      int llen;
      unsigned char *big;
      int blen;
      int *skip;
-     unsigned char *translate;
+     m17n_encoding *encode;
+     int translate;
 {
   int i, j, k;
 
@@ -2698,13 +2582,13 @@ bm_search(little, llen, big, blen, skip, translate)
     while (i < blen) {
       k = i;
       j = llen-1;
-      while (j >= 0 && translate[big[k]] == translate[little[j]]) {
+      while (j >= 0 && m17n_toupper(encode, big[k]) == m17n_toupper(encode, little[j])) {
 	k--;
 	j--;
       }
       if (j < 0) return k+1;
 
-      i += skip[translate[big[i]]];
+      i += skip[m17n_toupper(encode,big[i])];
     }
     return -1;
   }
@@ -2768,13 +2652,13 @@ re_compile_fastmap(bufp)
       case exactn:
 	if (p[1] == 0xff) {
 	  if (TRANSLATE_P())
-	    fastmap[translate[p[2]]] = 2;
+	    fastmap[m17n_toupper(enc, p[2])] = 2;
 	  else
 	    fastmap[p[2]] = 2;
 	  bufp->options |= RE_OPTIMIZE_BMATCH;
 	}
 	else if (TRANSLATE_P())
-	  fastmap[translate[p[1]]] = 1;
+	  fastmap[m17n_toupper(enc, p[1])] = 1;
 	else
 	  fastmap[p[1]] = 1;
 	break;
@@ -2805,7 +2689,7 @@ re_compile_fastmap(bufp)
 
       case endline:
 	if (TRANSLATE_P())
-	  fastmap[translate['\n']] = 1;
+	  fastmap[m17n_toupper(enc, '\n')] = 1;
 	else
 	  fastmap['\n'] = 1;
 	if ((options & RE_OPTION_SINGLELINE) == 0 && bufp->can_be_null == 0)
@@ -2905,46 +2789,24 @@ re_compile_fastmap(bufp)
 
       case wordchar:
 	for (j = 0; j < 0x80; j++) {
-	  if (SYNTAX(j) == Sword)
+	  if (m17n_isalnum(enc, j))
 	    fastmap[j] = 1;
 	}
-	switch (current_mbctype) {
-	case MBCTYPE_ASCII:
-	  for (j = 0x80; j < (1 << BYTEWIDTH); j++) {
-	    if (SYNTAX(j) == Sword2)
-	      fastmap[j] = 1;
+	for (j = 0x80; j < (1 << BYTEWIDTH); j++) {
+	  if (m17n_mbclen(enc, j) == 1 && m17n_isalnum(enc, j)) {
+	    fastmap[j] = 1;
 	  }
-	  break;
-	case MBCTYPE_EUC:
-	case MBCTYPE_SJIS:
-	case MBCTYPE_UTF8:
-	  for (j = 0x80; j < (1 << BYTEWIDTH); j++) {
-	    if (re_mbctab[j])
-	      fastmap[j] = 1;
-	  }
-	  break;
 	}
 	break;
 
       case notwordchar:
 	for (j = 0; j < 0x80; j++)
-	  if (SYNTAX(j) != Sword)
+	  if (!m17n_isalnum(enc, j))
 	    fastmap[j] = 1;
-	switch (current_mbctype) {
-	case MBCTYPE_ASCII:
-	  for (j = 0x80; j < (1 << BYTEWIDTH); j++) {
-	    if (SYNTAX(j) != Sword2)
-	      fastmap[j] = 1;
+	for (j = 0x80; j < (1 << BYTEWIDTH); j++) {
+	  if (m17n_mbclen(enc, j) == 1 && !m17n_isalnum(enc, j)) {
+	    fastmap[j] = 1;
 	  }
-	  break;
-	case MBCTYPE_EUC:
-	case MBCTYPE_SJIS:
-	case MBCTYPE_UTF8:
-	  for (j = 0x80; j < (1 << BYTEWIDTH); j++) {
-	    if (!re_mbctab[j])
-	      fastmap[j] = 1;
-	  }
-	  break;
 	}
 	break;
 
@@ -2953,7 +2815,7 @@ re_compile_fastmap(bufp)
 	   multi-byte char.  See set_list_bits().  */
 	for (j = *p++ * BYTEWIDTH - 1; j >= 0; j--)
 	  if (p[j / BYTEWIDTH] & (1 << (j % BYTEWIDTH))) {
-	    int tmp = TRANSLATE_P()?translate[j]:j;
+	    int tmp = TRANSLATE_P()?m17n_toupper(enc, j):j;
 	    fastmap[tmp] = 1;
 	  }
 	{
@@ -3077,7 +2939,7 @@ re_adjust_startpos(bufp, string, size, startpos, range)
   }
 
   /* Adjust startpos for mbc string */
-  if (current_mbctype && startpos>0 && !(bufp->options&RE_OPTIMIZE_BMATCH)) {
+  if (enc->index != 0 && startpos>0 && !(bufp->options&RE_OPTIMIZE_BMATCH)) {
     int i = 0;
 
     if (range > 0) {
@@ -3186,14 +3048,14 @@ re_search(bufp, string, size, startpos, range, regs)
     pend = size;
     if (bufp->options & RE_OPTIMIZE_NO_BM) {
       pos = slow_search(bufp->must+1, len,
-			string+pbeg, pend-pbeg,
-			MAY_TRANSLATE()?translate:0);
+			string+pbeg, pend-pbeg, enc,
+			MAY_TRANSLATE());
     }
     else {
       pos = bm_search(bufp->must+1, len,
 		      string+pbeg, pend-pbeg,
-		      bufp->must_skip,
-		      MAY_TRANSLATE()?translate:0);
+		      bufp->must_skip, enc, 
+		      MAY_TRANSLATE());
     }
     if (pos == -1) return -1;
     if (range > 0 && (bufp->options & RE_OPTIMIZE_EXACTN)) {
@@ -3234,7 +3096,7 @@ re_search(bufp, string, size, startpos, range, regs)
 	    }
 	  }
 	  else {
-	    if (fastmap[MAY_TRANSLATE() ? translate[c] : c])
+	    if (fastmap[MAY_TRANSLATE() ? m17n_toupper(enc, c) : c])
 	      break;
 	  }
 	  range--;
@@ -3247,7 +3109,7 @@ re_search(bufp, string, size, startpos, range, regs)
 
 	c = string[startpos];
 	c &= 0xff;
-	if (MAY_TRANSLATE() ? !fastmap[translate[c]] : !fastmap[c])
+	if (MAY_TRANSLATE() ? !fastmap[m17n_toupper(enc, c)] : !fastmap[c])
 	  goto advance;
       }
     }
@@ -3281,10 +3143,10 @@ re_search(bufp, string, size, startpos, range, regs)
 	while (range > 0) {
 	  c = *p++;
 	  if (ismbchar(c) && fastmap[c] != 2) {
-	    MBC2WC(c, p);
+	    MBC2WC(c, p, string+size);
 	  }
 	  else if (MAY_TRANSLATE())
-	    c = translate[c];
+	    c = m17n_toupper(enc, c);
 	  if (*bufp->stclass == charset) {
 	    if (!is_in_list(c, bufp->stclass+1)) break;
 	  }
@@ -3453,12 +3315,8 @@ re_search(bufp, string, size, startpos, range, regs)
 #define AT_STRINGS_BEG(d)  ((d) == string)
 #define AT_STRINGS_END(d)  ((d) == dend)
 
-#define IS_A_LETTER(d) (SYNTAX(*(d)) == Sword ||			\
-			(current_mbctype ?				\
-			 (re_mbctab[*(d)] && ((d)+mbclen(*(d)))<=dend):	\
-			 SYNTAX(*(d)) == Sword2))
-
-#define PREV_IS_A_LETTER(d) ((current_mbctype == MBCTYPE_SJIS)?		\
+#define IS_A_LETTER(d) (m17n_mbclen(enc, *d) == 1 ? m17n_iswchar(enc, *d) : 1)
+#define PREV_IS_A_LETTER(d) ((enc->index == 3)?	/* SJIS hack */		\
 			     IS_A_LETTER((d)-(!AT_STRINGS_BEG((d)-1)&&	\
 					      ismbchar((d)[-2])?2:1)):	\
 			     ((d)[-1] >= 0x80 || IS_A_LETTER((d)-1)))
@@ -3756,8 +3614,8 @@ re_match(bufp, string_arg, size, pos, regs)
 	    /* Compare that many; failure if mismatch, else move
 	       past them.  */
 	    if ((options & RE_OPTION_IGNORECASE) 
-		? memcmp_translate(d, d2, mcnt) 
-		: memcmp((char*)d, (char*)d2, mcnt))
+		? m17n_memcmp(d, d2, mcnt, enc) 
+		: memcmp(d, d2, mcnt))
 	      goto fail;
 	    d += mcnt, d2 += mcnt;
 	  }
@@ -3802,7 +3660,7 @@ re_match(bufp, string_arg, size, pos, regs)
 	  break;
 	}
 	if (!(options&RE_OPTION_MULTILINE)
-	    && (TRANSLATE_P() ? translate[*d] : *d) == '\n')
+	    && (TRANSLATE_P() ? m17n_toupper(enc, *d) : *d) == '\n')
 	  goto fail;
 	SET_REGS_MATCHED;
 	d++;
@@ -3820,7 +3678,7 @@ re_match(bufp, string_arg, size, pos, regs)
 	    continue;
 	  }
 	  if (!(options&RE_OPTION_MULTILINE) &&
-	      (TRANSLATE_P() ? translate[*d] : *d) == '\n')
+	      (TRANSLATE_P() ? m17n_toupper(enc, *d) : *d) == '\n')
 	    goto fail;
 	  SET_REGS_MATCHED;
 	  d++;
@@ -3839,11 +3697,11 @@ re_match(bufp, string_arg, size, pos, regs)
 	  cc = c = (unsigned char)*d++;
 	  if (ismbchar(c)) {
 	    if (d + mbclen(c) - 1 <= dend) {
-	      MBC2WC(c, d);
+	      MBC2WC(c, d, pend);
 	    }
 	  }
 	  else if (TRANSLATE_P())
-	    cc = c = (unsigned char)translate[c];
+	    cc = c = (unsigned char)m17n_toupper(enc, c);
 
 	  not = is_in_list(c, p);
 	  if (!not && cc != c) {
@@ -3974,7 +3832,7 @@ re_match(bufp, string_arg, size, pos, regs)
 	    int not;
 	    if (ismbchar(c)) {
 	      unsigned char *pp = p1+3;
-	      MBC2WC(c, pp);
+	      MBC2WC(c, pp, pend);
 	    }
 	    /* `is_in_list()' is TRUE if c would match */
 	    /* That means it is not safe to finalize.  */
@@ -4244,7 +4102,7 @@ re_match(bufp, string_arg, size, pos, regs)
 	      continue;
 	    }
 	    /* compiled code translation needed for ruby */
-	    if ((unsigned char)translate[c] != (unsigned char)translate[*p++])
+	    if ((unsigned char)m17n_toupper(enc, c) != (unsigned char)m17n_toupper(enc, *p++))
 	      goto fail;
 	  }
 	  while (--mcnt);
@@ -4347,31 +4205,6 @@ re_match(bufp, string_arg, size, pos, regs)
   FREE_AND_RETURN(stackb,(-1)); 	/* Failure to match.  */
 }
 
-
-static int
-memcmp_translate(s1, s2, len)
-     unsigned char *s1, *s2;
-     register int len;
-{
-  register unsigned char *p1 = s1, *p2 = s2, c;
-  while (len) {
-    c = *p1++;
-    if (ismbchar(c)) {
-      int n;
-
-      if (c != *p2++) return 1;
-      for (n = mbclen(c) - 1; n > 0; n--)
-	if (!--len || *p1++ != *p2++)
-	  return 1;
-    }
-    else
-      if (translate[c] != translate[*p2++])
-	return 1;
-    len--;
-  }
-  return 0;
-}
-
 void
 re_copy_registers(regs1, regs2)
      struct re_registers *regs1, *regs2;
@@ -4405,107 +4238,9 @@ re_free_registers(regs)
   if (regs->end) xfree(regs->end);
 }
 
-/* Functions for multi-byte support.
-   Created for grep multi-byte extension Jul., 1993 by t^2 (Takahiro Tanimoto)
-   Last change: Jul. 9, 1993 by t^2  */
-static const unsigned char mbctab_ascii[] = {
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-};
-
-static const unsigned char mbctab_euc[] = { /* 0xA1-0xFE */
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0
-};
-
-static const unsigned char mbctab_sjis[] = { /* 0x80-0x9f,0xE0-0xFF */
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
-};
-
-static const unsigned char mbctab_utf8[] = {
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-  3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 0, 0
-};
-
-const unsigned char *re_mbctab = mbctab_ascii;
-
 void
-re_mbcinit(mbctype)
-     int mbctype;
+re_set_default_encoding(encode)
+    m17n_encoding *encode;
 {
-  switch (mbctype) {
-  case MBCTYPE_ASCII:
-    re_mbctab = mbctab_ascii;
-    current_mbctype = MBCTYPE_ASCII;
-    break;
-  case MBCTYPE_EUC:
-    re_mbctab = mbctab_euc;
-    current_mbctype = MBCTYPE_EUC;
-    break;
-  case MBCTYPE_SJIS:
-    re_mbctab = mbctab_sjis;
-    current_mbctype = MBCTYPE_SJIS;
-    break;
-  case MBCTYPE_UTF8:
-    re_mbctab = mbctab_utf8;
-    current_mbctype = MBCTYPE_UTF8;
-    break;
-  }
+    default_encoding = encode;
 }

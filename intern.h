@@ -104,15 +104,13 @@ EXTERN int ruby_nerrs;
 VALUE rb_exc_new _((VALUE, const char*, long));
 VALUE rb_exc_new2 _((VALUE, const char*));
 VALUE rb_exc_new3 _((VALUE, VALUE));
-void rb_loaderror __((const char*, ...)) NORETURN;
+NORETURN(void rb_loaderror __((const char*, ...)));
 void rb_compile_error __((const char*, ...));
 void rb_compile_error_append __((const char*, ...));
-<<<<<<< intern.h
-NORETURN(void rb_load_fail _((char*)));
 NORETURN(void rb_error_frozen _((char*)));
 /* eval.c */
-void rb_exc_raise _((VALUE)) NORETURN;
-void rb_exc_fatal _((VALUE)) NORETURN;
+NORETURN(void rb_exc_raise _((VALUE)));
+NORETURN(void rb_exc_fatal _((VALUE)));
 void rb_remove_method _((VALUE, const char*));
 void rb_disable_super _((VALUE, const char*));
 void rb_enable_super _((VALUE, const char*));
@@ -134,7 +132,7 @@ ID rb_frame_last_func _((void));
 VALUE rb_obj_instance_eval _((int, VALUE*, VALUE));
 void rb_load _((VALUE, int));
 void rb_load_protect _((VALUE, int, int*));
-void rb_jump_tag _((int)) NORETURN;
+NORETURN(void rb_jump_tag _((int)));
 int rb_provided _((const char*));
 void rb_provide _((const char*));
 VALUE rb_f_require _((VALUE, VALUE));
@@ -266,7 +264,6 @@ VALUE rb_range_new _((VALUE, VALUE, int));
 VALUE rb_range_beg_len _((VALUE, long*, long*, long, int));
 VALUE rb_length_by_each _((VALUE));
 /* re.c */
-int rb_memcmp _((char*,char*,long));
 VALUE rb_reg_nth_defined _((int, VALUE));
 VALUE rb_reg_nth_match _((int, VALUE));
 VALUE rb_reg_last_match _((VALUE));
@@ -302,6 +299,12 @@ void rb_trap_exec _((void));
 /* sprintf.c */
 VALUE rb_f_sprintf _((int, VALUE*));
 /* string.c */
+struct m17n_encoding *ruby_default_encoding;
+struct m17n_encoding *rb_m17n_get_encoding _((VALUE obj));
+void rb_m17n_associate_encoding _((VALUE obj, struct m17n_encoding* enc));
+void rb_m17n_enc_check _((VALUE str1, VALUE str2, struct m17n_encoding **encp));
+VALUE rb_enc_get_encoding _((VALUE obj));
+VALUE rb_enc_set_encoding _((VALUE obj, VALUE encoding));
 VALUE rb_str_new _((const char*, long));
 VALUE rb_str_new2 _((const char*));
 VALUE rb_str_new3 _((VALUE));
@@ -314,6 +317,7 @@ VALUE rb_str_dup _((VALUE));
 VALUE rb_str_plus _((VALUE, VALUE));
 VALUE rb_str_times _((VALUE, VALUE));
 VALUE rb_str_substr _((VALUE, long, long));
+VALUE rb_str_length _((VALUE));
 void rb_str_modify _((VALUE));
 VALUE rb_str_freeze _((VALUE));
 VALUE rb_str_resize _((VALUE, long));

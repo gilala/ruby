@@ -58,6 +58,7 @@ OBJS	      = array.@OBJEXT@ \
 		hash.@OBJEXT@ \
 		inits.@OBJEXT@ \
 		io.@OBJEXT@ \
+		m17n.@OBJEXT@ \
 		marshal.@OBJEXT@ \
 		math.@OBJEXT@ \
 		numeric.@OBJEXT@ \
@@ -247,26 +248,27 @@ dmyext.@OBJEXT@: dmyext.c
 enum.@OBJEXT@: enum.c ruby.h config.h defines.h intern.h node.h
 error.@OBJEXT@: error.c ruby.h config.h defines.h intern.h env.h version.h
 eval.@OBJEXT@: eval.c ruby.h config.h defines.h intern.h node.h env.h rubysig.h st.h dln.h
-file.@OBJEXT@: file.c ruby.h config.h defines.h intern.h rubyio.h rubysig.h dln.h
+file.@OBJEXT@: file.c ruby.h config.h defines.h intern.h rubyio.h rubysig.h dln.h m17n.h
 gc.@OBJEXT@: gc.c ruby.h config.h defines.h intern.h rubysig.h st.h node.h env.h re.h regex.h
 hash.@OBJEXT@: hash.c ruby.h config.h defines.h intern.h st.h rubysig.h util.h
 inits.@OBJEXT@: inits.c ruby.h config.h defines.h intern.h
-io.@OBJEXT@: io.c ruby.h config.h defines.h intern.h rubyio.h rubysig.h env.h util.h
+io.@OBJEXT@: io.c ruby.h config.h defines.h intern.h rubyio.h rubysig.h env.h util.h m17n.h
+m17n.@OBJEXT@: m17n.c config.h m17n.h
 main.@OBJEXT@: main.c ruby.h config.h defines.h intern.h
-marshal.@OBJEXT@: marshal.c ruby.h config.h defines.h intern.h rubyio.h st.h
-prec.@OBJEXT@: prec.c ruby.h config.h defines.h intern.h
+marshal.@OBJEXT@: marshal.c ruby.h config.h defines.h intern.h rubyio.h st.h m17n.h
 math.@OBJEXT@: math.c ruby.h config.h defines.h intern.h
 numeric.@OBJEXT@: numeric.c ruby.h config.h defines.h intern.h
-object.@OBJEXT@: object.c ruby.h config.h defines.h intern.h st.h
-pack.@OBJEXT@: pack.c ruby.h config.h defines.h intern.h
+object.@OBJEXT@: object.c ruby.h config.h defines.h intern.h st.h m17n.h
+pack.@OBJEXT@: pack.c ruby.h config.h defines.h intern.h m17n.h
+prec.@OBJEXT@: prec.c ruby.h config.h defines.h intern.h
 process.@OBJEXT@: process.c ruby.h config.h defines.h intern.h rubysig.h st.h
 random.@OBJEXT@: random.c ruby.h config.h defines.h intern.h
 range.@OBJEXT@: range.c ruby.h config.h defines.h intern.h
 re.@OBJEXT@: re.c ruby.h config.h defines.h intern.h re.h regex.h
-regex.@OBJEXT@: regex.c config.h regex.h
+regex.@OBJEXT@: regex.c config.h regex.h m17n.h
 ruby.@OBJEXT@: ruby.c ruby.h config.h defines.h intern.h dln.h node.h util.h
 signal.@OBJEXT@: signal.c ruby.h config.h defines.h intern.h rubysig.h
-sprintf.@OBJEXT@: sprintf.c ruby.h config.h defines.h intern.h
+sprintf.@OBJEXT@: sprintf.c ruby.h config.h defines.h intern.h m17n.h
 st.@OBJEXT@: st.c config.h st.h
 string.@OBJEXT@: string.c ruby.h config.h defines.h intern.h re.h regex.h
 struct.@OBJEXT@: struct.c ruby.h config.h defines.h intern.h

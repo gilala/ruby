@@ -63,10 +63,8 @@ extern "C" {
 # define __(args) ()
 #endif
 
-#ifdef HAVE_ATTR_NORETURN
-# define NORETURN __attribute__ ((noreturn))
-#else
-# define NORETURN
+#ifndef NORETURN
+# define NORETURN(x) x
 #endif
 
 #if defined(HAVE_ALLOCA_H) && !defined(__GNUC__)
@@ -453,13 +451,13 @@ VALUE rb_equal _((VALUE,VALUE));
 
 EXTERN VALUE ruby_verbose, ruby_debug;
 
-void rb_raise __((VALUE, const char*, ...)) NORETURN;
-void rb_fatal __((const char*, ...)) NORETURN;
-void rb_bug __((const char*, ...)) NORETURN;
-void rb_sys_fail _((const char*)) NORETURN;
-void rb_iter_break _((void)) NORETURN;
-void rb_exit _((int)) NORETURN;
-void rb_notimplement _((void)) NORETURN;
+NORETURN(void rb_raise __((VALUE, const char*, ...)));
+NORETURN(void rb_fatal __((const char*, ...)));
+NORETURN(void rb_bug __((const char*, ...)));
+NORETURN(void rb_sys_fail _((const char*)));
+NORETURN(void rb_iter_break _((void)));
+NORETURN(void rb_exit _((int)));
+NORETURN(void rb_notimplement _((void)));
 
 void rb_warn __((const char*, ...));
 void rb_warning __((const char*, ...));		/* reports if `-w' specified */
@@ -472,7 +470,7 @@ VALUE rb_rescue _((VALUE(*)(),VALUE,VALUE(*)(),VALUE));
 VALUE rb_rescue2 __((VALUE(*)(),VALUE,VALUE(*)(),VALUE,...));
 VALUE rb_ensure _((VALUE(*)(),VALUE,VALUE(*)(),VALUE));
 VALUE rb_catch _((const char*,VALUE(*)(),VALUE));
-void rb_throw _((const char*,VALUE)) NORETURN;
+NORETURN(void rb_throw _((const char*,VALUE)));
 
 VALUE rb_require _((const char*));
 

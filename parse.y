@@ -1842,10 +1842,10 @@ none		: /* none */
 			$$ = 0;
 		    }
 %%
-#include <ctype.h>
-#include <sys/types.h>
 #include "regex.h"
 #include "util.h"
+
+#define enc ruby_default_encoding
 
 /* We remove any previous definition of `SIGN_EXTEND_CHAR',
    since ours (we hope) works properly with all combinations of
@@ -1858,7 +1858,7 @@ none		: /* none */
 /* As in Harbison and Steele.  */
 # define SIGN_EXTEND_CHAR(c) ((((unsigned char)(c)) ^ 128) - 128)
 #endif
-#define is_identchar(c) (SIGN_EXTEND_CHAR(c)!=-1&&(m17n_isalnum(enc,(c)) || (c) == '_' || ismbchar(c)))
+#define is_identchar(c) (SIGN_EXTEND_CHAR(c)!=-1&&(ISALNUM(c) || (c) == '_' || ismbchar(c)))
 
 static char *tokenbuf = NULL;
 static int   tokidx, toksiz = 0;
@@ -2574,7 +2574,7 @@ parse_quotedwords(term, paren)
     strstart = ruby_sourceline;
     newtok();
 
-    while (c = nextc(),m17n_isspace(enc, c))
+    while (c = nextc(),ISSPACE(c))
 	;		/* skip preceding spaces */
     pushback(c);
     while ((c = nextc()) != term || nest > 0) {
@@ -2604,7 +2604,7 @@ parse_quotedwords(term, paren)
 		    tokadd(c);
 		    continue;
 		}
-		if (!m17n_isspace(enc, c))
+		if (!ISSPACE(c))
 		    tokadd('\\');
 		break;
 	    }
@@ -4835,6 +4835,9 @@ Init_sym()
     sym_rev_tbl = st_init_numtable_with_size(200);
     rb_global_variable((VALUE*)&cur_cref);
     rb_global_variable((VALUE*)&lex_lastline);
+
+    m17n_init();
+    ruby_default_encoding = m17n_find_encoding("euc-jp");
 }
 
 ID

@@ -167,7 +167,7 @@ rb_check_safe_str(x)
     }
 }
 
-static void print_undef _((VALUE, ID)) NORETURN;
+NORETURN(static void print_undef _((VALUE, ID)));
 static void
 print_undef(klass, id)
     VALUE klass;
@@ -1122,9 +1122,15 @@ void rb_exec_end_proc _((void));
 void
 ruby_finalize()
 {
-    rb_trap_exit();
-    rb_exec_end_proc();
-    rb_gc_call_finalizer_at_exit();
+    int state;
+
+    PUSH_TAG(PROT_NONE);
+    if ((state = EXEC_TAG()) == 0) {
+	rb_trap_exit();
+	rb_exec_end_proc();
+	rb_gc_call_finalizer_at_exit();
+    }
+    POP_TAG();
 }
 
 void
@@ -1822,14 +1828,14 @@ is_defined(self, node, buf)
 
       case NODE_NTH_REF:
 	if (rb_reg_nth_defined(node->nd_nth, MATCH_DATA)) {
-	    sprintf(buf, "$%d", node->nd_nth);
+	    sprintf(buf, "$%d", (int)node->nd_nth);
 	    return buf;
 	}
 	break;
 
       case NODE_BACK_REF:
 	if (rb_reg_nth_defined(0, MATCH_DATA)) {
-	    sprintf(buf, "$%c", node->nd_nth);
+	    sprintf(buf, "$%c", (int)node->nd_nth);
 	    return buf;
 	}
 	break;
@@ -3306,7 +3312,7 @@ rb_iter_break()
     JUMP_TAG(TAG_BREAK);
 }
 
-static void rb_longjmp _((int, VALUE)) NORETURN;
+NORETURN(static void rb_longjmp _((int, VALUE)));
 static VALUE make_backtrace _((void));
 
 static void
@@ -3526,7 +3532,7 @@ rb_yield_0(val, self, klass, acheck)
 	if (!node) {
 	    result = Qnil;
 	}
-	else if (nd_type(node) == NODE_CFUNC) {
+	else if (nd_type(node) == NODE_CFUNC || nd_type(node) == NODE_IFUNC) {
 	    if (val == Qundef) val = rb_ary_new2(0);
 	    result = (*node->nd_cfnc)(val, node->nd_tval, self);
 	}
@@ -3745,7 +3751,7 @@ rb_iterate(it_proc, data1, bl_proc, data2)
 {
     int state;
     volatile VALUE retval = Qnil;
-    NODE *node = NEW_CFUNC(bl_proc, data2);
+    NODE *node = NEW_IFUNC(bl_proc, data2);
     VALUE self = ruby_top_self;
 
   iter_retry:
@@ -4417,6 +4423,9 @@ rb_call(klass, recv, mid, argc, argv, scope)
     ID     id = mid;
     struct cache_entry *ent;
 
+    if (!klass) {
+	rb_raise(rb_eNotImpError, "method call on terminated obejct");
+    }
     /* is it in the method cache? */
     ent = cache + EXPR1(klass, mid);
     if (ent->mid == mid && ent->klass == klass) {
@@ -5626,7 +5635,7 @@ rb_f_local_variables()
 }
 
 static VALUE rb_f_catch _((VALUE,VALUE));
-static VALUE rb_f_throw _((int,VALUE*)) NORETURN;
+NORETURN(static VALUE rb_f_throw _((int,VALUE*)));
 
 struct end_proc_data {
     void (*func)();
@@ -6616,7 +6625,7 @@ rb_mod_define_method(argc, argv, mod)
     VALUE mod;
 {
     ID id;
-    VALUE name, body;
+    VALUE body;
 
     if (argc == 1) {
 	id = rb_to_id(argv[0]);
@@ -6635,7 +6644,7 @@ rb_mod_define_method(argc, argv, mod)
     if (RDATA(body)->dmark == (RUBY_DATA_FUNC)bm_mark) {
 	rb_add_method(mod, id, NEW_DMETHOD(method_unbind(body)), NOEX_PUBLIC);
     }
-    else if (RDATA(body)->dmark != (RUBY_DATA_FUNC)blk_mark) {
+    else if (RDATA(body)->dmark == (RUBY_DATA_FUNC)blk_mark) {
 	rb_add_method(mod, id, NEW_BMETHOD(body), NOEX_PUBLIC);
     }
     else {
@@ -7354,6 +7363,7 @@ void
 rb_thread_wait_fd(fd)
     int fd;
 {
+    if (rb_thread_critical) return;
     if (curr_thread == curr_thread->next) return;
     if (curr_thread->status == THREAD_TO_KILL) return;
 
@@ -7367,6 +7377,7 @@ int
 rb_thread_fd_writable(fd)
     int fd;
 {
+    if (rb_thread_critical) return Qtrue;
     if (curr_thread == curr_thread->next) return Qtrue;
     if (curr_thread->status == THREAD_TO_KILL) return Qtrue;
 
@@ -7387,7 +7398,8 @@ rb_thread_wait_for(time)
 {
     double date;
 
-    if (curr_thread == curr_thread->next ||
+    if (rb_thread_critical ||
+	curr_thread == curr_thread->next ||
 	curr_thread->status == THREAD_TO_KILL) {
 	int n;
 #ifndef linux
@@ -7452,7 +7464,8 @@ rb_thread_select(max, read, write, except, timeout)
 	    (double)timeout->tv_sec+(double)timeout->tv_usec*1e-6;
     }
 
-    if (curr_thread == curr_thread->next ||
+    if (rb_thread_critical ||
+	curr_thread == curr_thread->next ||
 	curr_thread->status == THREAD_TO_KILL) {
 #ifndef linux
 	struct timeval tv, *tvp = timeout;
@@ -7518,6 +7531,7 @@ rb_thread_join(thread)
     rb_thread_t th = rb_thread_check(thread);
     enum thread_status last_status = THREAD_RUNNABLE;
 
+    if (rb_thread_critical) rb_thread_deadlock();
     if (!rb_thread_dead(th)) {
 	if (th == curr_thread)
 	    rb_raise(rb_eThreadError, "thread tried to join itself");
@@ -7617,8 +7631,8 @@ rb_thread_kill(thread)
     rb_thread_ready(th);
     th->gid = 0;
     th->status = THREAD_TO_KILL;
-    rb_thread_schedule();
-    return Qnil;		/* not reached */
+    if (!rb_thread_critical) rb_thread_schedule();
+    return thread;
 }
 
 static VALUE
@@ -8023,8 +8037,6 @@ static VALUE
 rb_thread_start(klass, args)
     VALUE klass, args;
 {
-    rb_thread_t th;
-
     if (!rb_block_given_p()) {
 	rb_raise(rb_eThreadError, "must be called with a block");
     }
