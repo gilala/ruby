@@ -34,20 +34,8 @@ enc_nth(str, nth)
     VALUE str;
     int nth;
 {
-    m17n_encoding *enc = rb_m17n_get_encoding(str);
-    if (m17n_mbmaxlen(enc) == 1) return INT2NUM(nth);
-    else {
-	char *p = RSTRING(str)->ptr;
-	char *e = p + nth;
-	int i;
-
-	i = 0;
-	while (p < e) {
-	    p += mbclen(*p);
-	    i++;
-	}
-	return INT2NUM(i);
-    }
+    int i = rb_str_sublen(str, nth);
+    return INT2NUM(i);
 }
 
 extern int ruby_in_compile;
@@ -133,18 +121,17 @@ rb_reg_desc(s, len, re)
     m17n_encoding *enc;
     VALUE str = rb_str_new2("/");
 
-
     enc = re ? rb_m17n_get_encoding(re) : ruby_default_encoding;
     rb_m17n_associate_encoding(str, enc);
     rb_reg_expr_str(str, s, len);
     rb_str_cat2(str, "/");
     if (re) {
 	rb_reg_check(re);
-	if (RREGEXP(re)->ptr->options & RE_OPTION_MULTILINE)
-	    rb_str_cat2(str, "m");
 	/* /p is obsolete; to be removed */
 	if ((RREGEXP(re)->ptr->options & RE_OPTION_POSIXLINE) == RE_OPTION_POSIXLINE)
 	    rb_str_cat2(str, "p");
+	else if (RREGEXP(re)->ptr->options & RE_OPTION_MULTILINE)
+	    rb_str_cat2(str, "m");
 	if (RREGEXP(re)->ptr->options & RE_OPTION_IGNORECASE)
 	    rb_str_cat2(str, "i");
 	if (RREGEXP(re)->ptr->options & RE_OPTION_EXTENDED)
@@ -1123,7 +1110,6 @@ Init_Regexp()
     rb_cMatch  = rb_define_class("MatchData", rb_cObject);
     rb_define_global_const("MatchingData", rb_cMatch);
     rb_undef_method(CLASS_OF(rb_cMatch), "new");
-
     rb_define_method(rb_cMatch, "clone", match_clone, 0);
     rb_define_method(rb_cMatch, "size", match_size, 0);
     rb_define_method(rb_cMatch, "length", match_size, 0);

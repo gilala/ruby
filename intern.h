@@ -303,6 +303,7 @@ struct m17n_encoding *ruby_default_encoding;
 struct m17n_encoding *rb_m17n_get_encoding _((VALUE obj));
 void rb_m17n_associate_encoding _((VALUE obj, struct m17n_encoding* enc));
 void rb_m17n_enc_check _((VALUE str1, VALUE str2, struct m17n_encoding **encp));
+int rb_str_sublen _((VALUE, int));
 VALUE rb_enc_get_encoding _((VALUE obj));
 VALUE rb_enc_set_encoding _((VALUE obj, VALUE encoding));
 VALUE rb_str_new _((const char*, long));

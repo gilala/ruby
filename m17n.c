@@ -579,10 +579,10 @@ utf8_codepoint(p, e, enc)
 
     if (p == e) return 0;
     if (*p < 0x80) return *p;
-    c = *p++;
+    c = *p;
     n = utf8_mbctab[c];
     if (e-p < n) return 0;
-    n--;
+    p++; n--;
     c &= (1<<(6-n))-1;
     while (n--) {
 	c = c << 6 | (*p++ & ((1<<6)-1));
