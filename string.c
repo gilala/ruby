@@ -31,6 +31,118 @@ VALUE rb_cString;
 
 VALUE rb_fs;
 
+<<<<<<< string.c
+static ID id_encoding = 0;
+
+#define ENCODING_INLINE_MAX 127
+#define ENCODING_MASK (FL_USER1|FL_USER2|FL_USER3|FL_USER4|FL_USER5|FL_USER6|FL_USER7)
+#define ENCODING_SHIFT (FL_USHIFT+1)
+#define ENCODING_SET(obj,i) do {\
+    RBASIC(obj)->flags &= ~ENCODING_MASK;\
+    RBASIC(obj)->flags |= i << ENCODING_SHIFT;\
+} while (0)
+#define ENCODING_GET(obj) ((RBASIC(obj)->flags & ENCODING_MASK)>>ENCODING_SHIFT)
+
+void
+rb_m17n_associate_encoding(obj, enc)
+    VALUE obj;
+    m17n_encoding *enc;
+{
+    int i = enc->index;
+
+    if (i < ENCODING_INLINE_MAX) {
+	ENCODING_SET(obj, i);
+	return;
+    }
+    ENCODING_SET(obj, ENCODING_INLINE_MAX);
+    if (!id_encoding) {
+	id_encoding = rb_intern("encoding");
+    }
+    rb_ivar_set(obj, id_encoding, INT2NUM(i));
+    return;
+}
+
+m17n_encoding*
+rb_m17n_get_encoding(obj)
+    VALUE obj;
+{
+    int i = ENCODING_GET(obj);
+
+    if (i == ENCODING_INLINE_MAX) {
+	VALUE iv;
+
+	if (!id_encoding) {
+	    return ruby_default_encoding;
+	}
+	iv = rb_ivar_get(obj, id_encoding);
+	i = NUM2INT(iv);
+    }
+    return m17n_index_to_encoding(i);
+}
+
+static int
+enc_memcmp(p1, p2, len, enc)
+    char *p1, *p2;
+    long len;
+    m17n_encoding *enc;
+{
+    if (!ruby_ignorecase) {
+	return memcmp(p1, p2, len);
+    }
+    return m17n_memcmp(p1, p2, len, enc);
+}
+
+void
+rb_m17n_enc_check(str1, str2, enc)
+    VALUE str1, str2;
+    m17n_encoding **enc;
+{
+    m17n_encoding *enc2;
+
+    *enc = rb_m17n_get_encoding(str1);
+    enc2 = rb_m17n_get_encoding(str2);
+
+    if (*enc != enc2) {
+	rb_raise(rb_eArgError, "character encodings differ");
+    }
+}
+
+VALUE
+rb_enc_get_encoding(str)
+    VALUE str;
+{
+    m17n_encoding *enc = rb_m17n_get_encoding(str);
+    return rb_str_new2(enc->name);
+}
+
+VALUE
+rb_enc_set_encoding(obj, encoding)
+    VALUE obj, encoding;
+{
+    m17n_encoding *enc = m17n_find_encoding(STR2CSTR(encoding));
+
+    if (!enc) {
+	rb_raise(rb_eArgError, "undefined encoding `%s'", STR2CSTR(encoding));
+    }
+    if (OBJ_FROZEN(obj)) {
+	rb_error_frozen("object's encoding");
+    }
+    rb_m17n_associate_encoding(obj, enc);
+
+    return encoding;
+}
+
+static void
+rb_str_copy_encoding(str1, str2)
+    VALUE str1, str2;
+{
+    rb_m17n_associate_encoding(str1, rb_m17n_get_encoding(str2));
+}
+
+#define str_ptr(str) RSTRING(str)->ptr
+#define str_len(str) RSTRING(str)->len
+#define str_end(str) (str_ptr(str)+str_len(str))
+
 VALUE
 rb_str_new(ptr, len)
     const char *ptr;
@@ -549,8 +661,12 @@ rb_str_cmp(str1, str2)
     long len;
     int retval;
 
-    len = lesser(RSTRING(str1)->len, RSTRING(str2)->len);
-    retval = rb_memcmp(RSTRING(str1)->ptr, RSTRING(str2)->ptr, len);
+    m17n_encoding *enc;
+
+    rb_m17n_enc_check(str1, str2, &enc);
+    len = lesser(str_len(str1), str_len(str2));
+
+    retval = enc_memcmp(str_ptr(str1), str_ptr(str2), len, enc);
     if (retval == 0) {
 	if (RSTRING(str1)->len == RSTRING(str2)->len) return 0;
 	if (RSTRING(str1)->len > RSTRING(str2)->len) return 1;
@@ -991,11 +1107,33 @@ rb_str_aset(str, indx, val)
 	    rb_raise(rb_eIndexError, "index %d out of string", idx);
 	}
 	if (FIXNUM_P(val)) {
-	    if (RSTRING(str)->len == idx) {
-		RSTRING(str)->len += 1;
-		REALLOC_N(RSTRING(str)->ptr, char, RSTRING(str)->len);
+<<<<<<< string.c
+	    unsigned int c = NUM2UINT(val);
+	    int clen = m17n_codelen(enc, c);
+	    char *p = str_nth(enc, str_ptr(str), str_end(str), idx);
+	    int plen;
+
+	    if (!p) goto bad_idx;
+	    if (p == str_end(str)) plen = 0;
+	    else {
+		plen = m17n_mbcspan(enc, p, str_end(str));
+		if (plen == 0) {
+		    rb_raise(rb_eArgError, "invalid mbstring sequence at %d", idx);
+		}
 	    }
-	    RSTRING(str)->ptr[idx] = NUM2INT(val) & 0xff;
+
+	    if (plen != clen) {
+		long offset = p - str_ptr(str);
+		char *p0 = str_ptr(str);
+
+		str_ptr(str) = ALLOC_N(char, str_len(str) + clen - plen);
+		memcpy(str_ptr(str), p0, offset);
+		p = str_ptr(str) + offset;
+		memcpy(p + clen, p0 + offset + plen, str_len(str) - offset);
+		str_len(str) += clen - plen;
+		str_ptr(str)[str_len(str)] = '\0';
+	    }
+	    m17n_mbcput(enc, c, p);
 	}
 	else {
 	    if (TYPE(val) != T_STRING) val = rb_str_to_str(val);
@@ -1393,41 +1531,48 @@ rb_f_gsub(argc, argv)
 }
 
 static VALUE
-rb_str_reverse_bang(str)
-    VALUE str;
-{
-    char *s, *e;
-    char c;
-
-    s = RSTRING(str)->ptr;
-    e = s + RSTRING(str)->len - 1;
-    while (s < e) {
-	c = *s;
-	*s++ = *e;
-	*e-- = c;
-    }
-
-    return str;
-}
-
-static VALUE
 rb_str_reverse(str)
     VALUE str;
 {
+    m17n_encoding *enc = rb_m17n_get_encoding(str);
     VALUE obj;
     char *s, *e, *p;
 
-    if (RSTRING(str)->len <= 1) return rb_str_dup(str);
+    if (str_len(str) <= 1) return rb_str_dup(str);
 
-    obj = rb_str_new(0, RSTRING(str)->len);
-    s = RSTRING(str)->ptr; e = s + RSTRING(str)->len - 1;
-    p = RSTRING(obj)->ptr;
+    obj = rb_str_new(0, str_len(str));
+    s = str_ptr(str);
+    e = str_end(str);
+    p = str_end(obj);
 
-    while (e >= s) {
-	*p++ = *e--;
+    if (m17n_mbmaxlen(enc) == 1) {
+	while (s < e) {
+	    *--p = *s++;
+	}
     }
+    else {
+	while (s < e) {
+	    int c = m17n_codepoint(enc, s, e);
+	    int clen = m17n_codelen(enc, c);
+
+	    p -= clen;
+	    m17n_mbcput(enc, c, p);
+	    s += clen;
+	}
+    }
+    rb_str_copy_encoding(obj, str);
 
     return obj;
+}
+
+static VALUE
+rb_str_reverse_bang(str)
+    VALUE str;
+{
+    rb_str_modify(str);
+    rb_str_become(str, rb_str_reverse(str));
+
+    return str;
 }
 
 static VALUE
@@ -1939,6 +2084,12 @@ tr_setup_table(str, table, init)
     if (RSTRING(str)->len > 1 && RSTRING(str)->ptr[0] == '^') {
 	cflag = 1;
 	tr.p++;
+	if (!*ctablep) *ctablep = rb_hash_new();
+	table = *ctablep;
+    }
+    else {
+	if (!*tablep) *tablep = rb_hash_new();
+	table = *tablep;
     }
 
     if (init) {
@@ -2171,7 +2322,9 @@ rb_str_split_m(argc, argv, str)
 	if (char_sep == ' ') {	/* AWK emulation */
 	    int skip = 1;
 
-	    for (end = beg = 0; ptr<eptr; ptr++) {
+	    while (ptr < eptr) {
+		c = m17n_codepoint(enc, ptr, eptr);
+
 		if (skip) {
 		    if (ISSPACE(*ptr)) {
 			beg++;

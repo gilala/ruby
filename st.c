@@ -122,8 +122,7 @@ new_size(size)
 #else
     for (i = 0, newsize = MINSIZE;
 	 i < sizeof(primes)/sizeof(primes[0]);
-	 i++, newsize <<= 1)
-    {
+	 i++, newsize <<= 1) {
 	if (newsize > size) return primes[i];
     }
     /* Ran out of polynomials */

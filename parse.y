@@ -314,7 +314,7 @@ stmt		: block_call
 
 			if (cur_mid || in_single)
 			    yyerror("alias within method");
-			sprintf(buf, "$%c", $3->nd_nth);
+			sprintf(buf, "$%c", (int)$3->nd_nth);
 		        $$ = NEW_VALIAS($2, rb_intern(buf));
 		    }
 		| kALIAS tGVAR tNTH_REF
@@ -1858,7 +1858,7 @@ none		: /* none */
 /* As in Harbison and Steele.  */
 # define SIGN_EXTEND_CHAR(c) ((((unsigned char)(c)) ^ 128) - 128)
 #endif
-#define is_identchar(c) (SIGN_EXTEND_CHAR(c)!=-1&&(ISALNUM(c) || (c) == '_' || ismbchar(c)))
+#define is_identchar(c) (SIGN_EXTEND_CHAR(c)!=-1&&(m17n_isalnum(enc,(c)) || (c) == '_' || ismbchar(c)))
 
 static char *tokenbuf = NULL;
 static int   tokidx, toksiz = 0;
@@ -2574,7 +2574,7 @@ parse_quotedwords(term, paren)
     strstart = ruby_sourceline;
     newtok();
 
-    while (c = nextc(),ISSPACE(c))
+    while (c = nextc(),m17n_isspace(enc, c))
 	;		/* skip preceding spaces */
     pushback(c);
     while ((c = nextc()) != term || nest > 0) {
@@ -2604,12 +2604,12 @@ parse_quotedwords(term, paren)
 		    tokadd(c);
 		    continue;
 		}
-		if (!ISSPACE(c))
+		if (!m17n_isspace(enc, c))
 		    tokadd('\\');
 		break;
 	    }
 	}
-	else if (ISSPACE(c)) {
+	else if (m17n_isspace(enc, c)) {
 	    NODE *str;
 
 	    tokfix();
@@ -2617,7 +2617,7 @@ parse_quotedwords(term, paren)
 	    newtok();
 	    if (!qwords) qwords = NEW_LIST(str);
 	    else list_append(qwords, str);
-	    while (c = nextc(),ISSPACE(c))
+	    while (c = nextc(),m17n_isspace(enc, c))
 		;		/* skip continuous spaces */
 	    pushback(c);
 	    continue;
@@ -2850,7 +2850,7 @@ yylex()
 	    return tOP_ASGN;
 	}
 	pushback(c);
-	if (lex_state == EXPR_ARG && space_seen && !ISSPACE(c)){
+	if (lex_state == EXPR_ARG && space_seen && !m17n_isspace(enc, c)){
 	    rb_warning("`*' interpreted as argument prefix");
 	    c = tSTAR;
 	}
@@ -2877,7 +2877,7 @@ yylex()
       case '=':
 	if (lex_p == lex_pbeg + 1) {
 	    /* skip embedded rd document */
-	    if (strncmp(lex_p, "begin", 5) == 0 && ISSPACE(lex_p[5])) {
+	    if (strncmp(lex_p, "begin", 5) == 0 && m17n_isspace(enc, lex_p[5])) {
 		for (;;) {
 		    lex_p = lex_pend;
 		    c = nextc();
@@ -2887,7 +2887,7 @@ yylex()
 		    }
 		    if (c != '=') continue;
 		    if (strncmp(lex_p, "end", 3) == 0 &&
-			(lex_p + 3 == lex_pend || ISSPACE(lex_p[3]))) {
+			(lex_p + 3 == lex_pend || m17n_isspace(enc, lex_p[3]))) {
 			break;
 		    }
 		}
@@ -2925,7 +2925,7 @@ yylex()
 		indent = 1;
 		c2 = nextc();
 	    }
-	    if (!ISSPACE(c2) && (strchr("\"'`", c2) || is_identchar(c2))) {
+	    if (!m17n_isspace(enc, c2) && (strchr("\"'`", c2) || is_identchar(c2))) {
 		return here_document(c2, indent);
 	    }
 	    pushback(c2);
@@ -2985,7 +2985,7 @@ yylex()
 	    rb_compile_error("incomplete character syntax");
 	    return 0;
 	}
-	if (lex_state == EXPR_ARG && ISSPACE(c)){
+	if (lex_state == EXPR_ARG && m17n_isspace(enc, c)){
 	    pushback(c);
 	    lex_state = EXPR_BEG;
 	    return '?';
@@ -3014,7 +3014,7 @@ yylex()
 	    return tOP_ASGN;
 	}
 	pushback(c);
-	if (lex_state == EXPR_ARG && space_seen && !ISSPACE(c)){
+	if (lex_state == EXPR_ARG && space_seen && !m17n_isspace(enc, c)){
 	    rb_warning("`&' interpreted as argument prefix");
 	    c = tAMPER;
 	}
@@ -3059,11 +3059,11 @@ yylex()
 	    return tOP_ASGN;
 	}
 	if (lex_state == EXPR_BEG || lex_state == EXPR_MID ||
-	    (lex_state == EXPR_ARG && space_seen && !ISSPACE(c))) {
+	    (lex_state == EXPR_ARG && space_seen && !m17n_isspace(enc, c))) {
 	    if (lex_state == EXPR_ARG) arg_ambiguous();
 	    lex_state = EXPR_BEG;
 	    pushback(c);
-	    if (ISDIGIT(c)) {
+	    if (m17n_isdigit(enc, c)) {
 		c = '+';
 		goto start_num;
 	    }
@@ -3088,11 +3088,11 @@ yylex()
 	    return tOP_ASGN;
 	}
 	if (lex_state == EXPR_BEG || lex_state == EXPR_MID ||
-	    (lex_state == EXPR_ARG && space_seen && !ISSPACE(c))) {
+	    (lex_state == EXPR_ARG && space_seen && !m17n_isspace(enc, c))) {
 	    if (lex_state == EXPR_ARG) arg_ambiguous();
 	    lex_state = EXPR_BEG;
 	    pushback(c);
-	    if (ISDIGIT(c)) {
+	    if (m17n_isdigit(enc, c)) {
 		c = '-';
 		goto start_num;
 	    }
@@ -3112,7 +3112,7 @@ yylex()
 	    return tDOT2;
 	}
 	pushback(c);
-	if (!ISDIGIT(c)) {
+	if (!m17n_isdigit(enc, c)) {
 	    lex_state = EXPR_DOT;
 	    return '.';
 	}
@@ -3142,7 +3142,7 @@ yylex()
 			    seen_uc = 1;
 			    continue;
 			}
-			if (!ISXDIGIT(c)) break;
+			if (!m17n_isxdigit(enc, c)) break;
 			seen_uc = 0;
 			tokadd(c);
 		    } while (c = nextc());
@@ -3220,7 +3220,7 @@ yylex()
 		    }
 		    else {
 			int c0 = nextc();
-			if (!ISDIGIT(c0)) {
+			if (!m17n_isdigit(enc, c0)) {
 			    pushback(c0);
 			    goto decode_num;
 			}
@@ -3303,7 +3303,7 @@ yylex()
 	    return tCOLON2;
 	}
 	pushback(c);
-	if (lex_state == EXPR_END || lex_state == EXPR_PAREN || ISSPACE(c)) {
+	if (lex_state == EXPR_END || lex_state == EXPR_PAREN || m17n_isspace(enc, c)) {
 	    lex_state = EXPR_BEG;
 	    return ':';
 	}
@@ -3321,7 +3321,7 @@ yylex()
 	}
 	pushback(c);
 	if (lex_state == EXPR_ARG && space_seen) {
-	    if (!ISSPACE(c)) {
+	    if (!m17n_isspace(enc, c)) {
 		arg_ambiguous();
 		return parse_regx('/', '/');
 	    }
@@ -3410,7 +3410,7 @@ yylex()
 
 	    c = nextc();
 	  quotation:
-	    if (!ISALNUM(c)) {
+	    if (!m17n_isalnum(enc, c)) {
 		term = c;
 		c = 'Q';
 	    }
@@ -3453,7 +3453,7 @@ yylex()
 	    yylval.id = '%';
 	    return tOP_ASGN;
 	}
-	if (lex_state == EXPR_ARG && space_seen && !ISSPACE(c)) {
+	if (lex_state == EXPR_ARG && space_seen && !m17n_isspace(enc, c)) {
 	    goto quotation;
 	}
 	lex_state = EXPR_BEG;
@@ -3520,7 +3520,7 @@ yylex()
 	  case '4': case '5': case '6':
 	  case '7': case '8': case '9':
 	    tokadd('$');
-	    while (ISDIGIT(c)) {
+	    while (m17n_isdigit(enc, c)) {
 		tokadd(c);
 		c = nextc();
 	    }
@@ -3549,7 +3549,7 @@ yylex()
 	    tokadd('@');
 	    c = nextc();
 	}
-	if (ISDIGIT(c)) {
+	if (m17n_isdigit(enc, c)) {
 	    rb_compile_error("`@%c' is not a valid instance variable name", c);
 	}
 	if (!is_identchar(c)) {
@@ -3559,7 +3559,7 @@ yylex()
 	break;
 
       default:
-	if (!is_identchar(c) || ISDIGIT(c)) {
+	if (!is_identchar(c) || m17n_isdigit(enc, c)) {
 	    rb_compile_error("Invalid char `\\%03o' in expression", c);
 	    goto retry;
 	}
@@ -3640,7 +3640,7 @@ yylex()
 			pushback(c);
 		    }
 		}
-		if (result == 0 && ISUPPER(tok()[0])) {
+		if (result == 0 && m17n_isupper(enc, tok()[0])) {
 		    result = tCONSTANT;
 		}
 		else {
@@ -3703,7 +3703,7 @@ str_extend(list, term)
 	  case '1': case '2': case '3':
 	  case '4': case '5': case '6':
 	  case '7': case '8': case '9':
-	    while (ISDIGIT(c)) {
+	    while (m17n_isdigit(enc, c)) {
 		tokadd(c);
 		c = nextc();
 	    }
@@ -4860,7 +4860,7 @@ rb_intern(name)
 	    id |= ID_INSTANCE;
 	break;
       default:
-	if (name[0] != '_' && !ISALPHA(name[0]) && !ismbchar(name[0])) {
+	if (name[0] != '_' && !m17n_isalpha(enc, name[0]) && !ismbchar(name[0])) {
 	    /* operator */
 	    int i;
 
@@ -4887,7 +4887,7 @@ rb_intern(name)
 	    }
 	    id = ID_ATTRSET;
 	}
-	else if (ISUPPER(name[0])) {
+	else if (m17n_isupper(enc, name[0])) {
 	    id = ID_CONST;
         }
 	else {
