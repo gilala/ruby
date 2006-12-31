@@ -259,6 +259,11 @@ Tue Nov 28 17:25:11 2006  Yukihiro Matsumoto  <matz@ruby-lang.org>
 	  rb_ary_clear, rb_ary_fill, rb_ary_uniq_bang, rb_ary_compact,
 	  rb_ary_shuffle): add iteration check.
 
+Tue Nov 28 17:23:50 2006  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* eval.c (error_line): should not call rb_class2name() for
+	  non-class object.
+
 Mon Nov 27 09:00:15 2006  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* string.c (rb_str_ord): typo fixed.  reported from Kornelius

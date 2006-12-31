@@ -1161,6 +1161,11 @@ error_line(struct FRAME *frame, NODE *node)
 		    rec = "true"; break;
 		  case T_FALSE:
 		    rec = "false"; break;
+		  default:
+		    if (FL_TEST(oklass, FL_SINGLETON)) {
+			oklass = rb_inspect(rb_iv_get(oklass, "__attached__"));
+			rec = RSTRING_PTR(oklass);
+		    }
 		}
 		if (rec) {
 		    return rb_sprintf("%s:%d:in `%s.%s'", file, line, rec,
@@ -1168,9 +1173,6 @@ error_line(struct FRAME *frame, NODE *node)
 		}
 		if (TYPE(oklass) == T_ICLASS) {
 		    oklass = RBASIC(oklass)->klass;
-		}
-		else if (FL_TEST(oklass, FL_SINGLETON)) {
-		    oklass = rb_iv_get(oklass, "__attached__");
 		}
 		return rb_sprintf("%s:%d:in `%s#%s'", file, line,
 				  rb_class2name(oklass),
