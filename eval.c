@@ -7648,7 +7648,7 @@ rb_f_local_variables(void)
     return ary;
 }
 
-static VALUE rb_f_catch(VALUE,VALUE);
+static VALUE rb_f_catch(int,VALUE*);
 NORETURN(static VALUE rb_f_throw(int,VALUE*));
 
 struct end_proc_data {
@@ -7911,7 +7911,7 @@ Init_eval(void)
 
     rb_define_global_function("at_exit", rb_f_at_exit, 0);
 
-    rb_define_global_function("catch", rb_f_catch, 1);
+    rb_define_global_function("catch", rb_f_catch, -1);
     rb_define_global_function("throw", rb_f_throw, -1);
     rb_define_global_function("global_variables", rb_f_global_variables, 0); /* in variable.c */
     rb_define_global_function("local_variables", rb_f_local_variables, 0);
@@ -13090,7 +13090,8 @@ Init_Thread(void)
 
 /*
  *  call-seq:
- *     catch(symbol) {| | block }  > obj
+ *     catch(symbol) { block }  => obj
+ *     catch() {|tag| block }   => obj
  *  
  *  +catch+ executes its block. If a +throw+ is
  *  executed, Ruby searches up its stack for a +catch+ block
@@ -13101,6 +13102,8 @@ Init_Thread(void)
  *  the value of +catch+ is the value of the last expression
  *  evaluated. +catch+ expressions may be nested, and the
  *  +throw+ call need not be in lexical scope.
+ *  If symbol for tag is ommited +catch+ generates a new tag object
+ *  and passes it as a block parameter.
  *     
  *     def routine(n)
  *       puts n
@@ -13120,12 +13123,16 @@ Init_Thread(void)
  */
 
 static VALUE
-rb_f_catch(VALUE dmy, VALUE tag)
+rb_f_catch(int argc, VALUE *argv)
 {
+    VALUE tag;
     int state;
     VALUE val = Qnil;		/* OK */
 
-    tag = ID2SYM(rb_to_id(tag));
+    rb_scan_args(argc, argv, "01", &tag);
+    if (argc == 0) {
+	tag = rb_obj_alloc(rb_cObject);
+    }
     PUSH_TAG(tag);
     if ((state = EXEC_TAG()) == 0) {
 	val = rb_yield_0(tag, 0, 0, 0);
@@ -13141,11 +13148,20 @@ rb_f_catch(VALUE dmy, VALUE tag)
 }
 
 VALUE
+rb_catch_obj(VALUE tag, VALUE (*func)(ANYARGS), VALUE data)
+{
+    return rb_block_call(Qnil, rb_intern("catch"), 1, &tag, func, data);
+}
+
+VALUE
 rb_catch(const char *tag, VALUE (*func)(ANYARGS), VALUE data)
 {
-    VALUE vtag = ID2SYM(rb_intern(tag));
+    VALUE vtag;
 
-    return rb_block_call(Qnil, rb_intern("catch"), 1, &vtag, func, data);
+    if (!tag) {
+	return rb_block_call(Qnil, rb_intern("catch"), 0, 0, func, data);
+    }
+    return rb_catch_obj(ID2SYM(rb_intern(tag)), func, data);
 }
 
 /*
@@ -13167,7 +13183,6 @@ rb_f_throw(int argc, VALUE *argv)
     struct tag *tt = prot_tag;
 
     rb_scan_args(argc, argv, "11", &tag, &value);
-    tag = ID2SYM(rb_to_id(tag));
 
     while (tt) {
 	if (tt->tag == tag) {
@@ -13198,6 +13213,16 @@ rb_throw(const char *tag, VALUE val)
     VALUE argv[2];
 
     argv[0] = ID2SYM(rb_intern(tag));
+    argv[1] = val;
+    rb_f_throw(2, argv);
+}
+
+void
+rb_throw_obj(VALUE tag, VALUE val)
+{
+    VALUE argv[2];
+
+    argv[0] = tag;
     argv[1] = val;
     rb_f_throw(2, argv);
 }

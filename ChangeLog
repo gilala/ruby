@@ -84,6 +84,21 @@ Mon Dec 18 08:36:29 2006  Yukihiro Matsumoto  <matz@ruby-lang.org>
 	* lib/cgi.rb (CGI::Cookie::initialize): Array(string) no longer
 	  works.  [ruby-core:09738]
 
+Fri Dec 15 23:47:26 2006  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* eval.c (rb_f_catch): generate new tag object if no argument is
+	  given.
+
+	* eval.c (rb_catch): call #catch without arguments if tag string
+	  is NULL.
+
+	* eval.c (rb_f_throw): allow throwing non-symbol object.
+
+	* eval.c (rb_catch_obj): new function to wait throw with arbitrary
+	  object. 
+
+	* eval.c (rb_throw_obj): new function to throw arbitrary object.
+
 Fri Dec 15 00:19:53 2006  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* win32/Makefile.sub (COMPILE_RULES): latter rule has higher priority.
