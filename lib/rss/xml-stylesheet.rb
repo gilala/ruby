@@ -34,7 +34,7 @@ module RSS
 
     attr_accessor(*ATTRIBUTES)
     attr_accessor(:do_validate)
-    def initialize(*attrs)
+    def initialize(attrs={})
       @do_validate = true
       ATTRIBUTES.each do |attr|
         __send__("#{attr}=", nil)

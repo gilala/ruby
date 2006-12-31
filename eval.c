@@ -2617,31 +2617,16 @@ call_trace_func(rb_event_t event, NODE *node, VALUE self, ID id, VALUE klass /* 
 }
 
 static VALUE
-splat(VALUE v, int strict)
+splat(VALUE v)
 {
     VALUE tmp;
 
     if (v == Qundef) return rb_ary_new2(0);
     tmp = rb_check_convert_type(v, T_ARRAY, "Array", "to_splat");
     if (NIL_P(tmp)) {
-	if (strict) {
-	    rb_raise(rb_eTypeError, "failed to splat");
-	}
 	return rb_ary_new3(1, v);
     }
     return tmp;
-}
-
-static VALUE
-svalue_to_avalue(VALUE v)
-{
-    return splat(v, Qfalse);
-}
-
-static VALUE
-splat_value(VALUE v)
-{
-    return splat(v, Qtrue);
 }
 
 static VALUE
@@ -2730,7 +2715,7 @@ when_check(NODE *tag, VALUE val, VALUE self)
       case NODE_SPLAT:
 	tag = tag->nd_head;
       splat:
-	elm = splat_value(rb_eval(self, tag));
+	elm = splat(rb_eval(self, tag));
 	for (i=0; i<RARRAY_LEN(elm); i++) {
 	    if (when_cond(val, RARRAY_PTR(elm)[i])) {
 		return Qtrue;
@@ -3004,7 +2989,7 @@ rb_eval(VALUE self, NODE *n)
 	break;
 
       case NODE_SPLAT:
-	result = splat_value(rb_eval(self, node->nd_head));
+	result = splat(rb_eval(self, node->nd_head));
 	break;
 
       case NODE_TO_ARY:
@@ -3165,7 +3150,7 @@ rb_eval(VALUE self, NODE *n)
       case NODE_ARGSCAT:
 	{
 	    VALUE args = rb_eval(self, node->nd_head);
-	    result = rb_ary_concat(args, splat_value(rb_eval(self, node->nd_body)));
+	    result = rb_ary_concat(args, splat(rb_eval(self, node->nd_body)));
 	}
 	break;
 
@@ -4781,7 +4766,7 @@ rb_yield_0(VALUE val, VALUE self, VALUE klass /* OK */, int flags)
 		goto block_var;
 	    }
 	    else if (nd_type(var) == NODE_ARGS) {
-		if (!(flags & YIELD_VALUES)) val = svalue_to_avalue(val);
+		if (!(flags & YIELD_VALUES)) val = splat(val);
 		formal_assign(self, var, RARRAY_LEN(val), RARRAY_PTR(val), 0);
 	    }
 	    else if (nd_type(var) == NODE_BLOCK) {
@@ -4843,7 +4828,7 @@ rb_yield_0(VALUE val, VALUE self, VALUE klass /* OK */, int flags)
       redo:
 	if (nd_type(node) == NODE_CFUNC || nd_type(node) == NODE_IFUNC) {
 	    if (node->nd_state == YIELD_FUNC_AVALUE) {
-		val = svalue_to_avalue(val);
+		val = splat(val);
 	    }
 	    else {
 		if (val == Qundef && node->nd_state != YIELD_FUNC_SVALUE)
@@ -5525,7 +5510,7 @@ method_missing(VALUE obj, ID id, int argc, const VALUE *argv,
 	argc = -argc;
 	n = argc / 256 - 1;
 	argc %= 256;
-	tmp = svalue_to_avalue(argv[argc]);
+	tmp = splat(argv[argc]);
 	nargv = ALLOCA_N(VALUE, argc + RARRAY_LEN(tmp) + n + 1);
 	MEMCPY(nargv+1, argv, VALUE, argc);
 	MEMCPY(nargv+1+argc, RARRAY_PTR(tmp), VALUE, RARRAY_LEN(tmp));
@@ -5745,7 +5730,7 @@ rb_call0(VALUE klass, VALUE recv, ID id, ID oid,
 	argc = -argc;
 	n = argc / 256 - 1;
 	argc %= 256;
-	tmp = svalue_to_avalue(argv[argc]);
+	tmp = splat(argv[argc]);
 	nargv = TMP_ALLOC(argc + RARRAY_LEN(tmp) + n);
 	MEMCPY(nargv, argv, VALUE, argc);
 	MEMCPY(nargv+argc, RARRAY_PTR(tmp), VALUE, RARRAY_LEN(tmp));
@@ -9427,7 +9412,7 @@ bmcall(VALUE args, VALUE method)
     volatile VALUE a;
     VALUE ret;
 
-    a = svalue_to_avalue(args);
+    a = splat(args);
     ret = rb_method_call(RARRAY_LEN(a), RARRAY_PTR(a), method);
     a = Qnil; /* prevent tail call */
     return ret;
@@ -9573,14 +9558,14 @@ rb_mod_define_method(int argc, VALUE *argv, VALUE mod)
 	rb_raise(rb_eTypeError, "wrong argument type (expected Proc/Method)");
     }
 
-    if (VIS_TEST(VIS_PRIVATE)) {
-	noex = NOEX_PRIVATE;
-    }
-    else if (VIS_TEST(VIS_PROTECTED)) {
-	noex = NOEX_PROTECTED;
-    }
-    else {
-	noex = NOEX_PUBLIC;
+    noex = NOEX_PUBLIC;
+    if (ruby_cbase == mod) {
+	if (VIS_TEST(VIS_PRIVATE)) {
+	    noex = NOEX_PRIVATE;
+	}
+	else if (VIS_TEST(VIS_PROTECTED)) {
+	    noex = NOEX_PROTECTED;
+	}
     }
     rb_add_method(mod, id, node, noex);
     return body;

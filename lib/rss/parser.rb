@@ -283,7 +283,7 @@ module RSS
       if name == "xml-stylesheet"
         params = parse_pi_content(content)
         if params.has_key?("href")
-          @xml_stylesheets << XMLStyleSheet.new(*params)
+          @xml_stylesheets << XMLStyleSheet.new(params)
         end
       end
     end

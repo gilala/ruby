@@ -145,7 +145,7 @@ module RSS
         rss ||= ::RSS::RDF.new()
         xss_strs = []
         attrs_ary.each do |attrs|
-          xss = ::RSS::XMLStyleSheet.new(*attrs)
+          xss = ::RSS::XMLStyleSheet.new(attrs)
           xss_strs.push(xss.to_s)
           rss.xml_stylesheets.push(xss)
         end
