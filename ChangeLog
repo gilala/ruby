@@ -1,3 +1,8 @@
+Wed Jan  3 12:45:23 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* ext/nkf/nkf-utf8/nkf.c (reinit): nkf small fix to allow turn off
+	  NUMCHAR_OPTION.
+
 Wed Jan  3 11:36:51 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* io.c (ruby_dup): start GC on ENOMEM as well.

@@ -5700,6 +5700,8 @@ void reinit(void)
 #ifdef INPUT_OPTION
     cap_f = FALSE;
     url_f = FALSE;
+#endif
+#ifdef NUMCHAR_OPTION
     numchar_f = FALSE;
 #endif
 #ifdef CHECK_OPTION
