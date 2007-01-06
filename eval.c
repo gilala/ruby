@@ -3500,12 +3500,12 @@ rb_eval(VALUE self, NODE *n)
 	    rb_raise(rb_eTypeError, "no class/module to define class variable");
 	}
 	result = rb_eval(self, node->nd_value);
-	rb_cvar_set(cvar_cbase(), node->nd_vid, result, Qtrue);
+	rb_cvar_set(cvar_cbase(), node->nd_vid, result);
 	break;
 
       case NODE_CVASGN:
 	result = rb_eval(self, node->nd_value);
-	rb_cvar_set(cvar_cbase(), node->nd_vid, result, Qfalse);
+	rb_cvar_set(cvar_cbase(), node->nd_vid, result);
 	break;
 
       case NODE_LVAR:
@@ -5072,11 +5072,11 @@ assign(VALUE self, NODE *lhs, VALUE val, int pcall)
 	if (RTEST(ruby_verbose) && FL_TEST(ruby_cbase, FL_SINGLETON)) {
 	    rb_warn("declaring singleton class variable");
 	}
-	rb_cvar_set(cvar_cbase(), lhs->nd_vid, val, Qtrue);
+	rb_cvar_set(cvar_cbase(), lhs->nd_vid, val);
 	break;
 
       case NODE_CVASGN:
-	rb_cvar_set(cvar_cbase(), lhs->nd_vid, val, Qfalse);
+	rb_cvar_set(cvar_cbase(), lhs->nd_vid, val);
 	break;
 
       case NODE_MASGN:

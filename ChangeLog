@@ -2,6 +2,10 @@ Sat Jan  6 11:50:33 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* io.c (argf_read): fix wrong replacement.  [ruby-dev:30070]
 
+Thu Jan  4 16:24:15 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* variable.c (rb_cvar_set): remove warn argument.
+
 Wed Jan  3 18:49:15 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* io.c (rb_io_getline): lineno update condition was wrong.
