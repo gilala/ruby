@@ -1858,18 +1858,9 @@ cvar_cbase(int warn)
 	    rb_raise(rb_eTypeError, "no class variables available");
 	}
     }
-<<<<<<< patched
     return ruby_cbase;
 }
 
-=======
-    if (NIL_P(cref->nd_clss)) {
-	rb_raise(rb_eTypeError, "no class variables available");
-    }
-    return cref->nd_clss;
-}
-
->>>>>>> current
 /*
  *  call-seq:
  *     Module.nesting    => array
