@@ -1,3 +1,11 @@
+Sat Jan  6 18:46:34 2007  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* io.c (rb_io_getline_fast, rb_io_getline): increase lineno
+	  when met the delimiter or EOF.  fixed: [ruby-dev:30081]
+
+	* io.c (prepare_getline_args, rb_io_getline_1): split
+	  preparation of arguments and reading.  [ruby-dev:30085]
+
 Sat Jan  6 11:50:33 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* io.c (argf_read): fix wrong replacement.  [ruby-dev:30070]
