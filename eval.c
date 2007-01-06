@@ -1845,22 +1845,31 @@ ev_const_get(ID id, VALUE self)
 }
 
 static VALUE
-cvar_cbase(void)
+cvar_cbase(int warn)
 {
-    NODE *cref = ruby_cref;
-
-    while (cref && cref->nd_next && (NIL_P(cref->nd_clss) || FL_TEST(cref->nd_clss, FL_SINGLETON))) {
-	cref = cref->nd_next;
-	if (!cref->nd_next) {
-	    rb_warn("class variable access from toplevel singleton method");
+    if (ruby_frame && ruby_frame->this_class) {
+	return ruby_frame->this_class;
+    }
+    if (warn) {
+	if (!ruby_cref->nd_next) {
+	    rb_warn("class variable access from toplevel");
+	}
+	if (!ruby_cbase) {
+	    rb_raise(rb_eTypeError, "no class variables available");
 	}
     }
+<<<<<<< patched
+    return ruby_cbase;
+}
+
+=======
     if (NIL_P(cref->nd_clss)) {
 	rb_raise(rb_eTypeError, "no class variables available");
     }
     return cref->nd_clss;
 }
 
+>>>>>>> current
 /*
  *  call-seq:
  *     Module.nesting    => array
@@ -2355,7 +2364,7 @@ is_defined(VALUE self, NODE *node /* OK */, char *buf, int noeval)
 	break;
 
       case NODE_CVAR:
-	if (rb_cvar_defined(cvar_cbase(), node->nd_vid)) {
+	if (rb_cvar_defined(cvar_cbase(Qfalse), node->nd_vid)) {
 	    return "class variable";
 	}
 	break;
@@ -3496,16 +3505,9 @@ rb_eval(VALUE self, NODE *n)
 	break;
 
       case NODE_CVDECL:
-	if (NIL_P(ruby_cbase)) {
-	    rb_raise(rb_eTypeError, "no class/module to define class variable");
-	}
-	result = rb_eval(self, node->nd_value);
-	rb_cvar_set(cvar_cbase(), node->nd_vid, result);
-	break;
-
       case NODE_CVASGN:
 	result = rb_eval(self, node->nd_value);
-	rb_cvar_set(cvar_cbase(), node->nd_vid, result);
+	rb_cvar_set(cvar_cbase(Qtrue), node->nd_vid, result);
 	break;
 
       case NODE_LVAR:
@@ -3532,7 +3534,7 @@ rb_eval(VALUE self, NODE *n)
 	break;
 
       case NODE_CVAR:
-	result = rb_cvar_get(cvar_cbase(), node->nd_vid);
+	result = rb_cvar_get(cvar_cbase(Qtrue), node->nd_vid);
 	break;
 
       case NODE_BLOCK_ARG:
@@ -5069,14 +5071,8 @@ assign(VALUE self, NODE *lhs, VALUE val, int pcall)
 	break;
 
       case NODE_CVDECL:
-	if (RTEST(ruby_verbose) && FL_TEST(ruby_cbase, FL_SINGLETON)) {
-	    rb_warn("declaring singleton class variable");
-	}
-	rb_cvar_set(cvar_cbase(), lhs->nd_vid, val);
-	break;
-
       case NODE_CVASGN:
-	rb_cvar_set(cvar_cbase(), lhs->nd_vid, val);
+	rb_cvar_set(cvar_cbase(Qtrue), lhs->nd_vid, val);
 	break;
 
       case NODE_MASGN:

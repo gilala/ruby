@@ -575,6 +575,7 @@ VALUE rb_const_get_from(VALUE, ID);
 VALUE rb_const_get_fallback(VALUE, ID, struct RNode *);
 void rb_const_set(VALUE, ID, VALUE);
 VALUE rb_mod_const_missing(VALUE,VALUE);
+void rb_cvar_set(VALUE, ID, VALUE);
 VALUE rb_cvar_defined(VALUE, ID);
 void rb_cvar_set(VALUE, ID, VALUE);
 VALUE rb_cvar_get(VALUE, ID);

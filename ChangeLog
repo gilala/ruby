@@ -2,6 +2,22 @@ Sat Jan  6 11:50:33 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* io.c (argf_read): fix wrong replacement.  [ruby-dev:30070]
 
+Thu Jan  4 16:30:14 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* variable.c (rb_cvar_get): new class variable look-up scheme:
+	  1) look up in the class.  2) if the class is singleton attached
+	  to a class (i.e. metaclass) then start look up in the attached
+	  class and its ancestors. 3) otherwise, look-up in ancestors of
+	  the class.
+
+	* eval.c (cvar_cbase): destination for class variable access is
+	  the class/module that holds the method, or cbase outside of
+	  methods.
+
+	* eval.c (rb_eval): merge code for NODE_CVDECL and NODE_CVASGN.
+
+	* parse.y (assignable_gen): no need to generate NODE_CVDECL.
+
 Thu Jan  4 16:24:15 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* variable.c (rb_cvar_set): remove warn argument.
@@ -90,6 +106,16 @@ Sat Dec 30 02:22:32 2006  Yukihiro Matsumoto  <matz@ruby-lang.org>
 	* io.c (rb_io_getline): small refactoring for DRY.
 
 	* io.c (rb_io_s_foreach, rb_io_s_readlines): small refactoring.
+
+Fri Dec 29 00:21:32 2006  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* eval.c (cvar_cbase): destination for class variable access is
+	  now strictly innermost surrounding class or module.  warned if
+	  accessed from toplevel.
+
+	* eval.c (rb_eval): small refactoring for NODE_CVASGN.
+
+	* variable.c (rb_cvar_set): 1.9 no longer need warn argument.
 
 Thu Dec 28 15:27:38 2006  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
