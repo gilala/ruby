@@ -438,7 +438,14 @@ module RDoc
     #   rb_define_const(cFoo, "PERFECT", INT2FIX(300);
     #
     # Will override +INT2FIX(300)+ with the value +300+ in the output RDoc.
-    # Values may include quotes and escaped colons (\:).
+    #
+    # Values may include quotes and escaped colons:
+    #
+    #   /* "C\\:\\Program Files\\Stuff": A directory on MS Windows */
+    #   rb_define_const(cFoo, "STUFF", rb_str_new2("C:\\Program Files\\Stuff"));
+    #   
+    #   /* "\\": The file separator on MS Windows */
+    #   rb_define_const(cFoo, "MSEPARATOR", rb_str_new2("\\"));
 
     def handle_constants(type, var_name, const_name, definition)
       #@stats.num_constants += 1
@@ -459,22 +466,29 @@ module RDoc
       # "/* definition: comment */" form.  The literal ':' and '\' characters
       # can be escaped with a backslash.
       if type.downcase == 'const' then
-         elements = mangle_comment(comment).split(':')
-         if elements.nil? or elements.empty? then
-            con = Constant.new(const_name, definition, mangle_comment(comment))
-         else
-            new_definition = elements[0..-2].join(':')
-            if new_definition.empty? then # Default to literal C definition
-               new_definition = definition
-            else
-               new_definition.gsub!("\:", ":")
-               new_definition.gsub!("\\", '\\')
-            end
-            new_definition.sub!(/\A(\s+)/, '')
-            new_comment = $1.nil? ? elements.last : "#{$1}#{elements.last.lstrip}"
-            con = Constant.new(const_name, new_definition,
-                               mangle_comment(new_comment))
-         end
+        elements = mangle_comment(comment).split(':')
+        if elements.length <= 1 then
+          con = Constant.new const_name, definition, mangle_comment(comment)
+        else
+          definition_end = nil
+          new_definition = nil
+
+          elements.each_with_index do |elem, i|
+            definition_end = i
+            break unless elem[-1] == "\\"
+          end
+
+          new_definition = elements.slice!(0..definition_end).join ':'
+          new_comment = elements.join ':'
+
+          new_definition.gsub!("\\:", ":") # replace escaped :
+
+          new_definition.sub!(/\A(\s+)/, '') # preserve leading whitespace
+          new_comment = $1.nil? ? new_comment : "#{$1}#{new_comment.lstrip}"
+
+          con = Constant.new(const_name, new_definition,
+                             mangle_comment(new_comment))
+        end
       else
          con = Constant.new(const_name, definition, mangle_comment(comment))
       end

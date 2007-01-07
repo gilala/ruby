@@ -30,31 +30,31 @@ class TestRdocC_Parser < Test::Unit::TestCase
 
   def test_do_constants
     content = <<-EOF
-#include <ruby.h>
-
-void Init_foo(){
    VALUE cFoo = rb_define_class("Foo", rb_cObject);
 
    /* 300: The highest possible score in bowling */
    rb_define_const(cFoo, "PERFECT", INT2FIX(300));
 
-   /* Huzzah!: What you cheer when you roll a perfect game */
+   /* "Huzzah!": What you cheer when you roll a perfect game */
    rb_define_const(cFoo, "CHEER", rb_str_new2("Huzzah!"));
 
-   /* TEST\:TEST: Checking to see if escaped semicolon works */
+   /* "TEST\\:TEST": Checking to see if escaped semicolon works */
    rb_define_const(cFoo, "TEST", rb_str_new2("TEST:TEST"));
 
-   /* \\: The file separator on MS Windows */
+   /* "late colon": This comment has a late colon here: */
+   rb_define_const(cFoo, "LATE_COLON", rb_str_new2("late colon"));
+
+   /* "\\": The file separator on MS Windows */
    rb_define_const(cFoo, "MSEPARATOR", rb_str_new2("\\"));
 
-   /* /: The file separator on Unix */
+   /* "/": The file separator on Unix */
    rb_define_const(cFoo, "SEPARATOR", rb_str_new2("/"));
 
-   /* C:\\Program Files\\Stuff: A directory on MS Windows */
+   /* "C\\:\\Program Files\\Stuff": A directory on MS Windows */
    rb_define_const(cFoo, "STUFF", rb_str_new2("C:\\Program Files\\Stuff"));
 
    /* Default definition */
-   rb_define_const(cFoo, "NOSEMI", INT2FIX(99));
+   rb_define_const(cFoo, "NOCOLON", INT2FIX(99));
 
    rb_define_const(cFoo, "NOCOMMENT", rb_str_new2("No comment"));
 
@@ -74,8 +74,6 @@ void Init_foo(){
     * Multiline comment goes here because this comment spans multiple lines.
     */
    rb_define_const(cFoo, "MULTILINE_NOT_EMPTY", INT2FIX(1));
-
-}
     EOF
 
     parser = util_parser content
@@ -94,22 +92,25 @@ void Init_foo(){
     assert_equal ['PERFECT', '300',
                   "\n      The highest possible score in bowling   \n   "],
                  constants.shift
-    assert_equal ['CHEER', 'Huzzah!',
+    assert_equal ['CHEER', '"Huzzah!"',
                   "\n      What you cheer when you roll a perfect game   \n   "],
                  constants.shift
-    assert_equal ['TEST', 'TEST:TEST',
+    assert_equal ['TEST', '"TEST:TEST"',
                   "\n      Checking to see if escaped semicolon works   \n   "],
                  constants.shift
-    assert_equal ['MSEPARATOR', '\\',
+    assert_equal ['LATE_COLON', '"late colon"',
+                  "\n      This comment has a late colon here:   \n   "],
+                 constants.shift
+    assert_equal ['MSEPARATOR', '"\\"',
                   "\n      The file separator on MS Windows   \n   "],
                  constants.shift
-    assert_equal ['SEPARATOR', '/',
+    assert_equal ['SEPARATOR', '"/"',
                   "\n      The file separator on Unix   \n   "],
                  constants.shift
-    assert_equal ['STUFF', 'C:\\Program Files\\Stuff',
+    assert_equal ['STUFF', '"C:\\Program Files\\Stuff"',
                   "\n      A directory on MS Windows   \n   "],
                  constants.shift
-    assert_equal ['NOSEMI', 'INT2FIX(99)',
+    assert_equal ['NOCOLON', 'INT2FIX(99)',
                   "\n      Default definition   \n   "],
                  constants.shift
     assert_equal ['NOCOMMENT', 'rb_str_new2("No comment")', nil],

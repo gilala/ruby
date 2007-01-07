@@ -1,3 +1,8 @@
+Sun Jan  7 10:32:12 2007  Eric Hodel  <drbrain@segment7.net>
+
+	* lib/rdoc/parsers/parse_c.rb (RDoc::C_Parser#handle_constants):
+	  Properly handle escaping of : in comments.
+
 Sat Jan  6 18:46:34 2007  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* io.c (rb_io_getline_fast, rb_io_getline): increase lineno
