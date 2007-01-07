@@ -214,6 +214,38 @@ Init_Foo(void) {
     assert_equal "  \n   a comment for class Foo\n   \n", klass.comment
   end
 
+  def test_find_class_comment_define_class
+    content = <<-EOF
+/*
+ * a comment for class Foo
+ */
+VALUE foo = rb_define_class("Foo", rb_cObject);
+    EOF
+
+    klass = util_get_class content, 'foo'
+
+    assert_equal "  \n   a comment for class Foo\n   ", klass.comment
+  end
+
+  def test_find_class_comment_define_class
+    content = <<-EOF
+/*
+ * a comment for class Foo on Init
+ */
+void
+Init_Foo(void) {
+    /*
+     * a comment for class Foo on rb_define_class
+     */
+    VALUE foo = rb_define_class("Foo", rb_cObject);
+}
+    EOF
+
+    klass = util_get_class content, 'foo'
+
+    assert_equal "  \n   a comment for class Foo on Init\n   \n", klass.comment
+  end
+
   def util_get_class(content, name)
     parser = util_parser content
     parser.do_classes

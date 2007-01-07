@@ -1,3 +1,9 @@
+Sun Jan  7 12:13:26 2007  Eric Hodel  <drbrain@segment7.net> 
+
+	* lib/rdoc/parsers/parse_c.rb (RDoc::C_Parser#find_class_comment):
+	  Look for class and module comments above rb_define_class and
+	  rb_define_module.  Patch by Daniel Berger <djberg96 at gmail.com>
+
 Sun Jan  7 10:32:12 2007  Eric Hodel  <drbrain@segment7.net>
 
 	* lib/rdoc/parsers/parse_c.rb (RDoc::C_Parser#handle_constants):
