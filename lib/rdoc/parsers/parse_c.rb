@@ -266,7 +266,24 @@ module RDoc
       @known_classes[var_name] = cm.full_name
     end
 
-    ############################################################
+    ##
+    # Look for class or module documentation above Init_+class_name+(void) or
+    # in a Document-class +class_name+ (or module) comment.
+    #
+    #   /*
+    #    * This is a comment for Foo
+    #    */
+    #   Init_Foo(void) {
+    #       VALUE cFoo = rb_define_class("Foo", rb_cObject);
+    #   }
+    #
+    #   /*
+    #    * Document-class: Foo
+    #    * This is a comment for Foo
+    #    */
+    #   Init_foo(void) {
+    #       VALUE cFoo = rb_define_class("Foo", rb_cObject);
+    #   }
 
     def find_class_comment(class_name, class_meth)
       comment = nil
