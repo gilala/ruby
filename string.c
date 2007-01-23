@@ -4227,7 +4227,10 @@ rb_str_intern(VALUE s)
     volatile VALUE str = s;
     ID id;
 
-    if (OBJ_TAINTED(str) && rb_safe_level() >= 1 && !rb_sym_interned_p(str)) {
+    if (rb_sym_interned_p(str)) {
+	return str;
+    }
+    if (OBJ_TAINTED(str) && rb_safe_level() >= 1) {
 	rb_raise(rb_eSecurityError, "Insecure: can't intern tainted string");
     }
     id = rb_intern2(RSTRING_PTR(str), RSTRING_LEN(str));
@@ -4688,8 +4691,13 @@ sym_to_i(VALUE sym)
 static VALUE
 sym_inspect(VALUE sym)
 {
-    VALUE str;
+    VALUE str, klass = Qundef;
+    ID id = SYM2ID(sym);
 
+    if (rb_is_instance2_id(id)) {
+	id = rb_dump_ivar2(id, &klass);
+	sym = ID2SYM(id);
+    }
     str = rb_str_new(0, RSTRING_LEN(sym)+1);
     RSTRING_PTR(str)[0] = ':';
     memcpy(RSTRING_PTR(str)+1, RSTRING_PTR(sym), RSTRING_LEN(sym));
@@ -4697,6 +4705,10 @@ sym_inspect(VALUE sym)
 	!rb_symname_p(RSTRING_PTR(sym))) {
 	str = rb_str_dump(str);
 	strncpy(RSTRING_PTR(str), ":\"", 2);
+    }
+    if (klass != Qundef) {
+	rb_str_cat2(str, "/");
+	rb_str_append(str, rb_inspect(klass));
     }
     return str;
 }
@@ -4806,6 +4818,44 @@ rb_to_id(VALUE name)
 	rb_raise(rb_eTypeError, "%s is not a symbol", RSTRING_PTR(rb_inspect(name)));
     }
     return id;
+}
+
+ID
+rb_intern_ivar2(ID id, VALUE klass)
+{
+    VALUE sym = ID2SYM(id);
+    long len = RSTRING_LEN(sym);
+    char *buf = ALLOCA_N(char, len+sizeof(VALUE)+1);
+    VALUE oid;
+
+    strcpy(buf, RSTRING_PTR(sym));
+    oid = rb_obj_id(klass);
+    memcpy(buf+len+1, (char*)&oid, sizeof(VALUE));
+    id = rb_intern2(buf, len+sizeof(VALUE)+1);
+    sym = ID2SYM(id);
+//    STR_SET_LEN(sym, len);
+    return id;
+}
+
+static VALUE
+sym_div(VALUE sym, VALUE klass)
+{
+    ID id = SYM2ID(sym);
+
+    if (!rb_is_instance2_id(id)) {
+	rb_raise(rb_eArgError, "symbol %s should be local instance variable",
+		 rb_id2name(id));
+    }
+    switch (TYPE(klass)) {
+      case T_CLASS:
+      case T_MODULE:
+	break;
+      default:
+	rb_check_type(klass, T_CLASS);
+	break;
+    }
+    id = rb_intern_ivar2(id, klass);
+    return ID2SYM(id);
 }
 
 /*
@@ -4948,6 +4998,7 @@ Init_String(void)
     rb_define_singleton_method(rb_cSymbol, "all_symbols", rb_sym_all_symbols, 0); /* in parse.y */
     rb_define_singleton_method(rb_cSymbol, "intern", rb_sym_s_intern, 1);
 
+    rb_define_method(rb_cSymbol, "/", sym_div, 1);
     rb_define_method(rb_cSymbol, "==", sym_equal, 1);
     rb_define_method(rb_cSymbol, "to_i", sym_to_i, 0);
     rb_define_method(rb_cSymbol, "inspect", sym_inspect, 0);

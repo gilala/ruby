@@ -1973,6 +1973,32 @@ id2ref(VALUE obj, VALUE objid)
     return (VALUE)ptr;
 }
 
+ID
+rb_dump_ivar2(ID id, VALUE *klassp)
+{
+    VALUE sym = ID2SYM(id);
+    char *ptr = RSTRING_PTR(sym);
+    long len = strlen(ptr);
+    ID oid;
+    VALUE klass;
+
+    if (RSTRING_LEN(sym) == len) return id;
+    oid  = rb_intern2(ptr, len);
+
+    memcpy((char*)&klass, ptr+strlen(ptr)+1, sizeof(VALUE));
+    klass = id2ref(0, klass);
+    switch (TYPE(klass)) {
+      case T_CLASS:
+      case T_MODULE:
+	break;
+      default:
+	rb_raise(rb_eTypeError, "corrupted instance variable - %s", ptr);
+	break;
+    }
+    if (klassp) *klassp = klass;
+    return oid;
+}
+
 /*
  *  Document-method: __id__
  *  Document-method: object_id

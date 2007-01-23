@@ -1861,6 +1861,14 @@ cvar_cbase(int warn)
     return ruby_cbase;
 }
 
+static void
+ivar2_prepare(NODE *node)
+{
+    if (node->nd_vid == 0) {
+	node->nd_vid = rb_intern_ivar2(node->nd_aid, ruby_cbase);
+    }
+}
+
 /*
  *  call-seq:
  *     Module.nesting    => array
@@ -2326,6 +2334,7 @@ is_defined(VALUE self, NODE *node /* OK */, char *buf, int noeval)
       case NODE_DASGN_CURR:
       case NODE_GASGN:
       case NODE_IASGN:
+      case NODE_IASGN2:
       case NODE_CDECL:
       case NODE_CVDECL:
       case NODE_CVASGN:
@@ -2343,6 +2352,13 @@ is_defined(VALUE self, NODE *node /* OK */, char *buf, int noeval)
 	break;
 
       case NODE_IVAR:
+	if (rb_ivar_defined(self, node->nd_vid)) {
+	    return "instance-variable";
+	}
+	break;
+
+      case NODE_IVAR2:
+	ivar2_prepare(node);
 	if (rb_ivar_defined(self, node->nd_vid)) {
 	    return "instance-variable";
 	}
@@ -3480,6 +3496,8 @@ rb_eval(VALUE self, NODE *n)
 	rb_gvar_set(node->nd_entry, result);
 	break;
 
+      case NODE_IASGN2:
+	ivar2_prepare(node);
       case NODE_IASGN:
 	result = rb_eval(self, node->nd_value);
 	rb_ivar_set(self, node->nd_vid, result);
@@ -3516,6 +3534,9 @@ rb_eval(VALUE self, NODE *n)
 	result = rb_gvar_get(node->nd_entry);
 	break;
 
+      case NODE_IVAR2:
+	ivar2_prepare(node);
+	/* fall through */
       case NODE_IVAR:
 	result = rb_ivar_get(self, node->nd_vid);
 	break;
@@ -5034,6 +5055,9 @@ assign(VALUE self, NODE *lhs, VALUE val, int pcall)
 	rb_gvar_set(lhs->nd_entry, val);
 	break;
 
+
+      case NODE_IASGN2:
+	ivar2_prepare(lhs);
       case NODE_IASGN:
 	rb_ivar_set(self, lhs->nd_vid, val);
 	break;
@@ -5758,6 +5782,8 @@ rb_call0(VALUE klass, VALUE recv, ID id, ID oid,
 	break;
 
 	/* for attr get/set */
+      case NODE_IVAR2:
+	ivar2_prepare(body);
       case NODE_IVAR:
 	if (argc != 0) {
 	    rb_raise(rb_eArgError, "wrong number of arguments (%d for 0)", argc);
@@ -9288,6 +9314,7 @@ rb_node_arity(NODE *body)
 	return -1;
       case NODE_ATTRSET:
 	return 1;
+      case NODE_IVAR2:
       case NODE_IVAR:
 	return 0;
       case NODE_BMETHOD:

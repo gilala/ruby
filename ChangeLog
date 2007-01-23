@@ -372,6 +372,14 @@ Fri Dec  1 16:31:53 2006  Hidetoshi NAGAI  <nagai@ai.kyutech.ac.jp>
 	* ext/tk/tcltklib.c: shouldn't run the killed thread at callback.
 	  [ruby-talk: 227408]
 
+Tue Nov 28 17:31:40 2006  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* eval.c (ivar2_prepare): prepare ivar2 ID before processing.
+
+	* marshal.c (w_symbol): support class local instance variables.
+
+	* marshal.c (r_object0): ditto.
+
 Tue Nov 28 17:25:11 2006  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* array.c (ary_iter_check): should check modification (size

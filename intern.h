@@ -313,6 +313,7 @@ void rb_gc_call_finalizer_at_exit(void);
 VALUE rb_gc_enable(void);
 VALUE rb_gc_disable(void);
 VALUE rb_gc_start(void);
+ID rb_dump_ivar2(ID, VALUE*);
 /* hash.c */
 void st_foreach_safe(struct st_table *, int (*)(ANYARGS), st_data_t);
 void rb_hash_foreach(VALUE, int (*)(ANYARGS), VALUE);
@@ -395,6 +396,7 @@ ID rb_id_attrset(ID);
 void rb_gc_mark_parser(void);
 int rb_is_const_id(ID);
 int rb_is_instance_id(ID);
+int rb_is_instance2_id(ID);
 int rb_is_class_id(ID);
 int rb_is_local_id(ID);
 int rb_is_junk_id(ID);
@@ -520,6 +522,7 @@ void rb_str_associate(VALUE, VALUE);
 VALUE rb_str_associated(VALUE);
 void rb_str_setter(VALUE, ID, VALUE*);
 VALUE rb_str_intern(VALUE);
+ID rb_intern_ivar2(ID, VALUE);
 /* struct.c */
 VALUE rb_struct_new(VALUE, ...);
 VALUE rb_struct_define(const char*, ...);

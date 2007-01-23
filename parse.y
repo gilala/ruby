@@ -36,19 +36,21 @@
 
 #define ID_SCOPE_SHIFT 3
 #define ID_SCOPE_MASK 0x07
-#define ID_LOCAL    0x01
-#define ID_INSTANCE 0x02
-#define ID_GLOBAL   0x03
-#define ID_ATTRSET  0x04
-#define ID_CONST    0x05
-#define ID_CLASS    0x06
-#define ID_JUNK     0x07
-#define ID_INTERNAL ID_JUNK
+#define ID_LOCAL      0x00
+#define ID_INSTANCE   0x01
+#define ID_INSTANCE2  0x02
+#define ID_GLOBAL     0x03
+#define ID_ATTRSET    0x04
+#define ID_CONST      0x05
+#define ID_CLASS      0x06
+#define ID_JUNK       0x07
+#define ID_INTERNAL   ID_JUNK
 
 #define is_notop_id(id) ((id)>tLAST_TOKEN)
 #define is_local_id(id) (is_notop_id(id)&&((id)&ID_SCOPE_MASK)==ID_LOCAL)
 #define is_global_id(id) (is_notop_id(id)&&((id)&ID_SCOPE_MASK)==ID_GLOBAL)
 #define is_instance_id(id) (is_notop_id(id)&&((id)&ID_SCOPE_MASK)==ID_INSTANCE)
+#define is_instance2_id(id) (is_notop_id(id)&&((id)&ID_SCOPE_MASK)==ID_INSTANCE2)
 #define is_attrset_id(id) (is_notop_id(id)&&((id)&ID_SCOPE_MASK)==ID_ATTRSET)
 #define is_const_id(id) (is_notop_id(id)&&((id)&ID_SCOPE_MASK)==ID_CONST)
 #define is_class_id(id) (is_notop_id(id)&&((id)&ID_SCOPE_MASK)==ID_CLASS)
@@ -7174,6 +7176,9 @@ gettable_gen(struct parser_params *parser, ID id)
     else if (is_instance_id(id)) {
 	return NEW_IVAR(id);
     }
+    else if (is_instance2_id(id)) {
+	return NEW_IVAR2(id);
+    }
     else if (is_const_id(id)) {
 	return NEW_CONST(id);
     }
@@ -7226,6 +7231,9 @@ assignable_gen(struct parser_params *parser, ID id, NODE *val)
     }
     else if (is_instance_id(id)) {
 	return NEW_IASGN(id, val);
+    }
+    else if (is_instance2_id(id)) {
+	return NEW_IASGN2(id, val);
     }
     else if (is_const_id(id)) {
 	if (in_def || in_single)
@@ -7361,6 +7369,7 @@ node_assign_gen(struct parser_params *parser, NODE *lhs, NODE *rhs)
     switch (nd_type(lhs)) {
       case NODE_GASGN:
       case NODE_IASGN:
+      case NODE_IASGN2:
       case NODE_LASGN:
       case NODE_DASGN:
       case NODE_DASGN_CURR:
@@ -8408,6 +8417,9 @@ rb_intern2(const char *name, long len)
 	    m++;
 	    id |= ID_CLASS;
 	}
+	else if (name[1] == '_') {
+	    id |= ID_INSTANCE2;
+	}
 	else {
 	    id |= ID_INSTANCE;
 	}
@@ -8586,6 +8598,13 @@ int
 rb_is_instance_id(ID id)
 {
     if (is_instance_id(id)) return Qtrue;
+    return Qfalse;
+}
+
+int
+rb_is_instance2_id(ID id)
+{
+    if (is_instance2_id(id)) return Qtrue;
     return Qfalse;
 }
 
