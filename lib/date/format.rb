@@ -1,7 +1,7 @@
 # format.rb: Written by Tadayoshi Funaba 1999-2006
 # $Id: format.rb,v 2.29 2006-12-30 21:43:41+09 tadf Exp $
 
-require 'rational'
+require 'time'
 
 class Date
 

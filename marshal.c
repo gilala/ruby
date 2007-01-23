@@ -317,7 +317,7 @@ w_symbol(ID id, struct dump_arg *arg)
 	    VALUE klass;
 	    volatile VALUE path;
 
-	    id = rb_dump_ivar2(id, &klass);
+	    id = rb_decompose_ivar2(id, &klass);
 	    path = class2path(klass);
 	    w_byte(TYPE_SYMBOL2, arg);
 	    sym = rb_id2name(id);
@@ -891,7 +891,7 @@ r_symivar2(struct load_arg *arg)
 
     s = r_bytes(arg);
     klass = r_entry(path2class(RSTRING_PTR(s)), arg);
-    id = rb_intern_ivar2(id, klass);
+    id = rb_compose_ivar2(id, klass);
     st_insert(arg->symbols, arg->symbols->num_entries, id);
 
     return id;

@@ -1592,6 +1592,7 @@ rb_reg_match_pos(VALUE re, VALUE str, long pos)
 	rb_backref_set(Qnil);
 	return Qnil;
     }
+    if (SYMBOL_P(str)) str = rb_sym_to_s(str);
     StringValue(str);
     if (pos != 0) {
 	if (pos < 0) {
@@ -1648,7 +1649,8 @@ rb_reg_eqq(VALUE re, VALUE str)
     long start;
 
     if (TYPE(str) != T_STRING) {
-	str = rb_check_string_type(str);
+	if (SYMBOL_P(str)) str = rb_sym_to_s(str);
+	else str = rb_check_string_type(str);
 	if (NIL_P(str)) {
 	    rb_backref_set(Qnil);
 	    return Qfalse;

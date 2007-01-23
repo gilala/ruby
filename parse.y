@@ -1674,7 +1674,7 @@ arg		: lhs '=' arg
 		    /*%%%*/
 			value_expr($3);
 			if ($1) {
-			    ID vid = $1->nd_vid;
+			    ID vid = $1->nd_vid ? $1->nd_vid : $1->nd_aid;
 			    if ($2 == tOROP) {
 				$1->nd_value = $3;
 				$$ = NEW_OP_ASGN_OR(gettable(vid), $1);
@@ -8260,26 +8260,55 @@ static const struct {
 
 static struct symbols {
     ID last_id;
-    st_table *sym_id;
-    st_table *id_sym;
+    st_table *str_id;
+    st_table *id_str;
+    st_table *ivar2_id;
+    st_table *id_ivar2;
 } global_symbols = {tLAST_TOKEN};
 
-static struct st_hash_type symhash = {
+static struct st_hash_type sym_hash_type = {
     rb_str_cmp,
     rb_str_hash,
+};
+
+struct ivar2_key {
+    ID id;
+    VALUE klass;
+};
+
+static int
+ivar2_cmp(struct ivar2_key *key1, struct ivar2_key *key2)
+{
+    if (key1->id == key2->id && key1->klass == key2->klass) {
+	return 0;
+    }
+    return 1;
+}
+
+static int
+ivar2_hash(struct ivar2_key *key)
+{
+    return (key->id << 8) ^ (key->klass >> 2);
+}
+
+static struct st_hash_type ivar2_hash_type = {
+    ivar2_cmp,
+    ivar2_hash,
 };
 
 void
 Init_sym(void)
 {
-    global_symbols.sym_id = st_init_table_with_size(&symhash, 1000);
-    global_symbols.id_sym = st_init_numtable_with_size(1000);
+    global_symbols.str_id = st_init_table_with_size(&sym_hash_type, 1000);
+    global_symbols.id_str = st_init_numtable_with_size(1000);
+    global_symbols.ivar2_id = st_init_table_with_size(&ivar2_hash_type, 1000);
+    global_symbols.id_ivar2 = st_init_numtable_with_size(1000);
 }
 
 void
 rb_gc_mark_symbols(void)
 {
-    rb_mark_tbl(global_symbols.id_sym);
+    rb_mark_tbl(global_symbols.id_str);
 }
 
 static ID
@@ -8383,26 +8412,15 @@ rb_symname_p(const char *name)
     return *m ? Qfalse : Qtrue;
 }
 
-int
-rb_sym_interned_p(str)
-    VALUE str;
-{
-    ID id;
-
-    if (st_lookup(global_symbols.sym_id, (st_data_t)str, (st_data_t *)&id))
-	return Qtrue;
-    return Qfalse;
-}
-
 ID
 rb_intern2(const char *name, long len)
 {
     const char *m = name;
-    VALUE sym = rb_str_new(name, len);
+    VALUE str = rb_str_new(name, len);
     ID id;
     int last;
 
-    if (st_lookup(global_symbols.sym_id, (st_data_t)sym, (st_data_t *)&id))
+    if (st_lookup(global_symbols.str_id, (st_data_t)str, (st_data_t *)&id))
 	return id;
 
     last = len-1;
@@ -8469,10 +8487,9 @@ rb_intern2(const char *name, long len)
   new_id:
     id |= ++global_symbols.last_id << ID_SCOPE_SHIFT;
   id_register:
-    RBASIC(sym)->klass = rb_cSymbol;
-    OBJ_FREEZE(sym);
-    st_add_direct(global_symbols.sym_id, (st_data_t)sym, id);
-    st_add_direct(global_symbols.id_sym, id, (st_data_t)sym);
+    OBJ_FREEZE(str);
+    st_add_direct(global_symbols.str_id, (st_data_t)str, (st_data_t)id);
+    st_add_direct(global_symbols.id_str, (st_data_t)id, (st_data_t)str);
     return id;
 }
 
@@ -8482,32 +8499,41 @@ rb_intern(const char *name)
     return rb_intern2(name, strlen(name));
 }
 
-VALUE
-rb_id2sym(ID id)
+ID
+rb_compose_ivar2(ID oid, VALUE klass)
 {
-    VALUE data;
+    struct ivar2_key key, *kp;
+    ID id;
 
-    while (!st_lookup(global_symbols.id_sym, id, &data)) {
-	rb_id2name(id);
-    }
-    if (!RBASIC(data)->klass) {
-	RBASIC(data)->klass = rb_cSymbol;
-    }
-    return data;
+    key.id = oid;
+    key.klass = klass;
+    if (st_lookup(global_symbols.ivar2_id, (st_data_t)&key, (st_data_t *)&id))
+	return id;
+
+    kp = ALLOC_N(struct ivar2_key, 1);
+    kp->id = oid; kp->klass = klass;
+    id = ID_INSTANCE2;
+    id |= ++global_symbols.last_id << ID_SCOPE_SHIFT;
+    st_add_direct(global_symbols.ivar2_id, (st_data_t)kp, (st_data_t)id);
+    st_add_direct(global_symbols.id_ivar2, (st_data_t)id, (st_data_t)kp);
+    return id;
 }
 
 ID
-rb_sym2id(VALUE sym)
+rb_decompose_ivar2(ID id, VALUE *klassp)
 {
-    ID data;
+    struct ivar2_key *kp;
+    ID oid;
 
-    if (st_lookup(global_symbols.sym_id, sym, &data))
-	return data;
-    return rb_intern2(RSTRING_PTR(sym), RSTRING_LEN(sym));
+    if (!st_lookup(global_symbols.id_ivar2, (st_data_t)id, (st_data_t *)&kp)) {
+	return id;
+    }
+    if (klassp) *klassp = kp->klass;
+    return kp->id;
 }
 
-const char *
-rb_id2name(ID id)
+VALUE
+rb_id2str(ID id)
 {
     const char *name;
     st_data_t data;
@@ -8517,12 +8543,12 @@ rb_id2name(ID id)
 
 	for (i=0; op_tbl[i].token; i++) {
 	    if (op_tbl[i].token == id)
-		return op_tbl[i].name;
+		return rb_str_new2(op_tbl[i].name);
 	}
     }
 
-    if (st_lookup(global_symbols.id_sym, id, &data))
-	return RSTRING_PTR(data);
+    if (st_lookup(global_symbols.id_str, id, &data))
+	return (VALUE)data;
 
     if (is_attrset_id(id)) {
 	ID id2 = (id & ~ID_SCOPE_MASK) | ID_LOCAL;
@@ -8535,7 +8561,7 @@ rb_id2name(ID id)
 	    strcpy(buf, name);
 	    strcat(buf, "=");
 	    rb_intern(buf);
-	    return rb_id2name(id);
+	    return rb_id2str(id);
 	}
 	if (is_local_id(id2)) {
 	    id2 = (id & ~ID_SCOPE_MASK) | ID_CONST;
@@ -8545,13 +8571,19 @@ rb_id2name(ID id)
     return 0;
 }
 
-static int
-symbols_i(VALUE sym, ID value, VALUE ary)
+const char *
+rb_id2name(ID id)
 {
-    if (!RBASIC(sym)->klass) {
-	RBASIC(sym)->klass = rb_cSymbol;
-    }
-    rb_ary_push(ary, sym);
+    VALUE str = rb_id2str(id);
+
+    if (!str) return 0;
+    return RSTRING_PTR(str);
+}
+
+static int
+symbols_i(VALUE key, ID value, VALUE ary)
+{
+    rb_ary_push(ary, ID2SYM(value));
     return ST_CONTINUE;
 }
 
@@ -8574,9 +8606,9 @@ symbols_i(VALUE sym, ID value, VALUE ary)
 VALUE
 rb_sym_all_symbols(void)
 {
-    VALUE ary = rb_ary_new2(global_symbols.sym_id->num_entries);
+    VALUE ary = rb_ary_new2(global_symbols.str_id->num_entries);
 
-    st_foreach(global_symbols.sym_id, symbols_i, ary);
+    st_foreach(global_symbols.str_id, symbols_i, ary);
     return ary;
 }
 

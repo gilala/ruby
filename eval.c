@@ -1865,7 +1865,7 @@ static void
 ivar2_prepare(NODE *node)
 {
     if (node->nd_vid == 0) {
-	node->nd_vid = rb_intern_ivar2(node->nd_aid, ruby_cbase);
+	node->nd_vid = rb_compose_ivar2(node->nd_aid, ruby_cbase);
     }
 }
 

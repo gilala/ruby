@@ -372,7 +372,17 @@ Fri Dec  1 16:31:53 2006  Hidetoshi NAGAI  <nagai@ai.kyutech.ac.jp>
 	* ext/tk/tcltklib.c: shouldn't run the killed thread at callback.
 	  [ruby-talk: 227408]
 
+Tue Nov 28 17:35:14 2006  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* ruby.h (SYMBOL_P): make Symbol immediate again for performance. 
+
 Tue Nov 28 17:31:40 2006  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* parse.y (rb_compose_ivar2): function to create a new ivar2
+	  symbol from a symbol and a class.
+
+	* parse.y (rb_decompose_ivar2): reverse function of
+	  rb_compose_ivar2(). 
 
 	* eval.c (ivar2_prepare): prepare ivar2 ID before processing.
 
