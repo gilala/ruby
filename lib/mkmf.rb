@@ -1237,7 +1237,7 @@ EXTSTATIC = #{$static || ""}
 STATIC_LIB = #{staticlib unless $static.nil?}
 #{!$extout && defined?($installed_list) ? "INSTALLED_LIST = #{$installed_list}\n" : ""}
 "
-  install_dirs.each {|*d| mfile.print("%-14s= %s\n" % d) if /^[[:upper:]]/ =~ d[0]}
+  install_dirs.each {|d| mfile.print("%-14s= %s\n" % d) if /^[[:upper:]]/ =~ d[0]}
   n = ($extout ? '$(RUBYARCHDIR)/' : '') + '$(TARGET).'
   mfile.print "
 TARGET_SO     = #{($extout ? '$(RUBYARCHDIR)/' : '')}$(DLLIB)

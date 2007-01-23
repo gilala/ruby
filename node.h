@@ -122,6 +122,7 @@ enum node_type {
     NODE_BMETHOD,
     NODE_MEMO,
     NODE_IFUNC,
+    NODE_IFUNC1,
     NODE_DSYM,
     NODE_ATTRASGN,
     NODE_PRELUDE,
@@ -250,6 +251,7 @@ extern NODE *ruby_top_cref;
 #define NEW_DEFS(r,i,a,d) NEW_NODE(NODE_DEFS,r,i,NEW_RFUNC(a,d))
 #define NEW_CFUNC(f,c) NEW_NODE(NODE_CFUNC,f,c,0)
 #define NEW_IFUNC(f,c) NEW_NODE(NODE_IFUNC,f,c,0)
+#define NEW_IFUNC1(f,c) NEW_NODE(NODE_IFUNC1,f,c,0)
 #define NEW_RFUNC(b1,b2) NEW_SCOPE(block_append(b1,b2))
 #define NEW_SCOPE(b) NEW_NODE(NODE_SCOPE,local_tbl(),0,(b))
 #define NEW_BLOCK(a) NEW_NODE(NODE_BLOCK,a,0,0)

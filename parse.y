@@ -2895,13 +2895,7 @@ bparam_list	: bparam_item
 block_param	: bparam_list
 		    {
 		    /*%%%*/
-                        if ($1->nd_alen == 1 && nd_type($1->nd_head) != NODE_MASGN) {
-                            $$ = $1->nd_head;
-                            rb_gc_force_recycle((VALUE)$1);
-                        }
-                        else {
-                            $$ = NEW_MASGN($1, 0);
-                        }
+                        $$ = NEW_MASGN($1, 0);
 		    /*%
 			$$ = blockvar_new($1);
 		    %*/
@@ -2909,7 +2903,7 @@ block_param	: bparam_list
 		| bparam_list ','
 		    {
 		    /*%%%*/
-			$$ = NEW_MASGN($1, 0);
+			$$ = NEW_MASGN($1, -2);
 		    /*%
 			$$ = blockvar_new($1);
 		    %*/
@@ -7845,11 +7839,7 @@ new_yield(NODE *node)
 
     if (node) {
 	no_blockarg(node);
-	if (nd_type(node) == NODE_ARRAY && node->nd_next == 0) {
-	    node = node->nd_head;
-	    state = Qfalse;
-	}
-	else if (node && nd_type(node) == NODE_SPLAT) {
+	if (node && nd_type(node) == NODE_SPLAT) {
 	    state = Qtrue;
 	}
     }

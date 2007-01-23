@@ -372,6 +372,12 @@ Fri Dec  1 16:31:53 2006  Hidetoshi NAGAI  <nagai@ai.kyutech.ac.jp>
 	* ext/tk/tcltklib.c: shouldn't run the killed thread at callback.
 	  [ruby-talk: 227408]
 
+Tue Nov 28 17:36:29 2006  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* eval.c (massign_args): more consistent yield parameter
+	  assignment.  a patch from Tanaka Akira <akr at fsij.org> in
+	  [ruby-dev:29616].  [ruby-dev:29006]
+
 Tue Nov 28 17:35:14 2006  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* ruby.h (SYMBOL_P): make Symbol immediate again for performance. 

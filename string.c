@@ -4120,7 +4120,10 @@ rb_str_scan(VALUE str, VALUE pat)
     while (!NIL_P(result = scan_once(str, pat, &start))) {
 	match = rb_backref_get();
 	rb_match_busy(match);
-	rb_yield(result);
+        if (TYPE(result) == T_STRING)
+            rb_yield(result);
+        else
+            rb_yield_splat(result);
 	str_mod_check(str, p, len);
 	rb_backref_set(match);	/* restore $~ value */
     }

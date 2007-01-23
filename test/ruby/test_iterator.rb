@@ -150,22 +150,22 @@ class TestIterator < Test::Unit::TestCase
     IterTest.new([1]).each1 {|x| assert_equal(1, x)}
     IterTest.new([2]).each2 {|x| assert_equal([2], x)}
     IterTest.new([4]).each4 {|x| assert_equal(4, x)}
-    IterTest.new([5]).each5 {|x| assert_equal([5], x)}
+    IterTest.new([5]).each5 {|x| assert_equal(5, x)}
     IterTest.new([6]).each6 {|x| assert_equal([6], x)}
     IterTest.new([8]).each8 {|x| assert_equal(8, x)}
 
     IterTest.new([[0]]).each0 {|x| assert_equal([0], x)}
-    IterTest.new([[1]]).each1 {|x| assert_equal(1, x)}
-    IterTest.new([[2]]).each2 {|x| assert_equal([2], x)}
+    IterTest.new([[1]]).each1 {|x| assert_equal([1], x)}
+    IterTest.new([[2]]).each2 {|x| assert_equal([[2]], x)}
     IterTest.new([[3]]).each3 {|x| assert_equal(3, x)}
     IterTest.new([[4]]).each4 {|x| assert_equal([4], x)}
     IterTest.new([[5]]).each5 {|x| assert_equal([5], x)}
-    IterTest.new([[6]]).each6 {|x| assert_equal([6], x)}
-    IterTest.new([[7]]).each7 {|x| assert_equal([7], x)}
+    IterTest.new([[6]]).each6 {|x| assert_equal([[6]], x)}
+    IterTest.new([[7]]).each7 {|x| assert_equal(7, x)}
     IterTest.new([[8]]).each8 {|x| assert_equal([8], x)}
 
-    IterTest.new([[0,0]]).each0 {|*x| assert_equal([0,0], x)}
-    IterTest.new([[8,8]]).each8 {|*x| assert_equal([8,8], x)}
+    IterTest.new([[0,0]]).each0 {|*x| assert_equal([[0,0]], x)}
+    IterTest.new([[8,8]]).each8 {|*x| assert_equal([[8,8]], x)}
   end
 
   def m(var)
@@ -359,6 +359,9 @@ class TestIterator < Test::Unit::TestCase
 
   class H
     def each
+      yield [:key, :value]
+    end
+    def each_pair
       yield :key, :value
     end
   end
@@ -366,8 +369,13 @@ class TestIterator < Test::Unit::TestCase
   def test_assoc_yield
     [{:key=>:value}, H.new].each {|h|
       h.each{|a| assert_equal([:key, :value], a)}
-      h.each{|*a| assert_equal([:key, :value], a)}
+      h.each{|a,| assert_equal(:key, a)}
+      h.each{|*a| assert_equal([[:key, :value]], a)}
       h.each{|k,v| assert_equal([:key, :value], [k,v])}
+      h.each_pair{|a| assert_equal(:key, a)}
+      h.each_pair{|a,| assert_equal(:key, a)}
+      h.each_pair{|*a| assert_equal([:key, :value], a)}
+      h.each_pair{|k,v| assert_equal([:key, :value], [k,v])}
     }
   end
 

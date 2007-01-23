@@ -1418,7 +1418,7 @@ class OptionParser
   def search(id, key)
     block_given = block_given?
     visit(:search, id, key) do |k|
-      return block_given ? yield(k) : k
+      return block_given ? yield(*k) : k
     end
   end
   private :search

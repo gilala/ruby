@@ -289,7 +289,7 @@ class GetoptLong
     @canonical_names.clear
     @argument_flags.clear
 
-    arguments.each do |*arg|
+    arguments.each do |arg|
       #
       # Find an argument flag and it set to `argument_flag'.
       #
