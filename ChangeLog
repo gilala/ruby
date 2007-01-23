@@ -18,6 +18,23 @@ Sat Jan 20 06:45:21 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
 	* eval.c (method_owner): a new method to get the class or module
 	  that defines the method.
 
+Wed Jan 17 10:17:51 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* parse.y (new_bv_gen): generate NODE_LASGN parse node outside of
+	  any blocks.
+
+Fri Jan 12 13:32:34 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* parse.y (arg): add new rule for explicit block local variable
+	  assignment. 
+
+	* parse.y (parser_yylex): allow ':=' assignment operator.
+
+	* parse.y (assignable_gen): do not generate NEW_DASGN() for mere
+	  local assignment.
+
+	* sample/test.rb: update some test to adapt new scoping rule.
+
 Wed Jan 10 00:10:23 2007  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* array.c (rb_ary_replace): use ptr and len of orig instead of

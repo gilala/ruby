@@ -561,6 +561,7 @@ static void ripper_compile_error(struct parser_params*, const char *fmt, ...);
 %token tNEQ  		/* != */
 %token tGEQ  		/* >= */
 %token tLEQ  		/* <= */
+%token tCEQ  		/* := */
 %token tANDOP tOROP	/* && and || */
 %token tMATCH tNMATCH	/* =~ and !~ */
 %token tDOT2 tDOT3	/* .. and ... */
@@ -593,7 +594,7 @@ static void ripper_compile_error(struct parser_params*, const char *fmt, ...);
 %left  keyword_or keyword_and
 %right keyword_not
 %nonassoc keyword_defined
-%right '=' tOP_ASGN
+%right '=' tCEQ tOP_ASGN
 %left modifier_rescue
 %right '?' ':'
 %nonassoc tDOT2 tDOT3
@@ -1661,12 +1662,28 @@ arg		: lhs '=' arg
 			$$ = dispatch2(assign, $1, $3);
 		    %*/
 		    }
+		| tIDENTIFIER tCEQ arg
+		    {
+		    /*%%%*/
+			$$ = new_bv($1, $3);
+		    /*%
+			$$ = dispatch2(dassign, $1, $3);
+		    %*/
+		    }
 		| lhs '=' arg modifier_rescue arg
 		    {
 		    /*%%%*/
 			$$ = node_assign($1, NEW_RESCUE($3, NEW_RESBODY(0,$5,0), 0));
 		    /*%
 			$$ = dispatch2(assign, $1, dispatch2(rescue_mod,$3,$5));
+		    %*/
+		    }
+		| tIDENTIFIER tCEQ arg modifier_rescue arg
+		    {
+		    /*%%%*/
+			$$ = new_bv($1, NEW_RESCUE($3, NEW_RESBODY(0,$5,0), 0));
+		    /*%
+			$$ = dispatch2(dassign, $1, dispatch2(rescue_mod,$3,$5));
 		    %*/
 		    }
 		| var_lhs tOP_ASGN arg
@@ -4757,6 +4774,7 @@ parser_pushback(struct parser_params *parser, int c)
 #define lex_goto_eol(parser) (parser->parser_lex_p = parser->parser_lex_pend)
 #define was_bol() (lex_p == lex_pbeg + 1)
 #define peek(c) (lex_p != lex_pend && (c) == *lex_p)
+#define peek2(c) (lex_p + 1 < lex_pend && lex_p[1] == (c))
 
 #define tokfix() (tokenbuf[tokidx]='\0')
 #define tok() tokenbuf
@@ -6296,6 +6314,10 @@ parser_yylex(struct parser_params *parser)
 	    lex_state = EXPR_DOT;
 	    return tCOLON2;
 	}
+	if (c == '=' && !(peek('=') || peek('~'))) {
+	    lex_state = EXPR_BEG;
+	    return tCEQ;
+	}
 	if (lex_state == EXPR_END || 
 	    lex_state == EXPR_ENDARG || ISSPACE(c)) {
 	    pushback(c);
@@ -6733,7 +6755,7 @@ parser_yylex(struct parser_params *parser)
 	    else {
 		if (lex_state == EXPR_FNAME) {
 		    if ((c = nextc()) == '=' && !peek('~') && !peek('>') &&
-			(!peek('=') || (lex_p + 1 < lex_pend && lex_p[1] == '>'))) {
+			(!peek('=') || peek2('>'))) {
 			result = tIDENTIFIER;
 			tokadd(c);
 			tokfix();
@@ -6788,7 +6810,7 @@ parser_yylex(struct parser_params *parser)
 	    if ((lex_state == EXPR_BEG && !cmd_state) ||
 		lex_state == EXPR_ARG ||
 		lex_state == EXPR_CMDARG) {
-		if (peek(':') && !(lex_p + 1 < lex_pend && lex_p[1] == ':')) {
+		if (peek(':') && !(peek2(':') || peek2('='))) {
 		    lex_state = EXPR_BEG;
 		    nextc();
 		    set_yylval_id(rb_intern(tok()));
@@ -7212,6 +7234,11 @@ assignable_gen(struct parser_params *parser, ID id, NODE *val)
 	else if (rb_dvar_defined(id)) {
 	    return NEW_DASGN(id, val);
 	}
+#if 1
+	else {
+	    return NEW_LASGN(id, val);
+	}
+#else
 	else if (local_id(id) || !dyna_in_block()) {
 	    return NEW_LASGN(id, val);
 	}
@@ -7219,6 +7246,7 @@ assignable_gen(struct parser_params *parser, ID id, NODE *val)
 	    dyna_var(id);
 	    return NEW_DASGN_CURR(id, val);
 	}
+#endif
     }
     else if (is_global_id(id)) {
 	return NEW_GASGN(id, val);
@@ -7258,6 +7286,9 @@ new_bv_gen(struct parser_params *parser, ID name, NODE *val)
 	compile_error(PARSER_ARG "invalid local variable - %s",
 		      rb_id2name(name));
 	return 0;
+    }
+    if (!dyna_in_block()) {
+	return NEW_LASGN(name, val);
     }
     shadowing_lvar(name);
     dyna_var(name);

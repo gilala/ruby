@@ -303,7 +303,7 @@ test_ok(a == [[1]])
 x, (y, z) = 1, 2, 3
 test_ok([1,2,nil] == [x,y,z])
 x, (y, z) = 1, [2,3]
-test_ok([1,2,3] == [x,y,z]); p [x,y,z]
+test_ok([1,2,3] == [x,y,z])
 x, (y, z) = 1, [2]
 test_ok([1,2,nil] == [x,y,z])
 
@@ -1649,7 +1649,7 @@ test_ok($proc.call(2) == 4)
 test_ok($proc.call(3) == 6)
 
 Proc.new{
-  iii=5				# nested local variable
+  iii:=5				# nested local variable
   $proc = Proc.new{|i|
     iii = i
   }
@@ -1761,14 +1761,14 @@ rescue NameError		# must raise error
 end
 test_ok(!$bad)
 
-x = Proc.new{}
+x = Proc.new{|;i4|binding}.call
 eval "i4 = 1", x
 test_ok(eval("i4", x) == 1)
-x = Proc.new{Proc.new{}}.call
-eval "i4 = 22", x
-test_ok(eval("i4", x) == 22)
+x = Proc.new{Proc.new{|;i5|binding}}.call
+eval "i5 = 22", x
+test_ok(eval("i5", x) == 22)
 $x = []
-x = Proc.new{Proc.new{}}.call
+x = Proc.new{Proc.new{binding}}.call
 eval "(0..9).each{|i5| $x[i5] = Proc.new{i5*2}}", x
 test_ok($x[4].call == 8)
 
@@ -1782,7 +1782,7 @@ $x = []
 x = Proc.new{binding}.call
 eval "(0..9).each{|i5| $x[i5] = Proc.new{i5*2}}", x
 test_ok($x[4].call == 8)
-x = Proc.new{binding}.call
+x = Proc.new{|;i6,j6|binding}.call
 eval "for i6 in 1..1; j6=i6; end", x
 test_ok(eval("defined? i6", x))
 test_ok(eval("defined? j6", x))
@@ -1794,18 +1794,18 @@ Proc.new {
   Proc.new{foo11=22}.call
   Proc.new{foo22=55}.call
   test_ok(eval("foo11", p) == eval("foo11"))
-  test_ok(eval("foo11") == 1)
+  test_ok(eval("foo11") == 22)
   test_ok(eval("foo22", p) == eval("foo22"))
   test_ok(eval("foo22") == 55)
 }.call
 
-p1 = Proc.new{i7 = 0; Proc.new{i7}}.call
+p1 = Proc.new{i7 := 0; Proc.new{i7}}.call
 test_ok(p1.call == 0)
 eval "i7=5", p1
 test_ok(p1.call == 5)
 test_ok(!defined?(i7))
 
-p1 = Proc.new{i7 = 0; Proc.new{i7}}.call
+p1 = Proc.new{i7 := 0; Proc.new{i7}}.call
 i7 = nil
 test_ok(p1.call == 0)
 eval "i7=1", p1
