@@ -317,10 +317,10 @@ module WEBrick
       @remaining_size = 0
     end
 
-    def _read_data(io, method, arg)
+    def _read_data(io, method, *arg)
       begin
         WEBrick::Utils.timeout(@config[:RequestTimeout]){
-          return io.__send__(method, arg)
+          return io.__send(method, *arg)
         }
       rescue Errno::ECONNRESET
         return nil
@@ -330,7 +330,11 @@ module WEBrick
     end
 
     def read_line(io)
-      _read_data(io, :gets, LF)
+      line = _read_data(io, :gets, [LF, 1024])
+      if line.size == 1024 and line[-1,1] != LF
+        raise HTTPStatus::RequestURITooLarge
+      end
+      line
     end
 
     def read_data(io, size)
