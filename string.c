@@ -4655,46 +4655,6 @@ sym_equal(VALUE sym1, VALUE sym2)
     return rb_str_equal(sym1, sym2);
 }
 
-/*
- * call-seq:
- *   sym.eql?(other)   => true or false
- *
- * Two symbols are equal if they are exactly same symbols.
- */
-
-static VALUE
-sym_eql(VALUE sym1, VALUE sym2)
-{
-    if (sym1 == sym2) return Qtrue;
-    if (SYMBOL_P(sym2)) return Qfalse;
-    return rb_str_eql(sym1, sym2);
-}
-
-/*
- * call-seq:
- *    sym.hash   => fixnum
- *
- * Return a hash based on the symbol's length and content.
- */
-static VALUE
-sym_hash(VALUE sym)
-{
-    int h;
-    VALUE hval;
-
-    if (STR_SHARED_P(sym)) {
-	/* if a symbol has shared value, that's a hash value. */
-	return RSTRING(sym)->as.heap.aux.shared;
-    }
-    h = rb_str_hash(sym);
-    hval = INT2FIX(h);
-    if (!STR_EMBED_P(sym)) {
-	FL_SET(sym, STR_ASSOC);
-	RSTRING(sym)->as.heap.aux.shared = hval;
-    }
-    return hval;
-}
-
 
 /*
  *  call-seq:
@@ -4756,7 +4716,7 @@ sym_inspect(VALUE sym)
 static VALUE
 sym_to_s(VALUE sym)
 {
-    return rb_str_new(RSTRING_PTR(sym), RSTRING_LEN(sym));
+    return str_new3(rb_cString, sym);
 }
 
 
@@ -4989,8 +4949,6 @@ Init_String(void)
     rb_define_singleton_method(rb_cSymbol, "intern", rb_sym_s_intern, 1);
 
     rb_define_method(rb_cSymbol, "==", sym_equal, 1);
-    rb_define_method(rb_cSymbol, "eql?", sym_eql, 1);
-    rb_define_method(rb_cSymbol, "hash", sym_hash, 0);
     rb_define_method(rb_cSymbol, "to_i", sym_to_i, 0);
     rb_define_method(rb_cSymbol, "inspect", sym_inspect, 0);
     rb_define_method(rb_cSymbol, "to_s", sym_to_s, 0);
@@ -5017,7 +4975,6 @@ Init_String(void)
     rb_define_method(rb_cSymbol, "chr", rb_str_chr, 0);
 
     rb_define_method(rb_cSymbol, "to_f", rb_str_to_f, 0);
-    rb_define_method(rb_cSymbol, "to_str", rb_str_to_s, 0);
     rb_define_method(rb_cSymbol, "dump", rb_str_dump, 0);
 
     rb_define_method(rb_cSymbol, "upcase", rb_str_upcase, 0);

@@ -429,6 +429,14 @@ Wed Nov 15 23:22:54 2006  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 	* file.c (test_grpowned, rb_stat_grpowned): should honor
 	  supplementary group IDs.  [ruby-core:09546]
 
+Thu Nov  9 20:51:10 2006  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* string.c (sym_to_s): use shared copy of symbols to save memory.
+
+	* string.c (Init_String): remove Symbol#hash and Symbol#eql?
+
+	* string.c (Init_String): remove Symbol#to_str.
+
 Tue Nov  7 18:35:18 2006  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* eval.c (formal_assign): need to pack rest arg information in
