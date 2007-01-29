@@ -1,3 +1,11 @@
+Mon Jan 29 17:52:44 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* instruby.rb: use ":=" assignment to avoid potential local
+	  variable name conflict.  [ruby-dev:30206]
+
+	* lib/date/format.rb (Date::Format::Bag::method_missing): add
+	  prefix to avoid making t class-local instance variable.
+
 Fri Jan 26 07:48:57 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* enumerator.c (enumerator_init_copy): need to copy internal

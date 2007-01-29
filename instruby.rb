@@ -203,7 +203,7 @@ if $extout
   install?(:ext, :arch, :'ext-arch') do
     puts "installing extension objects"
     makedirs [archlibdir, sitearchlibdir]
-    if noinst = CONFIG["no_install_files"] and noinst.empty?
+    if noinst := CONFIG["no_install_files"] and noinst.empty?
       noinst = nil
     end
     install_recursive("#{extout}/#{CONFIG['arch']}", archlibdir, :no_install => noinst)
@@ -219,7 +219,7 @@ install?(:rdoc) do
   if $rdocdir
     puts "installing rdoc"
 
-    ridatadir = File.join(CONFIG['datadir'], 'ri/$(MAJOR).$(MINOR)/system')
+    ridatadir := File.join(CONFIG['datadir'], 'ri/$(MAJOR).$(MINOR)/system')
     Config.expand(ridatadir)
     makedirs [ridatadir]
     install_recursive($rdocdir, ridatadir)
@@ -232,23 +232,23 @@ install?(:local, :comm, :bin) do
   Dir.chdir srcdir
   makedirs [bindir, rubylibdir]
 
-  ruby_shebang = File.join(bindir, ruby_install_name)
+  ruby_shebang := File.join(bindir, ruby_install_name)
   if File::ALT_SEPARATOR
-    ruby_bin_dosish = ruby_shebang.tr(File::SEPARATOR, File::ALT_SEPARATOR)
+    ruby_bin_dosish := ruby_shebang.tr(File::SEPARATOR, File::ALT_SEPARATOR)
   end
   for src in Dir["bin/*"]
     next unless File.file?(src)
     next if /\/[.#]|(\.(old|bak|orig|rej|diff|patch|core)|~|\/core)$/i =~ src
 
-    name = ruby_install_name.sub(/ruby/, File.basename(src))
-    dest = File.join(bindir, name)
+    name := ruby_install_name.sub(/ruby/, File.basename(src))
+    dest := File.join(bindir, name)
 
     install src, dest, :mode => 0755
 
     next if $dryrun
 
-    shebang = ''
-    body = ''
+    shebang := ''
+    body := ''
     open_for_install(dest, "r+") { |f|
       shebang = f.gets
       body = f.read
@@ -261,7 +261,7 @@ install?(:local, :comm, :bin) do
     }
 
     if ruby_bin_dosish
-      batfile = File.join(bindir, name + ".bat")
+      batfile := File.join(bindir, name + ".bat")
       open_for_install(batfile, "wb") {|b|
         b.print((<<EOH+shebang+body+<<EOF).gsub(/\r?\n/, "\r\n"))
 @echo off
@@ -287,7 +287,7 @@ install?(:local, :comm, :lib) do
   makedirs [rubylibdir]
 
   for f in Dir["lib/**/*{.rb,help-message}"]
-    dir = File.dirname(f).sub!(/\Alib/, rubylibdir) || rubylibdir
+    dir := File.dirname(f).sub!(/\Alib/, rubylibdir) || rubylibdir
     makedirs dir
     install f, dir, :mode => 0644
   end
@@ -316,7 +316,7 @@ install?(:local, :comm, :man) do
   for mdoc in Dir["*.[1-9]"]
     next unless File.file?(mdoc) and open(mdoc){|fh| fh.read(1) == '.'}
 
-    destdir = mandir + mdoc[/(\d+)$/]
+    destdir := mandir + mdoc[/(\d+)$/]
     destfile = File.join(destdir, mdoc.sub(/ruby/, ruby_install_name))
 
     makedirs destdir
