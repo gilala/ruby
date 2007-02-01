@@ -1,3 +1,8 @@
+Thu Feb  1 23:25:21 2007  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* parse.y (rb_id2str): store Strings for operator symbols.
+	  [ruby-dev:30235]
+
 Mon Jan 29 17:52:44 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* instruby.rb: use ":=" assignment to avoid potential local

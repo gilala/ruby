@@ -8285,6 +8285,7 @@ static struct symbols {
     st_table *id_str;
     st_table *ivar2_id;
     st_table *id_ivar2;
+    VALUE op_sym[tLAST_TOKEN];
 } global_symbols = {tLAST_TOKEN};
 
 static struct st_hash_type sym_hash_type = {
@@ -8330,6 +8331,8 @@ void
 rb_gc_mark_symbols(void)
 {
     rb_mark_tbl(global_symbols.id_str);
+    rb_gc_mark_locations(global_symbols.op_sym,
+			 global_symbols.op_sym + tLAST_TOKEN);
 }
 
 static ID
@@ -8544,7 +8547,6 @@ ID
 rb_decompose_ivar2(ID id, VALUE *klassp)
 {
     struct ivar2_key *kp;
-    ID oid;
 
     if (!st_lookup(global_symbols.id_ivar2, (st_data_t)id, (st_data_t *)&kp)) {
 	return id;
@@ -8563,8 +8565,15 @@ rb_id2str(ID id)
 	int i = 0;
 
 	for (i=0; op_tbl[i].token; i++) {
-	    if (op_tbl[i].token == id)
-		return rb_str_new2(op_tbl[i].name);
+	    if (op_tbl[i].token == id) {
+		VALUE str = global_symbols.op_sym[i];
+		if (!str) {
+		    str = rb_str_new2(op_tbl[i].name);
+		    OBJ_FREEZE(str);
+		    global_symbols.op_sym[i] = str;
+		}
+		return str;
+	    }
 	}
     }
 
