@@ -4113,7 +4113,8 @@ f_arg_item	: f_norm_arg
 		        ID tid = internal_id();
 			arg_var(tid);
 			$2->nd_value = NEW_LVAR(tid);
-			$$ = NEW_ARGS_AUX(tid, $2);
+			$$ = NEW_ARGS_AUX(tid, 1);
+		        $$->nd_next = $2;
                     /*%
 			$$ = dispatch1(mlhs_paren, $2);
                     %*/
@@ -4185,13 +4186,8 @@ f_rest_arg	: restarg_mark tIDENTIFIER
 		| restarg_mark
 		    {
 		    /*%%%*/
-			if (dyna_in_block()) {
-			    $$ = internal_id();
-			}
-			else {
-			    local_var(0);
-			    $$ = -1;
-			}
+			$$ = internal_id();
+		        arg_var($$);
 		    /*%
 			$$ = dispatch1(restparam, Qnil);
 		    %*/
