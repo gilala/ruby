@@ -706,7 +706,8 @@ program		:  {
 				void_expr(node->nd_head);
 			    }
 			}
-			ruby_eval_tree = block_append(ruby_eval_tree, $2);
+			ruby_eval_tree =
+		            NEW_SCOPE(0,block_append(ruby_eval_tree, $2));
                         top_local_setup();
                     /*%
                         $$ = $2;
