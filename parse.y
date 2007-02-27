@@ -377,9 +377,9 @@ static void local_push_gen(struct parser_params*,int);
 #define local_push(top) local_push_gen(parser,top)
 static void local_pop_gen(struct parser_params*);
 #define local_pop() local_pop_gen(parser)
-static int  local_var_gen(struct parser_params*, ID);
+static int local_var_gen(struct parser_params*, ID);
 #define local_var(id) local_var_gen(parser, id);
-static int  arg_var_gen(struct parser_params*, ID);
+static int arg_var_gen(struct parser_params*, ID);
 #define arg_var(id) arg_var_gen(parser, id)
 static int  local_id_gen(struct parser_params*, ID);
 #define local_id(id) local_id_gen(parser, id)
@@ -8013,15 +8013,21 @@ dyna_in_block_gen(struct parser_params *parser)
 static int
 dvar_defined_gen(struct parser_params *parser, ID id)
 {
-    struct vtable *dvars = lvtbl->vars;
+    struct vtable *vars, *args;
 
-    while(POINTER_P(dvars)){
-	if(vtable_included(dvars, id)){
+    args = lvtbl->vars;
+    vars = lvtbl->vars;
+    while (args && args->prev){
+	if (vtable_included(args, id)){
 	    return 1;
 	}
-	dvars = dvars->prev;
+	if (vtable_included(vars, id)){
+	    return 1;
+	}
+	args = vars->prev;
+	vars = vars->prev;
     }
-    if(dvars == DVARS_INHERIT){
+    if (vars && vars->prev == DVARS_INHERIT){
         return rb_dvar_defined(id);
     }
     return 0;
