@@ -203,7 +203,6 @@ typedef struct RNode {
 #define nd_tbl   u1.tbl
 
 #define nd_var   u1.node
-#define nd_ibdy  u2.node
 #define nd_iter  u3.node
 
 #define nd_value u2.node
@@ -253,8 +252,8 @@ typedef struct RNode {
 #define NEW_DEFS(r,i,a,d) NEW_NODE(NODE_DEFS,r,i,NEW_RFUNC(a,d))
 #define NEW_CFUNC(f,c) NEW_NODE(NODE_CFUNC,f,c,0)
 #define NEW_IFUNC(f,c) NEW_NODE(NODE_IFUNC,f,c,0)
-#define NEW_RFUNC(b1,b2) NEW_SCOPE(block_append(b1,b2))
-#define NEW_SCOPE(b) NEW_NODE(NODE_SCOPE,local_tbl(),0,(b))
+#define NEW_RFUNC(b1,b2) NEW_SCOPE(0,block_append(b1,b2))
+#define NEW_SCOPE(a,b) NEW_NODE(NODE_SCOPE,local_tbl(),a,b)
 #define NEW_BLOCK(a) NEW_NODE(NODE_BLOCK,a,0,0)
 #define NEW_IF(c,t,e) NEW_NODE(NODE_IF,c,t,e)
 #define NEW_UNLESS(c,t,e) NEW_IF(c,e,t)
@@ -264,8 +263,8 @@ typedef struct RNode {
 #define NEW_WHILE(c,b,n) NEW_NODE(NODE_WHILE,c,b,n)
 #define NEW_UNTIL(c,b,n) NEW_NODE(NODE_UNTIL,c,b,n)
 #define NEW_FOR(v,i,b) NEW_NODE(NODE_FOR,v,b,i)
-#define NEW_ITER(v,i,b) NEW_NODE(NODE_ITER,v,b,i)
-#define NEW_LAMBDA(a,b) NEW_NODE(NODE_LAMBDA,a,b,0)
+#define NEW_ITER(a,b) NEW_NODE(NODE_ITER,0,NEW_SCOPE(a,b),0)
+#define NEW_LAMBDA(a) NEW_NODE(NODE_LAMBDA,a,0,0)
 #define NEW_BREAK(s) NEW_NODE(NODE_BREAK,s,0,0)
 #define NEW_NEXT(s) NEW_NODE(NODE_NEXT,s,0,0)
 #define NEW_REDO() NEW_NODE(NODE_REDO,0,0,0)
@@ -332,9 +331,9 @@ typedef struct RNode {
 #define NEW_ALIAS(n,o) NEW_NODE(NODE_ALIAS,n,o,0)
 #define NEW_VALIAS(n,o) NEW_NODE(NODE_VALIAS,n,o,0)
 #define NEW_UNDEF(i) NEW_NODE(NODE_UNDEF,0,i,0)
-#define NEW_CLASS(n,b,s) NEW_NODE(NODE_CLASS,n,NEW_SCOPE(b),(s))
-#define NEW_SCLASS(r,b) NEW_NODE(NODE_SCLASS,r,NEW_SCOPE(b),0)
-#define NEW_MODULE(n,b) NEW_NODE(NODE_MODULE,n,NEW_SCOPE(b),0)
+#define NEW_CLASS(n,b,s) NEW_NODE(NODE_CLASS,n,NEW_SCOPE(0,b),(s))
+#define NEW_SCLASS(r,b) NEW_NODE(NODE_SCLASS,r,NEW_SCOPE(0,b),0)
+#define NEW_MODULE(n,b) NEW_NODE(NODE_MODULE,n,NEW_SCOPE(0,b),0)
 #define NEW_COLON2(c,i) NEW_NODE(NODE_COLON2,c,i,0)
 #define NEW_COLON3(i) NEW_NODE(NODE_COLON3,0,i,0)
 #define NEW_CREF(c) (NEW_NODE(NODE_CREF,0,0,c))

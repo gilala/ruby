@@ -115,8 +115,7 @@ struct vtable {
 
 struct local_vars {
     struct vtable *args;
-    struct vtable *tbl;
-    struct vtable *dvars;
+    struct vtable *vars;
     struct local_vars *prev;
 };
 
@@ -360,8 +359,8 @@ static NODE *gettable_gen(struct parser_params*,ID);
 #define gettable(id) gettable_gen(parser,id)
 static NODE *assignable_gen(struct parser_params*,ID,NODE*);
 #define assignable(id,node) assignable_gen(parser, id, node)
-static NODE *new_bv_gen(struct parser_params*,ID,NODE*);
-#define new_bv(id,node) new_bv_gen(parser, id, node)
+static void new_bv_gen(struct parser_params*,ID);
+#define new_bv(id) new_bv_gen(parser, id)
 static NODE *aryset_gen(struct parser_params*,NODE*,NODE*);
 #define aryset(node1,node2) aryset_gen(parser, node1, node2)
 static NODE *attrset_gen(struct parser_params*,NODE*,ID);
@@ -396,10 +395,7 @@ static void dyna_pop_gen(struct parser_params*);
 #define dyna_pop() dyna_pop_gen(parser)
 static int dyna_in_block_gen(struct parser_params*);
 #define dyna_in_block() dyna_in_block_gen(parser)
-static NODE *dyna_init_gen(struct parser_params*, NODE*, int);
-#define dyna_init(node, pre) dyna_init_gen(parser, node, pre)
-static void dyna_var_gen(struct parser_params*,ID);
-#define dyna_var(id) dyna_var_gen(parser, id)
+#define dyna_var(id) local_var(id)
 static int dvar_defined_gen(struct parser_params*,ID);
 #define dvar_defined(id) dvar_defined_gen(parser, id)
 static int dvar_curr_gen(struct parser_params*,ID);
@@ -618,7 +614,7 @@ static void ripper_compile_error(struct parser_params*, const char *fmt, ...);
 %type <node> f_arglist f_args f_arg f_arg_item f_optarg f_marg f_marg_head f_margs
 %type <node> assoc_list assocs assoc undef_list backref string_dvar for_var
 %type <node> block_param opt_block_param block_param_def f_opt
-%type <node> opt_bv_decl bv_decls bvar lambda f_larglist lambda_body
+%type <node> lambda f_larglist lambda_body
 %type <node> brace_block cmd_brace_block do_block lhs none fitem
 %type <node> mlhs mlhs_head mlhs_basic mlhs_item mlhs_node mlhs_post
 %type <id>   fsym variable sym symbol operation operation2 operation3
@@ -1201,14 +1197,12 @@ cmd_brace_block	: tLBRACE_ARG
 		    /*%
 		    %*/
 		    }
-		  opt_block_param {$<num>$ = vtable_size(lvtbl->dvars);}
+		  opt_block_param
 		  compstmt
 		  '}'
 		    {
 		    /*%%%*/
-			$3->nd_body = block_append($3->nd_body,
-						   dyna_init($5, $<num>4));
-			$$ = $3;
+			$$ = NEW_ITER($3,$4);
 			nd_set_line($$, $<num>2);
 			dyna_pop();
 		    /*%
@@ -3078,19 +3072,13 @@ block_param	: f_arg ',' f_rest_arg opt_f_block_arg
 		;
 
 opt_block_param	: none
-		    {
-		    /*%%%*/
-			$$ = NEW_ITER(0, 0, 0);
-		    /*%
-		    %*/
-		    }
 		| block_param_def
 		;
 
 block_param_def	: '|' opt_bv_decl '|'
 		    {
 		    /*%%%*/
-			$$ = NEW_ITER((NODE*)1, 0, $2);
+			$$ = 0;
 		    /*%
 			$$ = blockvar_new(mlhs_new());
 		    %*/
@@ -3098,7 +3086,7 @@ block_param_def	: '|' opt_bv_decl '|'
 		| tOROP
 		    {
 		    /*%%%*/
-			$$ = NEW_ITER((NODE*)1, 0, 0);
+			$$ = 0;
 		    /*%
 			$$ = blockvar_new(mlhs_new());
 		    %*/
@@ -3106,7 +3094,7 @@ block_param_def	: '|' opt_bv_decl '|'
 		| '|' block_param opt_bv_decl '|'
 		    {
 		    /*%%%*/
-			$$ = NEW_ITER($2, 0, $3);
+			$$ = $2;
 		    /*%
 			$$ = blockvar_new($2);
 		    %*/
@@ -3116,39 +3104,17 @@ block_param_def	: '|' opt_bv_decl '|'
 
 opt_bv_decl	: none
 		| ';' bv_decls
-		    {
-		    /*%%%*/
-			$$ = $2;
-		    /*%
-			$$ = FIXME;
-		    %*/
-		    }
 		;
 
 bv_decls	: bvar
-		    {
-		    /*%%%*/
-			$$ = $1;
-		    /*%
-			$$ = FIXME;
-		    %*/
-		    }
 		| bv_decls ',' bvar
-		    {
-		    /*%%%*/
-			$$ = block_append($1, $3);
-		    /*%
-			$$ = FIXME;
-		    %*/
-		    }
 		;
 
 bvar		:  f_norm_arg
 		    {
 		    /*%%%*/
-                        $$ = new_bv($1, NEW_NIL());
+			new_bv($1);
 		    /*%
-			$$ = FIXME;
 		    %*/
 		    }
 		;
@@ -3166,7 +3132,7 @@ lambda		:   {
 		    {
 		    /*%%%*/
 			$$ = $2;
-			$$->nd_body = block_append($$->nd_body, $3);
+			$$->nd_body = $3;
 			dyna_pop();
 			lpar_beg = $<num>1;
 		    /*%
@@ -3178,7 +3144,7 @@ lambda		:   {
 f_larglist	: '(' f_args opt_bv_decl rparen
 		    {
 		    /*%%%*/
-			$$ = NEW_LAMBDA($2, $3);
+			$$ = NEW_LAMBDA($2);
 		    /*%
 			$$ = dispatch1(paren, $2);
 		    %*/
@@ -3186,7 +3152,7 @@ f_larglist	: '(' f_args opt_bv_decl rparen
 		| f_args opt_bv_decl
 		    {
 		    /*%%%*/
-			$$ = NEW_LAMBDA($1, $2);
+			$$ = NEW_LAMBDA($1);
 		    /*%
 			$$ = $1;
 		    %*/
@@ -3211,18 +3177,11 @@ do_block	: keyword_do_block
 		    /*% %*/
 		    }
 		  opt_block_param
-		    {
-		    /*%%%*/
-			$<num>$ = vtable_size(lvtbl->dvars);
-		    /*% %*/
-		    }
 		  compstmt
 		  keyword_end
 		    {
 		    /*%%%*/
-			$3->nd_body = block_append($3->nd_body,
-						   dyna_init($5, $<num>4));
-			$$ = $3;
+			$$ = NEW_ITER($3,$4);
 			nd_set_line($$, $<num>2);
 			dyna_pop();
 		    /*%
@@ -3359,18 +3318,10 @@ brace_block	: '{'
 		    /*% %*/
 		    }
 		  opt_block_param
-		    {
-		    /*%%%*/
-			$<num>$ = vtable_size(lvtbl->dvars);
-		    /*%
-		    %*/
-		    }
 		  compstmt '}'
 		    {
 		    /*%%%*/
-			$3->nd_body = block_append($3->nd_body,
-						   dyna_init($5, $<num>4));
-			$$ = $3;
+			$$ = NEW_ITER($3,$4);
 			nd_set_line($$, $<num>2);
 			dyna_pop();
 		    /*%
@@ -3385,18 +3336,10 @@ brace_block	: '{'
 		    /*% %*/
 		    }
 		  opt_block_param
-		    {
-		    /*%%%*/
-			$<num>$ = vtable_size(lvtbl->dvars);
-		    /*%
-		    %*/
-		    }
 		  compstmt keyword_end
 		    {
 		    /*%%%*/
-			$3->nd_body = block_append($3->nd_body,
-						   dyna_init($5, $<num>4));
-			$$ = $3;
+			$$ = NEW_ITER($3,$4);
 			nd_set_line($$, $<num>2);
 			dyna_pop();
 		    /*%
@@ -4100,8 +4043,8 @@ f_arg_item	: f_norm_arg
                     /*%%%*/
 			if (!is_local_id($1))
 			    yyerror("formal argument must be local variable");
-			arg_var($1);
 			shadowing_lvar($1);
+			arg_var($1);
 			$$ = NEW_ARGS_AUX($1, 1);
                     /*%
                         $$ = rb_ary_new();
@@ -4135,8 +4078,8 @@ f_opt		: tIDENTIFIER '=' arg_value
 		    /*%%%*/
 			if (!is_local_id($1))
 			    yyerror("formal argument must be local variable");
-			arg_var($1);
 		        shadowing_lvar($1);
+			arg_var($1);
 		        $$ = NEW_OPT_ARG(0, assignable($1, $3));
 		    /*%
 			$$ = rb_assoc_new($1, $3);
@@ -4178,6 +4121,7 @@ f_rest_arg	: restarg_mark tIDENTIFIER
 			if (!is_local_id($2))
 			    yyerror("rest argument must be local variable");
 		        shadowing_lvar($2);
+			arg_var($2);
 			$$ = $2;
 		    /*%
 			$$ = dispatch1(restparam, $2);
@@ -4206,6 +4150,7 @@ f_block_arg	: blkarg_mark tIDENTIFIER
 			else if (!dyna_in_block() && local_id($2))
 			    yyerror("duplicated block argument name");
 		        shadowing_lvar($2);
+			arg_var($2);
 			$$ = $2;
 		    /*%
 			$$ = $2;
@@ -7247,18 +7192,17 @@ shadowing_lvar_gen(struct parser_params *parser, ID name)
      }
 }
 
-static NODE*
-new_bv_gen(struct parser_params *parser, ID name, NODE *val)
+static void
+new_bv_gen(struct parser_params *parser, ID name)
 {
-    if (!name) return 0;
+    if (!name) return;
     if (!is_local_id(name)) {
 	compile_error(PARSER_ARG "invalid local variable - %s",
 		      rb_id2name(name));
-	return 0;
+	return;
     }
     shadowing_lvar(name);
     dyna_var(name);
-    return NEW_DASGN_CURR(name, val);
 }
 
 static NODE *
@@ -7921,8 +7865,7 @@ local_push_gen(struct parser_params *parser, int inherit_dvars)
     local = ALLOC(struct local_vars);
     local->prev = lvtbl;
     local->args = 0;
-    local->tbl = 0;
-    local->dvars = inherit_dvars ? DVARS_INHERIT : DVARS_TOPSCOPE;
+    local->vars = inherit_dvars ? DVARS_INHERIT : DVARS_TOPSCOPE;
     lvtbl = local;
 }
 
@@ -7931,8 +7874,7 @@ local_pop_gen(struct parser_params *parser)
 {
     struct local_vars *local = lvtbl->prev;
     vtable_free(lvtbl->args);
-    vtable_free(lvtbl->tbl);
-    vtable_free(lvtbl->dvars);
+    vtable_free(lvtbl->vars);
     xfree(lvtbl);
     lvtbl = local;
 }
@@ -7967,20 +7909,14 @@ vtable_to_tbl(struct vtable *src)
 static ID*
 local_tbl_gen(struct parser_params *parser)
 {
-    int cnt = vtable_size(lvtbl->args) + vtable_size(lvtbl->tbl);
+    int cnt = vtable_size(lvtbl->args) + vtable_size(lvtbl->vars);
     ID *buf;
 
     if (cnt <= 0) return 0;
     buf = ALLOC_N(ID, cnt + 1);
     vtable_tblcpy(buf+1, lvtbl->args);
-    vtable_tblcpy(buf+vtable_size(lvtbl->args)+1, lvtbl->tbl);
+    vtable_tblcpy(buf+vtable_size(lvtbl->args)+1, lvtbl->vars);
     return buf;
-}
-
-static ID*
-dyna_tbl_gen(struct parser_params *parser)
-{
-    return vtable_to_tbl(lvtbl->dvars);
 }
 
 static int
@@ -7996,18 +7932,27 @@ arg_var_gen(struct parser_params *parser, ID id)
 static int
 local_var_gen(struct parser_params *parser, ID id)
 {
-    if (lvtbl->tbl == 0) {
-	lvtbl->tbl = vtable_alloc(0);
+    if (lvtbl->vars == 0) {
+	lvtbl->vars = vtable_alloc(0);
     }
-    vtable_add(lvtbl->tbl, id);
-    return vtable_size(lvtbl->tbl) - 1;
+    vtable_add(lvtbl->vars, id);
+    return vtable_size(lvtbl->vars) - 1;
 }
 
 static int
 local_id_gen(struct parser_params *parser, ID id)
 {
-    if (lvtbl == 0) return Qfalse;
-    return vtable_included(lvtbl->tbl, id);
+    struct vtable *vars, *args;
+
+    vars = lvtbl->vars;
+    args = lvtbl->args;
+
+    while (vars && vars->prev) {
+	vars = vars->prev;
+	args = args->prev;
+    }
+    return (vtable_included(args, id) ||
+	    vtable_included(vars, id));
 }
 
 extern int rb_dvar_current(void);
@@ -8022,11 +7967,11 @@ top_local_init_gen(struct parser_params *parser)
 
     local_push(rb_dvar_current());
     if (cnt = rb_scope_base_local_tbl_size()) {
-        if (lvtbl->tbl == 0) {
-            lvtbl->tbl = vtable_alloc(0);
+        if (lvtbl->vars == 0) {
+            lvtbl->vars = vtable_alloc(0);
         }
         for (i = 0; i < cnt; i++) {
-            vtable_add(lvtbl->tbl, rb_scope_base_local_tbl_id(i));
+            vtable_add(lvtbl->vars, rb_scope_base_local_tbl_id(i));
         }
     }
 }
@@ -8034,67 +7979,46 @@ top_local_init_gen(struct parser_params *parser)
 static void
 top_local_setup_gen(struct parser_params *parser)
 {
-    if (lvtbl->dvars != 0) {
-        /* eval */
-        rb_scope_setup_top_local_tbl(dyna_tbl());
-    }
-    else {
-        rb_scope_setup_top_local_tbl(local_tbl());
-    }
+    rb_scope_setup_top_local_tbl(local_tbl());
     local_pop();
-}
-
-static void
-dyna_var_gen(struct parser_params *parser, ID id)
-{
-    if (!POINTER_P(lvtbl->dvars)) {
-        lvtbl->dvars = vtable_alloc(lvtbl->dvars);
-    }
-    vtable_add(lvtbl->dvars, id);
 }
 
 static void
 dyna_push_gen(struct parser_params *parser)
 {
-    lvtbl->dvars = vtable_alloc(lvtbl->dvars);
+    lvtbl->args = vtable_alloc(lvtbl->args);
+    lvtbl->vars = vtable_alloc(lvtbl->vars);
 }
 
 static void
 dyna_pop_gen(struct parser_params *parser)
 {
-    struct vtable *tmp = lvtbl->dvars;
-    lvtbl->dvars = lvtbl->dvars->prev;
+    struct vtable *tmp;
+
+    tmp = lvtbl->args;
+    lvtbl->args = lvtbl->args->prev;
+    vtable_free(tmp);
+    tmp = lvtbl->vars;
+    lvtbl->vars = lvtbl->vars->prev;
     vtable_free(tmp);
 }
 
 static int
 dyna_in_block_gen(struct parser_params *parser)
 {
-    return lvtbl->dvars != DVARS_TOPSCOPE;
-}
-
-static NODE *
-dyna_init_gen(struct parser_params *parser, NODE *node, int pre_cnt)
-{
-    NODE *var;
-    int post_cnt = vtable_size(lvtbl->dvars);
-
-    if (!node || pre_cnt == post_cnt) return node;
-    for (var = 0; post_cnt != pre_cnt; post_cnt--) {
-	var = NEW_DASGN_CURR(lvtbl->dvars->tbl[post_cnt-1], var);
-    }
-    return block_append(var, node);
+    return lvtbl->vars != DVARS_TOPSCOPE;
 }
 
 static int
 dvar_defined_gen(struct parser_params *parser, ID id)
 {
-    struct vtable *dvars = lvtbl->dvars;
+    struct vtable *dvars = lvtbl->vars;
+
     while(POINTER_P(dvars)){
-      if(vtable_included(dvars, id)){
-          return 1;
-      }
-      dvars = dvars->prev;
+	if(vtable_included(dvars, id)){
+	    return 1;
+	}
+	dvars = dvars->prev;
     }
     if(dvars == DVARS_INHERIT){
         return rb_dvar_defined(id);
@@ -8105,7 +8029,8 @@ dvar_defined_gen(struct parser_params *parser, ID id)
 static int
 dvar_curr_gen(struct parser_params *parser, ID id)
 {
-    return vtable_included(lvtbl->dvars, id);
+    return (vtable_included(lvtbl->args, id) ||
+	    vtable_included(lvtbl->vars, id));
 }
 
 void
@@ -8646,7 +8571,7 @@ parser_free(void *ptr)
         xfree(p->parser_tokenbuf);
     }
     for (local = p->parser_lvtbl; local; local = prev) {
-	if (local->tbl) xfree(local->tbl);
+	if (local->vars) xfree(local->vars);
 	prev = local->prev;
 	xfree(local);
     }
