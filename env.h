@@ -43,6 +43,7 @@ RUBY_EXTERN struct SCOPE {
 #define SCOPE_MALLOC  1
 #define SCOPE_NOSTACK 2
 #define SCOPE_DONT_RECYCLE 4
+#define SCOPE_CLONE   8
 
 RUBY_EXTERN int ruby_in_eval;
 VALUE ruby_current_class_object(void);

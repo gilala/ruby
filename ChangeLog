@@ -1,3 +1,14 @@
+Fri Mar  2 19:18:13 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* eval.c (proc_invoke): turn on SCOPE_CLONE flag.  a patch from
+	  Chikanaga Tomoyuki <chikanag AT nippon-control-system.co.jp>.
+	  [ruby-dev:30460]
+
+	* gc.c (obj_free): check SCOPE_CLONE flag before freeing local_tbl
+	  region.
+
+	* parse.y (top_local_setup_gen): ditto.
+
 Thu Feb  1 23:25:21 2007  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* parse.y (rb_id2str): store Strings for operator symbols.

@@ -8521,11 +8521,12 @@ proc_invoke(VALUE proc, VALUE args /* OK */, VALUE self, VALUE klass)
     if (klass) _block.frame.this_class = klass;
     _block.frame.argc = RARRAY_LEN(args);
     _block.frame.flags = ruby_frame->flags;
-    if (_block.frame.argc && (ruby_frame->flags & FRAME_DMETH)) {
+    if (_block.frame.argc && DMETHOD_P()) {
         NEWOBJ(scope, struct SCOPE);
         OBJSETUP(scope, args, T_SCOPE);
         scope->local_tbl = _block.scope->local_tbl;
         scope->local_vars = _block.scope->local_vars;
+	scope->flags |= SCOPE_CLONE;
         _block.scope = scope;
     }
     PUSH_FRAME(Qfalse);
