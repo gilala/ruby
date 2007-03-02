@@ -2805,7 +2805,11 @@ rb_f_local_variables(void)
 	    for (i = 0; i < cfp->iseq->local_table_size; i++) {
 		ID lid = cfp->iseq->local_table[i];
 		if (lid) {
-		    rb_ary_push(ary, rb_str_new2(rb_id2name(lid)));
+		    const char *vname = rb_id2name(lid);
+		    /* should skip temporary variable */
+		    if (vname) {
+			rb_ary_push(ary, rb_str_new2(vname));
+		    }
 		}
 	    }
 	}
