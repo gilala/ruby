@@ -1,3 +1,18 @@
+Fri Mar  2 09:38:57 2007  Koichi Sasada  <ko1@atdot.net>
+
+	* parse.y, compile.c: change node structure. every "scope"
+	  (method, block, class/module, eval) has a NODE_SCOPE to represent
+	  it's own local variables and arguments if it has.
+
+	* intern.h, eval.c, yarvcore.h: ditto.
+
+	* iseq.c, proc.c, compile.c, vm_macro.def, vm.c: change default
+	  value of arg_rest and arg_block to -1.
+
+	* common.mk: show commandline on btest.
+
+	* debug.c (ruby_debug_node): added
+
 Mon Feb 26 00:58:39 2007  Koichi Sasada  <ko1@atdot.net>
 
 	* yarvcore.h: add rb_thread_t#top_wrapper, top_self.

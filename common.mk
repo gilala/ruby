@@ -305,7 +305,7 @@ realclean:: distclean
 check: test test-all
 
 btest: $(MINIRUBY) PHONY
-	@$(BOOTSTRAPRUBY) "$(srcdir)/bootstraptest/runner.rb" --ruby="$(MINIRUBY)"
+	$(BOOTSTRAPRUBY) "$(srcdir)/bootstraptest/runner.rb" --ruby="$(MINIRUBY)"
 
 test: miniruby$(EXEEXT) $(RBCONFIG) $(PROGRAM) PHONY
 	@$(MINIRUBY) $(srcdir)/rubytest.rb

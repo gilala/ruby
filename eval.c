@@ -1943,6 +1943,7 @@ eval(VALUE self, VALUE src, VALUE scope, char *file, int line)
 	th->parse_in_eval--;
 	th_set_eval_stack(th, iseqval);
 	th->base_block = 0;
+
 	if (0) {		/* for debug */
 	    extern VALUE ruby_iseq_disasm(VALUE);
 	    printf("%s\n", RSTRING_PTR(ruby_iseq_disasm(iseqval)));
@@ -2931,7 +2932,7 @@ Init_eval(void)
 
 /* for parser */
 
-VALUE
+int
 rb_dvar_defined(ID id)
 {
     rb_thread_t *th = GET_THREAD();
@@ -2943,72 +2944,34 @@ rb_dvar_defined(ID id)
 	       iseq->type == ISEQ_TYPE_EVAL) {
 	    int i;
 
-	    /* printf("local size: %d\n", iseq->local_size); */
 	    for (i = 0; i < iseq->local_table_size; i++) {
-		/* printf("id (%4d): %s\n", i, rb_id2name(iseq->local_tbl[i])); */
 		if (iseq->local_table[i] == id) {
-		    return Qtrue;
+		    return 1;
 		}
 	    }
 	    iseq = iseq->parent_iseq;
 	}
     }
-    return Qfalse;
+    return 0;
 }
 
-void
-rb_scope_setup_top_local_tbl(ID *tbl)
+int
+rb_local_defined(ID id)
 {
     rb_thread_t *th = GET_THREAD();
-    if (tbl) {
-	if (th->top_local_tbl) {
-	    xfree(th->top_local_tbl);
-	    th->top_local_tbl = 0;
+    rb_iseq_t *iseq;
+
+    if (th->base_block && th->base_block->iseq) {
+	int i;
+	iseq = th->base_block->iseq->local_iseq;
+
+	for (i=0; i<iseq->local_table_size; i++) {
+	    if (iseq->local_table[i] == id) {
+		return 1;
+	    }
 	}
-	th->top_local_tbl = tbl;
     }
-    else {
-	th->top_local_tbl = 0;
-    }
-}
-
-int
-rb_scope_base_local_tbl_size(void)
-{
-    rb_thread_t *th = GET_THREAD();
-    if (th->base_block) {
-	return th->base_block->iseq->local_iseq->local_size +
-	    2 /* $_, $~ */  - 1 /* svar */ ;
-    }
-    else {
-	return 0;
-    }
-}
-
-ID
-rb_scope_base_local_tbl_id(int i)
-{
-    rb_thread_t *th = GET_THREAD();
-    switch (i) {
-    case 0:
-	return rb_intern("$_");
-    case 1:
-	return rb_intern("$~");
-    default:
-	return th->base_block->iseq->local_iseq->local_table[i-2];
-    }
-}
-
-int
-rb_dvar_current(void)
-{
-    rb_thread_t *th = GET_THREAD();
-    if (th->base_block) {
-	return 1;
-    }
-    else {
-	return 0;
-    }
+    return 0;
 }
 
 int

@@ -1,7 +1,8 @@
 #!ruby -s
-
 require 'mkmf'
 require 'rbconfig'
+
+exit
 
 def main
   unless find_executable('bison')

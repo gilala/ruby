@@ -35,7 +35,7 @@ Init_version(void)
 void
 ruby_show_version(void)
 {
-    printf("ruby %s (%s patchlevel %d) [%s]\n", RUBY_VERSION, RUBY_RELEASE_DATE, RUBY_PATCHLEVEL, RUBY_PLATFORM);
+    printf("ruby %s (%s patchlevel %d) [%s] hb\n", RUBY_VERSION, RUBY_RELEASE_DATE, RUBY_PATCHLEVEL, RUBY_PLATFORM);
     fflush(stdout);
 }
 

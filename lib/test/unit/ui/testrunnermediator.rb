@@ -42,7 +42,7 @@ module Test
           fault_listener = result.add_listener(TestResult::FAULT) do |fault|
             notify_listeners(TestResult::FAULT, fault)
           end
-          
+
           @suite.run(result) do |channel, value|
             notify_listeners(channel, value)
           end
