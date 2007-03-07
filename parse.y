@@ -124,6 +124,7 @@ struct local_vars {
 #define DVARS_SPECIAL_P(tbl) (!POINTER_P(tbl))
 #define POINTER_P(val) ((unsigned long)(val) & ~3UL)
 
+#ifndef RIPPER
 static int
 vtable_size(struct vtable *tbl)
 {
@@ -192,6 +193,7 @@ vtable_included(struct vtable * tbl, ID id)
     }
     return 0;
 }
+#endif
 
 /*
     Structure of Lexer Buffer:
@@ -385,8 +387,6 @@ static int  local_id_gen(struct parser_params*, ID);
 #define local_id(id) local_id_gen(parser, id)
 static ID  *local_tbl_gen(struct parser_params*);
 #define local_tbl() local_tbl_gen(parser)
-static ID  *dyna_tbl_gen(struct parser_params*);
-#define dyna_tbl() dyna_tbl_gen(parser)
 static ID   internal_id(void);
 
 static void dyna_push_gen(struct parser_params*);
@@ -613,6 +613,7 @@ static void ripper_compile_error(struct parser_params*, const char *fmt, ...);
 %type <node> f_arglist f_args f_arg f_arg_item f_optarg f_marg f_marg_head f_margs
 %type <node> assoc_list assocs assoc undef_list backref string_dvar for_var
 %type <node> block_param opt_block_param block_param_def f_opt
+%type <node> bv_decls opt_bv_decl bvar
 %type <node> lambda f_larglist lambda_body
 %type <node> brace_block cmd_brace_block do_block lhs none fitem
 %type <node> mlhs mlhs_head mlhs_basic mlhs_item mlhs_node mlhs_post
@@ -3127,7 +3128,7 @@ block_param_def	: '|' opt_bv_decl '|'
 		    /*%%%*/
 			$$ = $2;
 		    /*%
-			$$ = blockvar_new($2);
+			$$ = blockvar_new(escape_Qundef($2));
 		    %*/
 		    }
 		;
@@ -3135,10 +3136,30 @@ block_param_def	: '|' opt_bv_decl '|'
 
 opt_bv_decl	: none
 		| ';' bv_decls
+		    {
+		    /*%%%*/
+			$$ = 0;
+		    /*%
+		    	$$ = $2;
+		    %*/
+		    }
 		;
 
 bv_decls	: bvar
+		    /*%c%*/
+		    /*%c
+		    {
+			$$ = mlhs_new();
+			$$ = mlhs_add($$, $1);
+		    }
+		    %*/
 		| bv_decls ',' bvar
+		    /*%c%*/
+		    /*%c
+		    {
+			$$ = mlhs_add($$, $3);
+		    }
+		    %*/
 		;
 
 bvar		:  f_norm_arg
@@ -3146,6 +3167,7 @@ bvar		:  f_norm_arg
 		    /*%%%*/
 			new_bv($1);
 		    /*%
+		    	$$ = dispatch0(new_blockvars)
 		    %*/
 		    }
 		;
@@ -4096,6 +4118,12 @@ f_arg_item	: f_norm_arg
 		;
 
 f_arg		: f_arg_item
+		    /*%c%*/
+		    /*%c
+		    {
+			$$ = rb_ary_new3(1, $1);
+		    }
+		    c%*/
 		| f_arg ',' f_arg_item
 		    {
 		    /*%%%*/
@@ -4103,10 +4131,7 @@ f_arg		: f_arg_item
 			$$->nd_next = block_append($$->nd_next, $3->nd_next);
 		        rb_gc_force_recycle((VALUE)$3);
 		    /*%
-		      #if 0
-		        TODO: Fix me
-		      #endif
-		        rb_ary_push($$, $1);
+			rb_ary_push($$, $3);
 		    %*/
 		    }
  		;
@@ -7940,7 +7965,7 @@ vtable_tblcpy(ID *buf, struct vtable *src)
 static ID*
 vtable_to_tbl(struct vtable *src)
 {
-    int i, cnt = vtable_size(src);
+    int cnt = vtable_size(src);
     ID *buf;
 
     if (cnt <= 0) return 0;

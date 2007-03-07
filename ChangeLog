@@ -1,3 +1,19 @@
+Thu Mar  8 06:30:27 2007  Minero Aoki  <aamine@loveruby.net>
+
+	* parse.y (opt_bv_decl): resolve type crash by declarating type of
+	  bv_decls, opt_bv_decl, bvar.
+
+	* parse.y: remove undefined function prototypes.
+
+	* parse.y: remove unused variable declaration.
+
+	* ext/ripper/extconf.rb: do not stop to compile ripper.
+
+	* parse.y (opt_bv_decl): provide actions for bv_decls,
+	  opt_bv_decl, bvar, f_arg.
+
+	* parse.y (ripper): disable unused functions in ripper.
+
 Fri Mar  2 10:48:33 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* eval.c (rb_f_local_variables): should skip temporary argument

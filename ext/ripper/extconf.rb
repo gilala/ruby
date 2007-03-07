@@ -2,8 +2,6 @@
 require 'mkmf'
 require 'rbconfig'
 
-exit
-
 def main
   unless find_executable('bison')
     unless File.exist?('ripper.c') or File.exist?("#{$srcdir}/ripper.c")
