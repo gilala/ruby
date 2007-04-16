@@ -1,3 +1,8 @@
+Mon Apr 16 16:34:08 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* parse.y (parser_yylex): should set command_start after block
+	  starting "do"s and braces.  [ruby-core:10916]
+
 Fri Mar  2 19:18:13 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* eval.c (proc_invoke): turn on SCOPE_CLONE flag.  a patch from
