@@ -4854,8 +4854,10 @@ rb_yield_0(VALUE args, VALUE self, VALUE klass /* OK */, int flags)
 	    CHECK_INTS;
 	    goto redo;
 	  case TAG_NEXT:
-	    state = 0;
-	    result = prot_tag->retval;
+	    if (!lambda) {
+		state = 0;
+		result = prot_tag->retval;
+	    }
 	    break;
 	  case TAG_BREAK:
 	    if (TAG_DST()) {
@@ -8554,6 +8556,7 @@ proc_invoke(VALUE proc, VALUE args /* OK */, VALUE self, VALUE klass)
 	proc_jump_error(TAG_RETRY, Qnil); /* xxx */
 	JUMP_TAG(state);
 	break;
+      case TAG_NEXT:
       case TAG_BREAK:
 	if (lambda && result != Qundef) break;
 	JUMP_TAG(state);
