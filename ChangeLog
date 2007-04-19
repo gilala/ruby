@@ -22,6 +22,11 @@ Fri Mar  2 19:18:13 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* parse.y (top_local_setup_gen): ditto.
 
+Fri Feb 16 19:19:21 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* parse.y (mrhs): need to append by arg_append().
+	  [ruby-talk:239385]
+
 Thu Feb  1 23:25:21 2007  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* parse.y (rb_id2str): store Strings for operator symbols.
