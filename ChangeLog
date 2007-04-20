@@ -1,3 +1,16 @@
+Thu Apr 19 20:57:50 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* parse.y (symbol): symbols should be followed by EXPR_ENDARG.
+
+	* parse.y (dsym): ditto.
+
+	* parse.y (parser_yylex): strings should be followed by
+	  EXPR_ENDARG.
+
+	* parse.y (parser_yylex): ditto for numbers.
+
+	* parse.y (parser_yylex): EXPR_ENDARG after ']' and '}'.
+
 Tue Apr 17 16:46:46 2007  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* eval.c (rb_yield_0): should not clear state on TAG_NEXT when

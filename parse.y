@@ -69,9 +69,9 @@ int   ruby_sourceline;		/* current line no. */
 enum lex_state_e {
     EXPR_BEG,			/* ignore newline, +/- is a sign. */
     EXPR_END,			/* newline significant, +/- is a operator. */
+    EXPR_ENDARG,		/* ditto, and unbound braces. */
     EXPR_ARG,			/* newline significant, +/- is a operator. */
     EXPR_CMDARG,		/* newline significant, +/- is a operator. */
-    EXPR_ENDARG,		/* newline significant, +/- is a operator. */
     EXPR_MID,			/* newline significant, +/- is a operator. */
     EXPR_FNAME,			/* ignore newline, no reserved words. */
     EXPR_DOT,			/* right after `.' or `::', no reserved words. */
@@ -3779,10 +3779,10 @@ string_dvar	: tGVAR
 symbol		: tSYMBEG sym
 		    {
 		    /*%%%*/
-			lex_state = EXPR_END;
+			lex_state = EXPR_ENDARG;
 			$$ = $2;
 		    /*%
-			lex_state = EXPR_END;
+			lex_state = EXPR_ENDARG;
 			$$ = dispatch1(symbol, $2);
 		    %*/
 		    }
@@ -3797,7 +3797,7 @@ sym		: fname
 dsym		: tSYMBEG xstring_contents tSTRING_END
 		    {
 		    /*%%%*/
-			lex_state = EXPR_END;
+			lex_state = EXPR_ENDARG;
 			if (!($$ = $2)) {
 			    yyerror("empty symbol literal");
 			}
@@ -3826,7 +3826,7 @@ dsym		: tSYMBEG xstring_contents tSTRING_END
 			    }
 			}
 		    /*%
-			lex_state = EXPR_END;
+			lex_state = EXPR_ENDARG;
 			$$ = dispatch1(dyna_symbol, $2);
 		    %*/
 		    }
@@ -5605,7 +5605,7 @@ parser_yylex(struct parser_params *parser)
 	    token = here_document(lex_strterm);
 	    if (token == tSTRING_END) {
 		lex_strterm = 0;
-		lex_state = EXPR_END;
+		lex_state = EXPR_ENDARG;
 	    }
 	}
 	else {
@@ -5613,7 +5613,7 @@ parser_yylex(struct parser_params *parser)
 	    if (token == tSTRING_END || token == tREGEXP_END) {
 		rb_gc_force_recycle((VALUE)lex_strterm);
 		lex_strterm = 0;
-		lex_state = EXPR_END;
+		lex_state = EXPR_ENDARG;
 	    }
 	}
 	return token;
@@ -5934,7 +5934,7 @@ parser_yylex(struct parser_params *parser)
 	}
 	tokfix();
 	set_yylval_str(rb_str_new(tok(), toklen()));
-	lex_state = EXPR_END;
+	lex_state = EXPR_ENDARG;
 	return tCHAR;
 
       case '&':
@@ -6083,7 +6083,7 @@ parser_yylex(struct parser_params *parser)
 	    int is_float, seen_point, seen_e, nondigit;
 
 	    is_float = seen_point = seen_e = nondigit = 0;
-	    lex_state = EXPR_END;
+	    lex_state = EXPR_ENDARG;
 	    newtok();
 	    if (c == '-' || c == '+') {
 		tokadd(c);
@@ -6300,7 +6300,10 @@ parser_yylex(struct parser_params *parser)
       case '}':
 	COND_LEXPOP();
 	CMDARG_LEXPOP();
-	lex_state = EXPR_END;
+	if (c == ')')
+	    lex_state = EXPR_END;
+	else
+	    lex_state = EXPR_ENDARG;
 	return c;
 
       case ':':
@@ -6565,7 +6568,7 @@ parser_yylex(struct parser_params *parser)
 
       case '$':
 	last_state = lex_state;
-	lex_state = EXPR_END;
+	lex_state = EXPR_ENDARG;
 	newtok();
 	c = nextc();
 	switch (c) {
@@ -6738,11 +6741,11 @@ parser_yylex(struct parser_params *parser)
 	last_state = lex_state;
 	switch (tok()[0]) {
 	  case '$':
-	    lex_state = EXPR_END;
+	    lex_state = EXPR_ENDARG;
 	    result = tGVAR;
 	    break;
 	  case '@':
-	    lex_state = EXPR_END;
+	    lex_state = EXPR_ENDARG;
 	    if (tok()[1] == '@')
 		result = tCVAR;
 	    else
