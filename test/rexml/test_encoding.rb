@@ -6,7 +6,7 @@ require 'rexml/source'
 class EncodingTester < Test::Unit::TestCase
   include REXML
 
-  TEST_DIR="test/data"
+  TEST_DIR="test/rexml/data"
 
   def setup
     @encoded = "<?xml version='1.0' encoding='ISO-8859-3'?>"+

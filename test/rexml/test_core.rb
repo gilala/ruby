@@ -9,8 +9,6 @@ require "rexml/source"
 require "rexml/formatters/pretty"
 require "rexml/undefinednamespaceexception"
 
-load "test/listener.rb"
-
 class Tester < Test::Unit::TestCase
   include REXML
   def setup
@@ -1053,7 +1051,7 @@ EOL
 
   def test_text_raw
     # From the REXML tutorial
-    # (http://www.germane-software.com/software/rexml/docs/tutorial.html)
+    # (http://www.germane-software.com/software/rexml/test/rexml/data/tutorial.html)
     doc = Document.new <<-EOL
     <?xml version="1.0"?>
     <!DOCTYPE schema SYSTEM "XMLSchema.dtd" [

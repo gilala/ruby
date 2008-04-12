@@ -150,7 +150,7 @@ module REXML
 			@element = element
 
       if @normalized
-        Text.check( @normalized, NEEDS_A_SECOND_CHECK, doctype )
+        Text.check( @normalized, Text::NEEDS_A_SECOND_CHECK, doctype )
       end
 
 			self

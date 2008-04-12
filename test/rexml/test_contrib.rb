@@ -450,8 +450,8 @@ EOL
 	def test_external_entity
 		xp = '//channel/title'
 
-		%w{data/working.rss data/broken.rss}.each do |path|
-			File.open(File.join( "test", path )) do |file|
+		%w{working.rss broken.rss}.each do |path|
+			File.open(File.join( "test", "rexml", "data", path )) do |file|
 				doc = REXML::Document.new file.readlines.join('')
 
 				# check to make sure everything is kosher

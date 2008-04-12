@@ -267,7 +267,7 @@ class SAX2Tester < Test::Unit::TestCase
     include REXML::SAX2Listener 
   end  
   def test_ticket_68
-    parser = REXML::Parsers::SAX2Parser.new( File.new('test/rexml/data/icket_68.xml') ) 
+    parser = REXML::Parsers::SAX2Parser.new( File.new('test/rexml/data/ticket_68.xml') ) 
     parser.listen( Ticket68.new ) 
     begin
       parser.parse

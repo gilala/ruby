@@ -990,7 +990,9 @@ module REXML
     end
 
     def to_a
-      values.flatten
+      attributes = []
+      each_attribute {|attr| attributes << attr}
+      attributes
     end
 
     # Returns the number of attributes the owning Element contains.
@@ -1232,8 +1234,7 @@ module REXML
       result = nil
       each_attribute() { |attribute|
         if name == attribute.name &&
-          namespace == attribute.namespace() &&
-          ( !namespace.empty? || !attribute.fully_expanded_name.index(':') )
+          namespace == attribute.namespace()
           # foo will match xmlns:foo, but only if foo isn't also an attribute
           result = attribute if !result or !namespace.empty? or 
                                 !attribute.fully_expanded_name.index(':')

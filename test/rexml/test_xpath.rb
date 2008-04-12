@@ -185,7 +185,7 @@ class XPathTester < Test::Unit::TestCase
 	end
 
 	def no_test_ancestor
-		doc = REXML::Document.new(File.new("test/rexml/data/estsrc.xml"))
+		doc = REXML::Document.new(File.new("test/rexml/data/testsrc.xml"))
 		doc.elements.each("//item") { |el| print el.name
 			if el.attributes['x']
 				puts " -- "+el.attributes['x']
@@ -208,7 +208,7 @@ class XPathTester < Test::Unit::TestCase
 	# This method reads a document from a file, and then a series of xpaths, 
 	# also from a file.  It then checks each xpath against the source file.
 	def test_more
-    xmlsource   = "test/rexml/data/estsrc.xml"
+    xmlsource   = "test/rexml/data/testsrc.xml"
     xpathtests  = "test/rexml/data/xp.tst"
 
 		doc = REXML::Document.new(File.new(xmlsource))
@@ -313,8 +313,8 @@ class XPathTester < Test::Unit::TestCase
 	end
 
 	def test_lang
-		doc = Document.new(File.new("test/rexml/data/lang-0.xml"))
-    #puts IO.read( "test/rexml/data/lang.xml" )
+		doc = Document.new(File.new("test/rexml/data/lang.xml"))
+    #puts IO.read( "test/lang.xml" )
 
     #puts XPath.match( doc, "//language/*" ).size
 		c = each_test( doc, "//language/*" ) { |element|
@@ -995,13 +995,13 @@ EOF
   end  
 
   def test_ticket_61_text
-    file = File.open( "test/rexml/data/icket_61.xml" )
+    file = File.open( "test/rexml/data/ticket_61.xml" )
     doc = REXML::Document.new file
     ticket_61_fixture( doc, "//div[text()='Add' and @class='ButtonText']" )
   end
 
   def test_ticket_61_contains
-    file = File.open( "test/rexml/data/icket_61.xml" )
+    file = File.open( "test/rexml/data/ticket_61.xml" )
     doc = REXML::Document.new file
     ticket_61_fixture( doc, "//div[contains(.,'Add') and @class='ButtonText']" )
   end

@@ -33,7 +33,7 @@ class JaxenTester < Test::Unit::TestCase
   def test_web2 ; test("web2") ; end
 
   def test( fname )
-    xml_dir = "test/data"
+    xml_dir = "test/rexml/data"
 #    Dir.entries( xml_dir ).each { |fname|
 #      if fname =~ /\.xml$/
         file = File.new( File.join( xml_dir, fname+".xml" ))
