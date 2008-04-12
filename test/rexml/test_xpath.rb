@@ -313,12 +313,12 @@ class XPathTester < Test::Unit::TestCase
 	end
 
 	def test_lang
-		doc = Document.new(File.new("test/rexml/data/lang.xml"))
-    #puts IO.read( "test/lang.xml" )
-
-    #puts XPath.match( doc, "//language/*" ).size
+		doc = Document.new(File.new("test/rexml/data/lang0.xml"))
+		#puts IO.read( "test/lang.xml" )
+	  
+		#puts XPath.match( doc, "//language/*" ).size
 		c = each_test( doc, "//language/*" ) { |element|
-      #puts "#{element.name}: #{element.text}"
+			#puts "#{element.name}: #{element.text}"
 		}
 		assert_equal 4, c
 	end
