@@ -1,7 +1,7 @@
 dnl Process this file with autoconf to produce a configure script.
 AC_INIT()
 
-AC_PREREQ(2.58)
+AC_PREREQ(2.60)
 
 AC_ARG_WITH(baseruby,
 	[  --with-baseruby=RUBY use RUBY as baseruby; RUBY is the pathname of ruby],
@@ -176,17 +176,23 @@ AC_ARG_PROGRAM
 
 dnl Checks for programs.
 
+: ${CFLAGS=} ${cflags='${optflags} ${debugflags} ${warnflags}'}
+: ${CXXFLAGS=} ${cxxflags='${optflags} ${debugflags} ${warnflags}'}
 if test x"${build}" != x"${host}"; then
   AC_CHECK_TOOL(CC, gcc)
 fi
 AC_PROG_CC
 AC_PROG_CXX
 AC_PROG_GCC_TRADITIONAL
+test $ac_cv_prog_cc_g = yes && : ${debugflags=-g}
 if test "$GCC" = yes; then
     linker_flag=-Wl,
+    : ${optflags=-O2} ${warnflags="-Wall -Wno-parentheses"}
 else
     linker_flag=
 fi
+CFLAGS="${CFLAGS} `eval echo $cflags`"
+CXXFLAGS="${CXXFLAGS} `eval echo $cxxflags`"
 
 RUBY_PROG_GNU_LD
 RUBY_CPPOUTFILE
@@ -243,8 +249,7 @@ AC_PROG_MAKE_SET
 AC_PROG_INSTALL
 
 # checks for UNIX variants that set C preprocessor variables
-AC_AIX
-AC_MINIX
+AC_USE_SYSTEM_EXTENSIONS
 
 AC_SUBST(RM, ['rm -f'])
 AC_SUBST(CP, ['cp'])
@@ -592,7 +597,7 @@ AC_CHECK_HEADERS(stdlib.h string.h unistd.h limits.h sys/file.h sys/ioctl.h sys/
 		 fcntl.h sys/fcntl.h sys/select.h sys/time.h sys/times.h sys/param.h\
 		 syscall.h pwd.h grp.h a.out.h utime.h memory.h direct.h sys/resource.h \
 		 sys/mkdev.h sys/utime.h xti.h netinet/in_systm.h float.h ieeefp.h pthread.h \
-		 ucontext.h intrinsics.h langinfo.h locale.h sys/sendfile.h)
+		 ucontext.h intrinsics.h langinfo.h locale.h sys/sendfile.h time.h)
 
 dnl Check additional types.
 AC_CHECK_SIZEOF(rlim_t, 0, [
@@ -627,7 +632,9 @@ AC_CHECK_MEMBERS([struct stat.st_ctim])
 AC_CHECK_MEMBERS([struct stat.st_ctimespec])
 AC_CHECK_MEMBERS([struct stat.st_ctimensec])
 
-AC_CHECK_TYPES(struct timespec)
+AC_CHECK_TYPES([struct timespec], [], [], [@%:@ifdef HAVE_TIME_H
+@%:@include <time.h>
+@%:@endif])
 
 AC_CHECK_TYPE(fd_mask, [AC_DEFINE(HAVE_RB_FD_INIT, 1)])
 
@@ -1487,6 +1494,7 @@ if test x"$cross_compiling" = xyes; then
   RUNRUBY='$(MINIRUBY) -I`cd $(srcdir)/lib; pwd`'
 else
   MINIRUBY='./miniruby$(EXEEXT) -I$(srcdir)/lib'
+  MINIRUBY="$MINIRUBY"' -I$(EXTOUT)/common -I./- -r$(srcdir)/ext/purelib.rb'
   PREP='miniruby$(EXEEXT)'
   RUNRUBY='$(MINIRUBY) $(srcdir)/runruby.rb --extout=$(EXTOUT)'
 fi
@@ -1622,7 +1630,6 @@ fi
 MINIDLNOBJ=dln.o
 case "$target_os" in
     linux*)
-	XCFLAGS="$XCFLAGS -D_GNU_SOURCE=1"
 	;;
     netbsd*)
     	CFLAGS="$CFLAGS -pipe"
@@ -1726,12 +1733,16 @@ case "$build_os" in
 esac
 
 CPPFLAGS="$CPPFLAGS "'$(DEFS)'
-test -z "$CFLAGS" || CFLAGS="$CFLAGS "; CFLAGS="$CFLAGS"'${cflags}'
 test -z "$CPPFLAGS" || CPPFLAGS="$CPPFLAGS "; CPPFLAGS="$CPPFLAGS"'${cppflags}'
+cflagspat=`eval echo '"'"${cflags}"'"' | sed 's/[][|.*]/\\&/g'`
+CFLAGS=`echo "$CFLAGS" | sed "s|$cflagspat"'|${cflags}|'`
+cxxflagspat=`eval echo '"'"${cxxflags}"'"' | sed 's/[][|.*]/\\&/g'`
+CXXFLAGS=`echo "$CXXFLAGS" | sed "s|$cxxflagspat"'|${cxxflags}|'`
 AC_SUBST(cppflags, [])dnl
-AC_SUBST(cflags, ['${optflags} ${debugflags}'])dnl
+AC_SUBST(cflags, ['${optflags} ${debugflags} ${warnflags}'])dnl
 AC_SUBST(optflags)dnl
 AC_SUBST(debugflags)dnl
+AC_SUBST(warnflags)dnl
 AC_SUBST(XCFLAGS)dnl
 AC_SUBST(XLDFLAGS)dnl
 AC_SUBST(LIBRUBY_LDSHARED)
@@ -1780,15 +1791,15 @@ esac
 RUBY_LIB_PREFIX=`eval echo \\"${libdir}/ruby\\"`
 
 AC_ARG_WITH(sitedir,
-	    [  --with-sitedir=DIR      site libraries in DIR [PREFIX/lib/ruby/site_ruby]],
+	    [  --with-sitedir=DIR      site libraries in DIR [[LIBDIR/ruby/site_ruby]]],
             [sitedir=$withval],
             [sitedir='${libdir}/ruby/site_ruby'])
 SITE_DIR=`eval echo \\"${sitedir}\\"`
 
 AC_ARG_WITH(vendordir,
-	    [  --with-vendordir=DIR    vendor libraries in DIR [PREFIX/lib/ruby/vendor_ruby]],
+	    [  --with-vendordir=DIR    vendor libraries in DIR [[LIBDIR/ruby/vendor_ruby]]],
             [vendordir=$withval],
-            [vendordir='${prefix}/lib/ruby/vendor_ruby'])
+            [vendordir='${libdir}/ruby/vendor_ruby'])
 VENDOR_DIR=`eval echo \\"${vendordir}\\"`
 
 case "$target_os" in

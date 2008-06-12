@@ -241,6 +241,10 @@ make_compile_option(rb_compile_option_t *option, VALUE opt)
       if (flag == Qtrue)  { o->mem = 1; } \
       else if (flag == Qfalse)  { o->mem = 0; } \
   }
+#define SET_COMPILE_OPTION_NUM(o, h, mem) \
+  { VALUE num = rb_hash_aref(opt, ID2SYM(rb_intern(#mem))); \
+      if (!NIL_P(num)) o->mem = NUM2INT(num); \
+  }
 	SET_COMPILE_OPTION(option, opt, inline_const_cache);
 	SET_COMPILE_OPTION(option, opt, peephole_optimization);
 	SET_COMPILE_OPTION(option, opt, tailcall_optimization);
@@ -249,7 +253,9 @@ make_compile_option(rb_compile_option_t *option, VALUE opt)
 	SET_COMPILE_OPTION(option, opt, instructions_unification);
 	SET_COMPILE_OPTION(option, opt, stack_caching);
 	SET_COMPILE_OPTION(option, opt, trace_instruction);
+	SET_COMPILE_OPTION_NUM(option, opt, debug_level);
 #undef SET_COMPILE_OPTION
+#undef SET_COMPILE_OPTION_NUM
     }
     else {
 	rb_raise(rb_eTypeError, "Compile option must be Hash/true/false/nil");
@@ -262,6 +268,8 @@ make_compile_option_value(rb_compile_option_t *option)
     VALUE opt = rb_hash_new();
 #define SET_COMPILE_OPTION(o, h, mem) \
   rb_hash_aset(h, ID2SYM(rb_intern(#mem)), o->mem ? Qtrue : Qfalse)
+#define SET_COMPILE_OPTION_NUM(o, h, mem) \
+  rb_hash_aset(h, ID2SYM(rb_intern(#mem)), INT2NUM(o->mem))
     {
 	SET_COMPILE_OPTION(option, opt, inline_const_cache);
 	SET_COMPILE_OPTION(option, opt, peephole_optimization);
@@ -270,8 +278,10 @@ make_compile_option_value(rb_compile_option_t *option)
 	SET_COMPILE_OPTION(option, opt, operands_unification);
 	SET_COMPILE_OPTION(option, opt, instructions_unification);
 	SET_COMPILE_OPTION(option, opt, stack_caching);
+	SET_COMPILE_OPTION_NUM(option, opt, debug_level);
     }
 #undef SET_COMPILE_OPTION
+#undef SET_COMPILE_OPTION_NUM
     return opt;
 }
 
@@ -378,6 +388,7 @@ iseq_load(VALUE self, VALUE data, VALUE parent, VALUE opt)
 	st_insert(type_map, ID2SYM(rb_intern("rescue")), ISEQ_TYPE_RESCUE);
 	st_insert(type_map, ID2SYM(rb_intern("ensure")), ISEQ_TYPE_ENSURE);
 	st_insert(type_map, ID2SYM(rb_intern("eval")), ISEQ_TYPE_EVAL);
+	st_insert(type_map, ID2SYM(rb_intern("defined_guard")), ISEQ_TYPE_DEFINED_GUARD);
     }
 
     if (st_lookup(type_map, type, &iseq_type) == 0) {
@@ -428,11 +439,11 @@ VALUE
 rb_iseq_compile_with_option(VALUE src, VALUE file, VALUE line, VALUE opt)
 {
     rb_compile_option_t option;
-    NODE *node = compile_string(src, file, line);
+    NODE *node = compile_string(StringValue(src), file, line);
     rb_thread_t *th = GET_THREAD();
     make_compile_option(&option, opt);
 
-    if (th->base_block) {
+    if (th->base_block && th->base_block->iseq) {
 	return rb_iseq_new_with_opt(node, th->base_block->iseq->name,
 				    file, th->base_block->iseq->self,
 				    ISEQ_TYPE_EVAL, &option);
@@ -649,6 +660,7 @@ insn_operand_intern(rb_iseq_t *iseq,
       }
       case TS_ID:		/* ID (symbol) */
 	op = ID2SYM(op);
+
       case TS_VALUE:		/* VALUE */
 	ret = rb_inspect(op);
 	if (CLASS_OF(op) == rb_cISeq) {
@@ -762,7 +774,7 @@ ruby_iseq_disasm_insn(VALUE ret, VALUE *iseq, int pos,
     return len;
 }
 
-static char *
+static const char *
 catch_type(int type)
 {
     switch (type) {
@@ -944,12 +956,12 @@ exception_type2symbol(VALUE type)
 {
     ID id;
     switch(type) {
-      case CATCH_TYPE_RESCUE: id = rb_intern("rescue"); break;
-      case CATCH_TYPE_ENSURE: id = rb_intern("ensure"); break;
-      case CATCH_TYPE_RETRY:  id = rb_intern("retry");  break;
-      case CATCH_TYPE_BREAK:  id = rb_intern("break");  break;
-      case CATCH_TYPE_REDO:   id = rb_intern("redo");   break;
-      case CATCH_TYPE_NEXT:   id = rb_intern("next");   break;
+      case CATCH_TYPE_RESCUE: CONST_ID(id, "rescue"); break;
+      case CATCH_TYPE_ENSURE: CONST_ID(id, "ensure"); break;
+      case CATCH_TYPE_RETRY:  CONST_ID(id, "retry");  break;
+      case CATCH_TYPE_BREAK:  CONST_ID(id, "break");  break;
+      case CATCH_TYPE_REDO:   CONST_ID(id, "redo");   break;
+      case CATCH_TYPE_NEXT:   CONST_ID(id, "next");   break;
       default:
 	rb_bug("...");
     }
@@ -989,6 +1001,7 @@ iseq_data_to_ary(rb_iseq_t *iseq)
     DECL_SYMBOL(rescue);
     DECL_SYMBOL(ensure);
     DECL_SYMBOL(eval);
+    DECL_SYMBOL(defined_guard);
 
     if (sym_top == 0) {
 	int i;
@@ -1002,6 +1015,7 @@ iseq_data_to_ary(rb_iseq_t *iseq)
 	INIT_SYMBOL(rescue);
 	INIT_SYMBOL(ensure);
 	INIT_SYMBOL(eval);
+	INIT_SYMBOL(defined_guard);
     }
 
     /* type */
@@ -1013,6 +1027,7 @@ iseq_data_to_ary(rb_iseq_t *iseq)
       case ISEQ_TYPE_RESCUE: type = sym_rescue; break;
       case ISEQ_TYPE_ENSURE: type = sym_ensure; break;
       case ISEQ_TYPE_EVAL:   type = sym_eval;   break;
+      case ISEQ_TYPE_DEFINED_GUARD: type = sym_defined_guard; break;
       default: rb_bug("unsupported iseq type");
     };
 
@@ -1285,6 +1300,7 @@ Init_ISeq(void)
 
     /* disable this feature because there is no verifier. */
     /* rb_define_singleton_method(rb_cISeq, "load", iseq_s_load, -1); */
+    (void)iseq_s_load;
 
     rb_define_singleton_method(rb_cISeq, "compile", iseq_s_compile, -1);
     rb_define_singleton_method(rb_cISeq, "new", iseq_s_compile, -1);

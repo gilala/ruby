@@ -80,7 +80,7 @@ rb_encoding* rb_nkf_enc_get(const char *name)
 int nkf_split_options(const char *arg)
 {
     int count = 0;
-    char option[256];
+    unsigned char option[256];
     int i = 0, j = 0;
     int is_escaped = FALSE;
     int is_single_quoted = FALSE;
@@ -138,14 +138,19 @@ int nkf_split_options(const char *arg)
 static VALUE
 rb_nkf_convert(VALUE obj, VALUE opt, VALUE src)
 {
-    rb_encoding *to_enc;
-    const char *to_e;
-    int to_encidx;
-
     reinit();
     StringValue(opt);
     nkf_split_options(RSTRING_PTR(opt));
     if (!output_encoding) rb_raise(rb_eArgError, "no output encoding given");
+
+    switch (nkf_enc_to_index(output_encoding)) {
+    case UTF_8_BOM:    output_encoding = nkf_enc_from_index(UTF_8); break;
+    case UTF_16BE_BOM: output_encoding = nkf_enc_from_index(UTF_16BE); break;
+    case UTF_16LE_BOM: output_encoding = nkf_enc_from_index(UTF_16LE); break;
+    case UTF_32BE_BOM: output_encoding = nkf_enc_from_index(UTF_32BE); break;
+    case UTF_32LE_BOM: output_encoding = nkf_enc_from_index(UTF_32LE); break;
+    }
+    output_bom_f = FALSE;
 
     incsize = INCSIZE;
 
@@ -484,8 +489,8 @@ Init_nkf()
     rb_define_const(mNKF, "EUC",	rb_enc_from_encoding(rb_nkf_enc_get("EUC-JP")));
     rb_define_const(mNKF, "SJIS",	rb_enc_from_encoding(rb_nkf_enc_get("Shift_JIS")));
     rb_define_const(mNKF, "UTF8",	rb_enc_from_encoding(rb_utf8_encoding()));
-    rb_define_const(mNKF, "UTF16",	rb_enc_from_encoding(rb_nkf_enc_get("UTF-16")));
-    rb_define_const(mNKF, "UTF32",	rb_enc_from_encoding(rb_nkf_enc_get("UTF-32")));
+    rb_define_const(mNKF, "UTF16",	rb_enc_from_encoding(rb_nkf_enc_get("UTF-16BE")));
+    rb_define_const(mNKF, "UTF32",	rb_enc_from_encoding(rb_nkf_enc_get("UTF-32BE")));
 
     /* Full version string of nkf */
     rb_define_const(mNKF, "VERSION", rb_str_new2(RUBY_NKF_VERSION));

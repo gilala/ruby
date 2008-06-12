@@ -226,7 +226,7 @@ typedef fd_set rb_fdset_t;
 #define rb_fd_copy(d, s, n) (*(d) = *(s))
 #define rb_fd_ptr(f)	(f)
 #define rb_fd_init(f)	FD_ZERO(f)
-#define rb_fd_term(f)	(f)
+#define rb_fd_term(f)	(void)(f)
 #define rb_fd_max(f)	FD_SETSIZE
 #define rb_fd_select(n, rfds, wfds, efds, timeout)	select(n, rfds, wfds, efds, timeout)
 
@@ -257,7 +257,9 @@ VALUE rb_apply(VALUE, ID, VALUE);
 void rb_backtrace(void);
 ID rb_frame_this_func(void);
 VALUE rb_obj_instance_eval(int, VALUE*, VALUE);
+VALUE rb_obj_instance_exec(int, VALUE*, VALUE);
 VALUE rb_mod_module_eval(int, VALUE*, VALUE);
+VALUE rb_mod_module_exec(int, VALUE*, VALUE);
 void rb_load(VALUE, int);
 void rb_load_protect(VALUE, int, int*);
 NORETURN(void rb_jump_tag(int));
@@ -271,6 +273,7 @@ VALUE rb_block_proc(void);
 VALUE rb_f_lambda(void);
 VALUE rb_proc_new(VALUE (*)(ANYARGS/* VALUE yieldarg[, VALUE procarg] */), VALUE);
 VALUE rb_proc_call(VALUE, VALUE);
+VALUE rb_proc_call_with_block(VALUE, int argc, VALUE *argv, VALUE);
 int rb_proc_arity(VALUE);
 VALUE rb_binding_new(void);
 VALUE rb_obj_method(VALUE, VALUE);
@@ -308,6 +311,7 @@ VALUE rb_thread_main(void);
 VALUE rb_thread_local_aref(VALUE, ID);
 VALUE rb_thread_local_aset(VALUE, ID, VALUE);
 void rb_thread_atfork(void);
+void rb_thread_atfork_before_exec(void);
 VALUE rb_exec_recursive(VALUE(*)(VALUE, VALUE, int),VALUE,VALUE);
 /* file.c */
 VALUE rb_file_s_expand_path(int, VALUE *);
@@ -325,7 +329,6 @@ void ruby_set_stack_size(size_t);
 NORETURN(void rb_memerror(void));
 int ruby_stack_check(void);
 int ruby_stack_length(VALUE**);
-char *rb_source_filename(const char*);
 void rb_gc_mark_locations(VALUE*, VALUE*);
 void rb_mark_tbl(struct st_table*);
 void rb_mark_set(struct st_table*);
@@ -345,6 +348,7 @@ void st_foreach_safe(struct st_table *, int (*)(ANYARGS), st_data_t);
 void rb_hash_foreach(VALUE, int (*)(ANYARGS), VALUE);
 VALUE rb_hash(VALUE);
 VALUE rb_hash_new(void);
+VALUE rb_hash_dup(VALUE);
 VALUE rb_hash_freeze(VALUE);
 VALUE rb_hash_aref(VALUE, VALUE);
 VALUE rb_hash_lookup(VALUE, VALUE);
@@ -354,6 +358,7 @@ VALUE rb_hash_delete(VALUE,VALUE);
 struct st_table *rb_hash_tbl(VALUE);
 int rb_path_check(const char*);
 int rb_env_path_tainted(void);
+VALUE rb_env_clear(void);
 /* io.c */
 #define rb_defout rb_stdout
 RUBY_EXTERN VALUE rb_fs;
@@ -378,6 +383,8 @@ VALUE rb_file_open(const char*, const char*);
 VALUE rb_gets(void);
 void rb_write_error(const char*);
 void rb_write_error2(const char*, long);
+int rb_io_mode_modenum(const char *mode);
+void rb_close_before_exec(int lowfd, int maxhint, VALUE noclose_fds);
 /* marshal.c */
 VALUE rb_marshal_dump(VALUE, VALUE);
 VALUE rb_marshal_load(VALUE);
@@ -445,12 +452,17 @@ struct rb_exec_arg {
     int argc;
     VALUE *argv;
     const char *prog;
+    VALUE options;
+    VALUE redirect_fds;
 };
 int rb_proc_exec_n(int, VALUE*, const char*);
 int rb_proc_exec(const char*);
-VALUE rb_check_argv(int, VALUE*);
+VALUE rb_exec_arg_init(int argc, VALUE *argv, int accept_shell, struct rb_exec_arg *e);
+int rb_exec_arg_addopt(struct rb_exec_arg *e, VALUE key, VALUE val);
+void rb_exec_arg_fixup(struct rb_exec_arg *e);
+int rb_run_exec_options(const struct rb_exec_arg *e, struct rb_exec_arg *s);
 int rb_exec(const struct rb_exec_arg*);
-rb_pid_t rb_fork(int*, int (*)(void*), void*);
+rb_pid_t rb_fork(int*, int (*)(void*), void*, VALUE);
 VALUE rb_f_exec(int,VALUE*);
 rb_pid_t rb_waitpid(rb_pid_t pid, int *status, int flags);
 void rb_syswait(rb_pid_t pid);
@@ -481,8 +493,9 @@ int rb_reg_options(VALUE);
 void rb_set_kcode(const char*);
 const char* rb_get_kcode(void);
 /* ruby.c */
-RUBY_EXTERN VALUE rb_argv;
+#define rb_argv rb_get_argv()
 RUBY_EXTERN VALUE rb_argv0;
+VALUE rb_get_argv(void);
 void *rb_load_file(const char*);
 void ruby_script(const char*);
 void ruby_prog_init(void);
@@ -573,7 +586,7 @@ VALUE rb_struct_iv_get(VALUE, const char*);
 VALUE rb_struct_s_members(VALUE);
 VALUE rb_struct_members(VALUE);
 VALUE rb_struct_alloc_noinit(VALUE);
-VALUE rb_struct_define_without_accessor(char *, VALUE, rb_alloc_func_t, ...);
+VALUE rb_struct_define_without_accessor(const char *, VALUE, rb_alloc_func_t, ...);
 /* thread.c */
 typedef void rb_unblock_function_t(void *);
 typedef VALUE rb_blocking_function_t(void *);
@@ -650,7 +663,7 @@ void ruby_show_copyright(void);
 ID rb_frame_callee(void);
 VALUE rb_str_succ(VALUE);
 VALUE rb_time_succ(VALUE);
-void Init_stack(VALUE*);
+#define Init_stack(addr) ruby_init_stack(addr)
 void rb_frame_pop(void);
 int rb_frame_method_id_and_class(ID *idp, VALUE *klassp);
 

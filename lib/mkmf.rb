@@ -1312,7 +1312,7 @@ arch_hdrdir = #{$arch_hdrdir}
 VPATH = #{vpath.join(CONFIG['PATH_SEPARATOR'])}
 }
   if $extmk
-    mk << "RUBYLIB = -\nRUBYOPT = -rpurelib.rb\n"
+    mk << "RUBYLIB = -\nRUBYOPT = -r$(top_srcdir)/ext/purelib.rb\n"
   end
   if destdir = CONFIG["prefix"][$dest_prefix_pattern, 1]
     mk << "\nDESTDIR = #{destdir}\n"
@@ -1345,6 +1345,10 @@ OUTFLAG = #{OUTFLAG}
 COUTFLAG = #{COUTFLAG}
 
 RUBY_EXTCONF_H = #{$extconf_h}
+cflags   = #{CONFIG['cflags']}
+optflags = #{CONFIG['optflags']}
+debugflags = #{CONFIG['debugflags']}
+warnflags = #{CONFIG['warnflags']}
 CFLAGS   = #{$static ? '' : CONFIG['CCDLFLAGS']} #$CFLAGS #$ARCH_FLAG
 INCFLAGS = -I. #$INCFLAGS
 DEFS     = #{CONFIG['DEFS']}

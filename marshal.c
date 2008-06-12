@@ -149,6 +149,14 @@ struct dump_call_arg {
 };
 
 static void
+check_dump_arg(struct dump_arg *arg)
+{
+    if (!DATA_PTR(arg->wrapper)) {
+	rb_raise(rb_eRuntimeError, "Marshal.dump reentered");
+    }
+}
+
+static void
 mark_dump_arg(void *ptr)
 {
     struct dump_arg *p = ptr;
@@ -406,7 +414,7 @@ hash_each(VALUE key, VALUE value, struct dump_call_arg *arg)
 static void
 w_extended(VALUE klass, struct dump_arg *arg, int check)
 {
-    char *path;
+    const char *path;
 
     if (check && FL_TEST(klass, FL_SINGLETON)) {
 	if (RCLASS_M_TBL(klass)->num_entries ||
@@ -574,23 +582,25 @@ w_object(VALUE obj, struct dump_arg *arg, int limit)
     else {
 	if (OBJ_TAINTED(obj)) arg->taint = Qtrue;
 
-	if (rb_respond_to(obj, s_mdump)) {
+	if (rb_obj_respond_to(obj, s_mdump, Qtrue)) {
 	    volatile VALUE v;
 
             st_add_direct(arg->data, obj, arg->data->num_entries);
 
 	    v = rb_funcall(obj, s_mdump, 0, 0);
+	    check_dump_arg(arg);
 	    w_class(TYPE_USRMARSHAL, obj, arg, Qfalse);
 	    w_object(v, arg, limit);
 	    if (hasiv) w_ivar(obj, 0, &c_arg);
 	    return;
 	}
-	if (rb_respond_to(obj, s_dump)) {
+	if (rb_obj_respond_to(obj, s_dump, Qtrue)) {
 	    VALUE v;
             st_table *ivtbl2 = 0;
             int hasiv2;
 
 	    v = rb_funcall(obj, s_dump, 1, INT2NUM(limit));
+	    check_dump_arg(arg);
 	    if (TYPE(v) != T_STRING) {
 		rb_raise(rb_eTypeError, "_dump() must return string");
 	    }
@@ -693,13 +703,14 @@ w_object(VALUE obj, struct dump_arg *arg, int limit)
 	    w_uclass(obj, rb_cArray, arg);
 	    w_byte(TYPE_ARRAY, arg);
 	    {
-		long len = RARRAY_LEN(obj);
-		VALUE *ptr = RARRAY_PTR(obj);
+		long i, len = RARRAY_LEN(obj);
 
 		w_long(len, arg);
-		while (len--) {
-		    w_object(*ptr, arg, limit);
-		    ptr++;
+		for (i=0; i<RARRAY_LEN(obj); i++) {
+		    w_object(RARRAY_PTR(obj)[i], arg, limit);
+		    if (len != RARRAY_LEN(obj)) {
+			rb_raise(rb_eRuntimeError, "array modified during dump");
+		    }
 		}
 	    }
 	    break;
@@ -748,12 +759,13 @@ w_object(VALUE obj, struct dump_arg *arg, int limit)
 	    {
 		VALUE v;
 
-		if (!rb_respond_to(obj, s_dump_data)) {
+		if (!rb_obj_respond_to(obj, s_dump_data, Qtrue)) {
 		    rb_raise(rb_eTypeError,
 			     "no marshal_dump is defined for class %s",
 			     rb_obj_classname(obj));
 		}
 		v = rb_funcall(obj, s_dump_data, 0);
+		check_dump_arg(arg);
 		w_class(TYPE_DATA, obj, arg, Qtrue);
 		w_object(v, arg, limit);
 	    }
@@ -784,6 +796,7 @@ dump(struct dump_call_arg *arg)
 static VALUE
 dump_ensure(struct dump_arg *arg)
 {
+    if (!DATA_PTR(arg->wrapper)) return 0;
     st_free_table(arg->symbols);
     st_free_table(arg->data);
     st_free_table(arg->compat_tbl);
@@ -843,13 +856,13 @@ marshal_dump(int argc, VALUE *argv)
     }
     arg.dest = 0;
     if (!NIL_P(port)) {
-	if (!rb_respond_to(port, s_write)) {
+	if (!rb_obj_respond_to(port, s_write, Qtrue)) {
 	  type_error:
 	    rb_raise(rb_eTypeError, "instance of IO needed");
 	}
 	arg.str = rb_str_buf_new(0);
 	arg.dest = port;
-	if (rb_respond_to(port, s_binmode)) {
+	if (rb_obj_respond_to(port, s_binmode, Qtrue)) {
 	    rb_funcall2(port, s_binmode, 0, 0);
 	}
     }
@@ -887,6 +900,14 @@ struct load_arg {
     VALUE compat_tbl_wrapper;
 };
 
+static void
+check_load_arg(struct load_arg *arg)
+{
+    if (!DATA_PTR(arg->compat_tbl_wrapper)) {
+	rb_raise(rb_eRuntimeError, "Marshal.load reentered");
+    }
+}
+
 static VALUE r_entry(VALUE v, struct load_arg *arg);
 static VALUE r_object(struct load_arg *arg);
 static VALUE path2class(const char *path);
@@ -907,6 +928,7 @@ r_byte(struct load_arg *arg)
     else {
 	VALUE src = arg->src;
 	VALUE v = rb_funcall2(src, s_getbyte, 0, 0);
+	check_load_arg(arg);
 	if (NIL_P(v)) rb_eof_error();
 	c = (unsigned char)NUM2CHR(v);
     }
@@ -916,7 +938,7 @@ r_byte(struct load_arg *arg)
 static void
 long_toobig(int size)
 {
-    rb_raise(rb_eTypeError, "long too big for this architecture (size %d, given %d)",
+    rb_raise(rb_eTypeError, "long too big for this architecture (size %zd, given %d)",
 	     sizeof(long), size);
 }
 
@@ -983,6 +1005,7 @@ r_bytes0(long len, struct load_arg *arg)
 	VALUE src = arg->src;
 	VALUE n = LONG2NUM(len);
 	str = rb_funcall2(src, s_read, 1, &n);
+	check_load_arg(arg);
 	if (NIL_P(str)) goto too_short;
 	StringValue(str);
 	if (RSTRING_LEN(str) != len) goto too_short;
@@ -1077,6 +1100,7 @@ r_leave(VALUE v, struct load_arg *arg)
     }
     if (arg->proc) {
 	v = rb_funcall(arg->proc, rb_intern("call"), 1, v);
+	check_load_arg(arg);
     }
     return v;
 }
@@ -1156,11 +1180,13 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
       case TYPE_LINK:
 	id = r_long(arg);
 	v = rb_hash_aref(arg->data, LONG2FIX(id));
+	check_load_arg(arg);
 	if (NIL_P(v)) {
 	    rb_raise(rb_eArgError, "dump format error (unlinked)");
 	}
 	if (arg->proc) {
 	    v = rb_funcall(arg->proc, rb_intern("call"), 1, v);
+	    check_load_arg(arg);
 	}
 	break;
 
@@ -1394,7 +1420,7 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
 	    VALUE klass = path2class(r_unique(arg));
 	    VALUE data;
 
-	    if (!rb_respond_to(klass, s_load)) {
+	    if (!rb_obj_respond_to(klass, s_load, Qtrue)) {
 		rb_raise(rb_eTypeError, "class %s needs to have method `_load'",
 			 rb_class2name(klass));
 	    }
@@ -1404,6 +1430,7 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
 		*ivp = Qfalse;
 	    }
 	    v = rb_funcall(klass, s_load, 1, data);
+	    check_load_arg(arg);
 	    v = r_entry(v, arg);
             v = r_leave(v, arg);
 	}
@@ -1421,13 +1448,14 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
                     rb_extend_object(v, m);
                 }
             }
-	    if (!rb_respond_to(v, s_mload)) {
+	    if (!rb_obj_respond_to(v, s_mload, Qtrue)) {
 		rb_raise(rb_eTypeError, "instance of %s needs to have method `marshal_load'",
 			 rb_class2name(klass));
 	    }
 	    v = r_entry(v, arg);
 	    data = r_object(arg);
 	    rb_funcall(v, s_mload, 1, data);
+	    check_load_arg(arg);
             v = r_leave(v, arg);
 	}
         break;
@@ -1447,13 +1475,14 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
       case TYPE_DATA:
        {
            VALUE klass = path2class(r_unique(arg));
-           if (rb_respond_to(klass, s_alloc)) {
+           if (rb_obj_respond_to(klass, s_alloc, Qtrue)) {
 	       static int warn = Qtrue;
 	       if (warn) {
 		   rb_warn("define `allocate' instead of `_alloc'");
 		   warn = Qfalse;
 	       }
 	       v = rb_funcall(klass, s_alloc, 0);
+	       check_load_arg(arg);
            }
 	   else {
 	       v = rb_obj_alloc(klass);
@@ -1462,12 +1491,13 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
                rb_raise(rb_eArgError, "dump format error");
            }
            v = r_entry(v, arg);
-           if (!rb_respond_to(v, s_load_data)) {
+           if (!rb_obj_respond_to(v, s_load_data, Qtrue)) {
                rb_raise(rb_eTypeError,
                         "class %s needs to have instance method `_load_data'",
                         rb_class2name(klass));
            }
            rb_funcall(v, s_load_data, 1, r_object0(arg, 0, extmod));
+	   check_load_arg(arg);
            v = r_leave(v, arg);
        }
        break;
@@ -1533,6 +1563,7 @@ load(struct load_arg *arg)
 static VALUE
 load_ensure(struct load_arg *arg)
 {
+    if (!DATA_PTR(arg->compat_tbl_wrapper)) return 0;
     st_free_table(arg->symbols);
     st_free_table(arg->compat_tbl);
     DATA_PTR(arg->compat_tbl_wrapper) = 0;
@@ -1560,12 +1591,13 @@ marshal_load(int argc, VALUE *argv)
     struct load_arg arg;
 
     rb_scan_args(argc, argv, "11", &port, &proc);
-    if (rb_respond_to(port, rb_intern("to_str"))) {
+    v = rb_check_string_type(port);
+    if (!NIL_P(v)) {
 	arg.taint = OBJ_TAINTED(port); /* original taintedness */
-	StringValue(port);	       /* possible conversion */
+	port = v;
     }
-    else if (rb_respond_to(port, s_getbyte) && rb_respond_to(port, s_read)) {
-	if (rb_respond_to(port, s_binmode)) {
+    else if (rb_obj_respond_to(port, s_getbyte, Qtrue) && rb_obj_respond_to(port, s_read, Qtrue)) {
+	if (rb_obj_respond_to(port, s_binmode, Qtrue)) {
 	    rb_funcall2(port, s_binmode, 0, 0);
 	}
 	arg.taint = Qtrue;
@@ -1593,6 +1625,7 @@ marshal_load(int argc, VALUE *argv)
 
     arg.symbols = st_init_numtable();
     arg.data   = rb_hash_new();
+    RBASIC(arg.data)->klass = 0;
     if (NIL_P(proc)) arg.proc = 0;
     else             arg.proc = proc;
     v = rb_ensure(load, (VALUE)&arg, load_ensure, (VALUE)&arg);
@@ -1636,6 +1669,8 @@ marshal_load(int argc, VALUE *argv)
 void
 Init_marshal(void)
 {
+#undef rb_intern
+
     VALUE rb_mMarshal = rb_define_module("Marshal");
 
     s_dump = rb_intern("_dump");

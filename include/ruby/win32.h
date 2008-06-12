@@ -28,6 +28,7 @@ extern "C" {
 // #include <stdarg.h> conflict with varargs.h?
 #if !defined(WSAAPI)
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #endif
 
 #define NT 1			/* deprecated */
@@ -88,6 +89,9 @@ typedef unsigned int uintptr_t;
 #  endif
 #  define _UINTPTR_T_DEFINED
 # endif
+#endif
+#ifndef __MINGW32__
+# define mode_t int
 #endif
 
 #ifdef _M_IX86
@@ -543,6 +547,7 @@ size_t rb_w32_read(int, void *, size_t);
 size_t rb_w32_write(int, const void *, size_t);
 int  rb_w32_utime(const char *, const struct utimbuf *);
 int  WINAPI rb_w32_Sleep(unsigned long msec);
+int  rb_w32_wait_events_blocking(HANDLE *events, int num, DWORD timeout);
 
 /*
 == ***CAUTION***

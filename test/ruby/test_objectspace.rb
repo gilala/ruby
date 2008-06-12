@@ -1,4 +1,5 @@
 require 'test/unit'
+require_relative 'envutil'
 
 class TestObjectSpace < Test::Unit::TestCase
   def self.deftest_id2ref(obj)
@@ -33,4 +34,38 @@ End
   deftest_id2ref(true)
   deftest_id2ref(false)
   deftest_id2ref(nil)
+
+  def test_count_objects
+    h = {}
+    ObjectSpace.count_objects(h)
+    assert_kind_of(Hash, h)
+    assert(h.keys.all? {|x| x.is_a?(Symbol) || x.is_a?(Integer) })
+    assert(h.values.all? {|x| x.is_a?(Integer) })
+
+    h = ObjectSpace.count_objects
+    assert_kind_of(Hash, h)
+    assert(h.keys.all? {|x| x.is_a?(Symbol) || x.is_a?(Integer) })
+    assert(h.values.all? {|x| x.is_a?(Integer) })
+
+    assert_raise(TypeError) { ObjectSpace.count_objects(1) }
+
+    h0 = {:T_FOO=>1000}
+    h = ObjectSpace.count_objects(h0)
+    assert_same(h0, h)
+    assert_equal(0, h0[:T_FOO])
+  end
+
+  def test_finalizer
+    EnvUtil.rubyexec("-e", <<-END) do |w, r, e|
+      a = []
+      ObjectSpace.define_finalizer(a) { p :ok }
+      b = a.dup
+      ObjectSpace.define_finalizer(a) { p :ok }
+    END
+      assert_equal("", e.read)
+      assert_equal(":ok\n:ok\n:ok\n:ok\n", r.read)
+
+      assert_raise(ArgumentError) { ObjectSpace.define_finalizer([], Object.new) }
+    end
+  end
 end

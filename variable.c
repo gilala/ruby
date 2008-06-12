@@ -26,9 +26,9 @@ Init_var_tables(void)
 {
     rb_global_tbl = st_init_numtable();
     rb_class_tbl = st_init_numtable();
-    autoload = rb_intern("__autoload__");
-    classpath = rb_intern("__classpath__");
-    tmp_classpath = rb_intern("__tmp_classpath__");
+    CONST_ID(autoload, "__autoload__");
+    CONST_ID(classpath, "__classpath__");
+    CONST_ID(tmp_classpath, "__tmp_classpath__");
 }
 
 struct fc_result {
@@ -142,7 +142,9 @@ classname(VALUE klass)
     if (!klass) klass = rb_cObject;
     if (RCLASS_IV_TBL(klass)) {
 	if (!st_lookup(RCLASS_IV_TBL(klass), classpath, &path)) {
-	    ID classid = rb_intern("__classid__");
+	    ID classid;
+
+	    CONST_ID(classid, "__classid__");
 
 	    if (!st_lookup(RCLASS_IV_TBL(klass), classid, &path)) {
 		return find_class_path(klass);
@@ -270,13 +272,13 @@ rb_class_name(VALUE klass)
     return rb_class_path(rb_class_real(klass));
 }
 
-char *
+const char *
 rb_class2name(VALUE klass)
 {
     return RSTRING_PTR(rb_class_name(klass));
 }
 
-char *
+const char *
 rb_obj_classname(VALUE obj)
 {
     return rb_class2name(CLASS_OF(obj));
@@ -455,13 +457,20 @@ rb_define_hooked_variable(
     void  (*setter)(ANYARGS))
 {
     struct global_variable *gvar;
-    ID id = global_id(name);
+    ID id;
+    VALUE tmp;
+    
+    if (var)
+        tmp = *var;
 
+    id = global_id(name);
     gvar = rb_global_entry(id)->var;
     gvar->data = (void*)var;
     gvar->getter = getter?getter:var_getter;
     gvar->setter = setter?setter:var_setter;
     gvar->marker = var_marker;
+
+    RB_GC_GUARD(tmp);
 }
 
 void
@@ -557,7 +566,7 @@ remove_trace(struct global_variable *var)
 	next = trace->next;
 	if (next->removed) {
 	    trace->next = next->next;
-	    free(next);
+	    xfree(next);
 	}
 	else {
 	    trace = next;
@@ -750,10 +759,10 @@ rb_alias_variable(ID name1, ID name2)
 	    struct trace_var *trace = var->trace;
 	    while (trace) {
 		struct trace_var *next = trace->next;
-		free(trace);
+		xfree(trace);
 		trace = next;
 	    }
-	    free(var);
+	    xfree(var);
 	}
     }
     else {

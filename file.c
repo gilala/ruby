@@ -14,6 +14,10 @@
 #ifdef _WIN32
 #include "missing/file.h"
 #endif
+#ifdef __CYGWIN__
+#include <windows.h>
+#include <sys/cygwin.h>
+#endif
 
 #include "ruby/ruby.h"
 #include "ruby/io.h"
@@ -98,15 +102,14 @@ static VALUE
 rb_get_path_check(VALUE obj, int check)
 {
     VALUE tmp;
-    static ID to_path;
+    ID to_path;
 
     if (check) rb_check_safe_obj(obj);
     tmp = rb_check_string_type(obj);
     if (!NIL_P(tmp)) goto exit;
 
-    if (!to_path) {
-	to_path = rb_intern("to_path");
-    }
+
+    CONST_ID(to_path, "to_path");
     if (rb_respond_to(obj, to_path)) {
 	tmp = rb_funcall(obj, to_path, 0, 0);
     }
@@ -180,7 +183,7 @@ stat_new_0(VALUE klass, struct stat *st)
 	nst = ALLOC(struct stat);
 	*nst = *st;
     }
-    return Data_Wrap_Struct(klass, NULL, free, nst);
+    return Data_Wrap_Struct(klass, NULL, -1, nst);
 }
 
 static VALUE
@@ -944,8 +947,8 @@ eaccess(const char *path, int mode)
 
     return -1;
 #else
-# if _MSC_VER >= 1400
-    mode &= 6;
+# if defined(_MSC_VER) || defined(__MINGW32__)
+    mode &= ~1;
 # endif
     return access(path, mode);
 #endif
@@ -2272,11 +2275,11 @@ rb_file_s_readlink(VALUE klass, VALUE path)
 	buf = xrealloc(buf, size);
     }
     if (rv < 0) {
-	free(buf);
+	xfree(buf);
 	rb_sys_fail(RSTRING_PTR(path));
     }
     v = rb_tainted_str_new(buf, rv);
-    free(buf);
+    xfree(buf);
 
     return v;
 #else
@@ -2399,6 +2402,18 @@ rb_file_s_umask(int argc, VALUE *argv)
 #define isdirsep(x) ((x) == '/')
 #endif
 
+#if defined _WIN32 || defined __CYGWIN__
+#define USE_NTFS 1
+#else
+#define USE_NTFS 0
+#endif
+
+#if USE_NTFS
+#define istrailinggabage(x) ((x) == '.' || (x) == ' ')
+#else
+#define istrailinggabage(x) 0
+#endif
+
 #ifndef CharNext		/* defined as CharNext[AW] on Windows. */
 # if defined(DJGPP)
 #   define CharNext(p) ((p) + mblen(p, RUBY_MBCHAR_MAXSIZE))
@@ -2437,7 +2452,7 @@ getcwdofdrv(int drv)
     if (chdir(drive) == 0) {
 	drvcwd = my_getcwd();
 	chdir(oldcwd);
-	free(oldcwd);
+	xfree(oldcwd);
     }
     else {
 	/* perhaps the drive is not exist. we return only drive letter */
@@ -2535,15 +2550,40 @@ rb_path_end(const char *path)
     return chompdirsep(path);
 }
 
+#if USE_NTFS
+static char *
+ntfs_tail(const char *path)
+{
+    while (*path == '.') path++;
+    while (*path && *path != ':') {
+	if (istrailinggabage(*path)) {
+	    const char *last = path++;
+	    while (istrailinggabage(*path)) path++;
+	    if (!*path || *path == ':') return (char *)last;
+	}
+	else if (isdirsep(*path)) {
+	    const char *last = path++;
+	    while (isdirsep(*path)) path++;
+	    if (!*path) return (char *)last;
+	    if (*path == ':') path++;
+	}
+	else {
+	    path = CharNext(path);
+	}
+    }
+    return (char *)path;
+}
+#endif
+
 #define BUFCHECK(cond) do {\
     long bdiff = p - buf;\
-    while (cond) {\
-	buflen *= 2;\
+    if (cond) {\
+	do {buflen *= 2;} while (cond);\
+	rb_str_resize(result, buflen);\
+	buf = RSTRING_PTR(result);\
+	p = buf + bdiff;\
+	pend = buf + buflen;\
     }\
-    rb_str_resize(result, buflen);\
-    buf = RSTRING_PTR(result);\
-    p = buf + bdiff;\
-    pend = buf + buflen;\
 } while (0)
 
 #define BUFINIT() (\
@@ -2551,14 +2591,20 @@ rb_path_end(const char *path)
     buflen = RSTRING_LEN(result),\
     pend = p + buflen)
 
+#define SET_EXTERNAL_ENCODING() (\
+    (void)(extenc || (extenc = rb_default_external_encoding())),\
+    rb_enc_associate(result, extenc))
+
 static int is_absolute_path(const char*);
 
 static VALUE
 file_expand_path(VALUE fname, VALUE dname, VALUE result)
 {
-    char *s, *buf, *b, *p, *pend, *root;
+    const char *s, *b;
+    char *buf, *p, *pend, *root;
     long buflen, dirlen;
     int tainted;
+    rb_encoding *extenc = 0;
 
     FilePathValue(fname);
     s = StringValuePtr(fname);
@@ -2567,7 +2613,7 @@ file_expand_path(VALUE fname, VALUE dname, VALUE result)
 
     if (s[0] == '~') {
 	if (isdirsep(s[1]) || s[1] == '\0') {
-	    char *dir = getenv("HOME");
+	    const char *dir = getenv("HOME");
 
 	    if (!dir) {
 		rb_raise(rb_eArgError, "couldn't find HOME environment -- expanding `%s'", s);
@@ -2586,6 +2632,7 @@ file_expand_path(VALUE fname, VALUE dname, VALUE result)
 #endif
 	    s++;
 	    tainted = 1;
+	    SET_EXTERNAL_ENCODING();
 	}
 	else {
 #ifdef HAVE_PWD_H
@@ -2640,7 +2687,8 @@ file_expand_path(VALUE fname, VALUE dname, VALUE result)
 		dirlen = strlen(dir);
 		BUFCHECK(dirlen > buflen);
 		strcpy(buf, dir);
-		free(dir);
+		xfree(dir);
+		SET_EXTERNAL_ENCODING();
 	    }
 	    p = chompdirsep(skiproot(buf));
 	    s += 2;
@@ -2659,7 +2707,8 @@ file_expand_path(VALUE fname, VALUE dname, VALUE result)
 	    dirlen = strlen(dir);
 	    BUFCHECK(dirlen > buflen);
 	    strcpy(buf, dir);
-	    free(dir);
+	    xfree(dir);
+	    SET_EXTERNAL_ENCODING();
 	}
 #if defined DOSISH || defined __CYGWIN__
 	if (isdirsep(*s)) {
@@ -2680,8 +2729,11 @@ file_expand_path(VALUE fname, VALUE dname, VALUE result)
     }
     if (p > buf && p[-1] == '/')
 	--p;
-    else
+    else {
+	++buflen;
+	BUFCHECK(bdiff >= buflen);
 	*p = '/';
+    }
 
     p[1] = 0;
     root = skipprefix(buf);
@@ -2698,15 +2750,21 @@ file_expand_path(VALUE fname, VALUE dname, VALUE result)
 		  case '.':
 		    if (*(s+1) == '\0' || isdirsep(*(s+1))) {
 			/* We must go back to the parent */
+			char *n;
 			*p = '\0';
-			if (!(b = strrdirsep(root))) {
+			if (!(n = strrdirsep(root))) {
 			    *p = '/';
 			}
 			else {
-			    p = b;
+			    p = n;
 			}
 			b = ++s;
 		    }
+#if USE_NTFS
+		    else {
+			do *++s; while (istrailinggabage(*s));
+		    }
+#endif
 		    break;
 		  case '/':
 #if defined DOSISH || defined __CYGWIN__
@@ -2719,6 +2777,19 @@ file_expand_path(VALUE fname, VALUE dname, VALUE result)
 		    break;
 		}
 	    }
+#if USE_NTFS
+	    else {
+		--s;
+	      case ' ': {
+		const char *e = s;
+		while (istrailinggabage(*s)) s++;
+		if (!*s) {
+		    s = e;
+		    goto endpath;
+		}
+	      }
+	    }
+#endif
 	    break;
 	  case '/':
 #if defined DOSISH || defined __CYGWIN__
@@ -2741,21 +2812,84 @@ file_expand_path(VALUE fname, VALUE dname, VALUE result)
     }
 
     if (s > b) {
+#if USE_NTFS
+      endpath:
+	if (s > b + 6 && strncasecmp(s - 6, ":$DATA", 6) == 0) {
+	    /* alias of stream */
+	    /* get rid of a bug of x64 VC++ */
+	    if (*(s-7) == ':') s -= 7;			/* prime */
+	    else if (memchr(b, ':', s - 6 - b)) s -= 6; /* alternative */
+	}
+#endif
 	BUFCHECK(bdiff + (s-b) >= buflen);
 	memcpy(++p, b, s-b);
 	p += s-b;
     }
     if (p == skiproot(buf) - 1) p++;
 
+#if USE_NTFS
+    *p = '\0';
+    if (*(s = skipprefix(b = buf)) && !strpbrk(s, "*?")) {
+	size_t len;
+	WIN32_FIND_DATA wfd;
+#ifdef __CYGWIN__
+	int lnk_added = 0, is_symlink = 0;
+	struct stat st;
+	char w32buf[MAXPATHLEN];
+	p = strrdirsep(s);
+	if (lstat(buf, &st) == 0 && S_ISLNK(st.st_mode)) {
+	    is_symlink = 1;
+	    *p = '\0';
+	}
+	if (cygwin_conv_to_win32_path((*buf ? buf : "/"), w32buf) == 0) {
+	    b = w32buf;
+	}
+	if (is_symlink && b == w32buf) {
+	    *p = '\\';
+	    strlcat(w32buf, p, sizeof(w32buf));
+	    len = strlen(p);
+	    if (len > 4 && STRCASECMP(p + len - 4, ".lnk") != 0) {
+		lnk_added = 1;
+		strlcat(w32buf, ".lnk", sizeof(w32buf));
+	    }
+	}
+	*p = '/';
+#endif
+	HANDLE h = FindFirstFile(b, &wfd);
+	if (h != INVALID_HANDLE_VALUE) {
+	    FindClose(h);
+	    len = strlen(wfd.cFileName);
+#ifdef __CYGWIN__
+	    if (lnk_added && len > 4 &&
+		STRCASECMP(wfd.cFileName + len - 4, ".lnk") == 0) {
+		wfd.cFileName[len -= 4] = '\0';
+	    }
+#else
+	    p = strrdirsep(s);
+#endif
+	    ++p;
+	    BUFCHECK(bdiff + len >= buflen);
+	    memcpy(p, wfd.cFileName, len + 1);
+	    p += len;
+	}
+#ifdef __CYGWIN__
+	else {
+	    p += strlen(p);
+	}
+#endif
+    }
+#endif
+
     if (tainted) OBJ_TAINT(result);
     rb_str_set_len(result, p - buf);
+    rb_enc_check(fname, result);
     return result;
 }
 
 VALUE
 rb_file_expand_path(VALUE fname, VALUE dname)
 {
-    return file_expand_path(fname, dname, rb_str_new(0, MAXPATHLEN + 2));
+    return file_expand_path(fname, dname, rb_usascii_str_new(0, MAXPATHLEN + 2));
 }
 
 /*
@@ -2789,22 +2923,29 @@ rb_file_s_expand_path(int argc, VALUE *argv)
 }
 
 static int
-rmext(const char *p, const char *e)
+rmext(const char *p, int l1, const char *e)
 {
-    int l1, l2;
+    int l2;
 
     if (!e) return 0;
 
-    l1 = chompdirsep(p) - p;
     l2 = strlen(e);
     if (l2 == 2 && e[1] == '*') {
-	e = strrchr(p, *e);
-	if (!e) return 0;
+	unsigned char c = *e;
+	e = p + l1;
+	do {
+	    if (e <= p) return 0;
+	} while (*--e != c);
 	return e - p;
     }
     if (l1 < l2) return l1;
 
-    if (strncmp(p+l1-l2, e, l2) == 0) {
+#if CASEFOLD_FILESYSTEM
+#define fncomp strncasecmp
+#else
+#define fncomp strncmp
+#endif
+    if (fncomp(p+l1-l2, e, l2) == 0) {
 	return l1-l2;
     }
     return 0;
@@ -2828,11 +2969,11 @@ static VALUE
 rb_file_s_basename(int argc, VALUE *argv)
 {
     VALUE fname, fext, basename;
-    char *name, *p;
+    const char *name, *p;
 #if defined DOSISH_DRIVE_LETTER || defined DOSISH_UNC
-    char *root;
+    const char *root;
 #endif
-    int f;
+    int f, n;
 
     if (rb_scan_args(argc, argv, "11", &fname, &fext) == 2) {
 	StringValue(fext);
@@ -2866,20 +3007,25 @@ rb_file_s_basename(int argc, VALUE *argv)
 #endif
 #endif
     }
-    else if (!(p = strrdirsep(name))) {
-	if (NIL_P(fext) || !(f = rmext(name, StringValueCStr(fext)))) {
-	    f = chompdirsep(name) - name;
-	    if (f == RSTRING_LEN(fname)) return fname;
-	}
-	p = name;
-    }
     else {
-	while (isdirsep(*p)) p++; /* skip last / */
-	if (NIL_P(fext) || !(f = rmext(p, StringValueCStr(fext)))) {
-	    f = chompdirsep(p) - p;
+	if (!(p = strrdirsep(name))) {
+	    p = name;
 	}
+	else {
+	    while (isdirsep(*p)) p++; /* skip last / */
+	}
+#if USE_NTFS
+	n = ntfs_tail(p) - p;
+#else
+	n = chompdirsep(p) - p;
+#endif
+	if (NIL_P(fext) || !(f = rmext(p, n, StringValueCStr(fext)))) {
+	    f = n;
+	}
+	if (f == RSTRING_LEN(fname)) return fname;
     }
     basename = rb_str_new(p, f);
+    rb_enc_copy(basename, fname);
     OBJ_INFECT(basename, fname);
     return basename;
 }
@@ -2931,6 +3077,7 @@ rb_file_s_dirname(VALUE klass, VALUE fname)
     if (has_drive_letter(name) && root == name + 2 && p - name == 2)
 	rb_str_cat(dirname, ".", 1);
 #endif
+    rb_enc_copy(dirname, fname);
     OBJ_INFECT(dirname, fname);
     return dirname;
 }
@@ -2952,21 +3099,49 @@ rb_file_s_dirname(VALUE klass, VALUE fname)
 static VALUE
 rb_file_s_extname(VALUE klass, VALUE fname)
 {
-    char *name, *p, *e;
+    const char *name, *p, *e;
     VALUE extname;
 
     FilePathStringValue(fname);
     name = StringValueCStr(fname);
     p = strrdirsep(name);	/* get the last path component */
     if (!p)
- 	p = name;
+	p = name;
     else
- 	p++;
- 
-    e = strrchr(p, '.');	/* get the last dot of the last component */
-    if (!e || e == p || !e[1])	/* no dot, or the only dot is first or end? */
+	name = ++p;
+
+    e = 0;
+    while (*p) {
+	if (*p == '.' || istrailinggabage(*p)) {
+#if USE_NTFS
+	    const char *last = p++, *dot = last;
+	    while (istrailinggabage(*p)) {
+		if (*p == '.') dot = p;
+		p++;
+	    }
+	    if (!*p || *p == ':') {
+		p = last;
+		break;
+	    }
+	    e = dot;
+	    continue;
+#else
+	    e = p;	  /* get the last dot of the last component */
+#endif
+	}
+#if USE_NTFS
+	else if (*p == ':') {
+	    break;
+	}
+#endif
+	else if (isdirsep(*p))
+	    break;
+	p = CharNext(p);
+    }
+    if (!e || e == name || e+1 == p)	/* no dot, or the only dot is first or end? */
 	return rb_str_new(0, 0);
-    extname = rb_str_new(e, chompdirsep(e) - e);	/* keep the dot, too! */
+    extname = rb_str_new(e, p - e);	/* keep the dot, too! */
+    rb_enc_copy(extname, fname);
     OBJ_INFECT(extname, fname);
     return extname;
 }
@@ -3023,7 +3198,7 @@ rb_file_join(VALUE ary, VALUE sep)
 {
     long len, i;
     VALUE result, tmp;
-    char *name, *tail;
+    const char *name, *tail;
 
     if (RARRAY_LEN(ary) == 0) return rb_str_new(0, 0);
 
@@ -3550,7 +3725,7 @@ rb_stat_init(VALUE obj, VALUE fname)
 	rb_sys_fail(RSTRING_PTR(fname));
     }
     if (DATA_PTR(obj)) {
-	free(DATA_PTR(obj));
+	xfree(DATA_PTR(obj));
 	DATA_PTR(obj) = NULL;
     }
     nst = ALLOC(struct stat);
@@ -3573,7 +3748,7 @@ rb_stat_init_copy(VALUE copy, VALUE orig)
 	rb_raise(rb_eTypeError, "wrong argument class");
     }
     if (DATA_PTR(copy)) {
-	free(DATA_PTR(copy));
+	xfree(DATA_PTR(copy));
 	DATA_PTR(copy) = 0;
     }
     if (DATA_PTR(orig)) {
@@ -4189,7 +4364,7 @@ static int
 path_check_0(VALUE path, int execpath)
 {
     struct stat st;
-    char *p0 = StringValueCStr(path);
+    const char *p0 = StringValueCStr(path);
     char *p = 0, *s;
 
     if (!is_absolute_path(p0)) {
@@ -4197,7 +4372,7 @@ path_check_0(VALUE path, int execpath)
 	VALUE newpath;
 
 	newpath = rb_str_new2(buf);
-	free(buf);
+	xfree(buf);
 
 	rb_str_cat2(newpath, "/");
 	rb_str_cat2(newpath, p0);
@@ -4278,14 +4453,14 @@ file_load_ok(const char *path)
     return eaccess(path, R_OK) == 0;
 }
 
-extern VALUE rb_load_path;
+VALUE rb_get_load_path(void);
 
 int
 rb_find_file_ext(VALUE *filep, const char *const *ext)
 {
-    char *path, *found;
-    char *f = RSTRING_PTR(*filep);
-    VALUE fname;
+    const char *path, *found;
+    const char *f = RSTRING_PTR(*filep);
+    VALUE fname, load_path;
     long i, j;
 
     if (f[0] == '~') {
@@ -4311,35 +4486,38 @@ rb_find_file_ext(VALUE *filep, const char *const *ext)
 	return 0;
     }
 
-    if (!rb_load_path) return 0;
+    load_path = rb_get_load_path();
+    if (!load_path) return 0;
 
-    Check_Type(rb_load_path, T_ARRAY);
     for (j=0; ext[j]; j++) {
 	fname = rb_str_dup(*filep);
 	rb_str_cat2(fname, ext[j]);
 	OBJ_FREEZE(fname);
-	for (i=0;i<RARRAY_LEN(rb_load_path);i++) {
-	    VALUE str = RARRAY_PTR(rb_load_path)[i];
+	for (i = 0; i < RARRAY_LEN(load_path); i++) {
+	    VALUE str = RARRAY_PTR(load_path)[i];
+	    char fbuf[MAXPATHLEN];
 
 	    FilePathValue(str);
 	    if (RSTRING_LEN(str) == 0) continue;
 	    path = RSTRING_PTR(str);
-	    found = dln_find_file(StringValueCStr(fname), path);
+	    found = dln_find_file_r(StringValueCStr(fname), path, fbuf, sizeof(fbuf));
 	    if (found && file_load_ok(found)) {
 		*filep = rb_str_new2(found);
 		return j+1;
 	    }
 	}
     }
+    RB_GC_GUARD(load_path);
     return 0;
 }
 
 VALUE
 rb_find_file(VALUE path)
 {
-    VALUE tmp;
-    char *f = StringValueCStr(path);
-    char *lpath;
+    VALUE tmp, load_path;
+    const char *f = StringValueCStr(path);
+    const char *lpath;
+    char fbuf[MAXPATHLEN];
 
     if (f[0] == '~') {
 	path = rb_file_expand_path(path, Qnil);
@@ -4370,13 +4548,13 @@ rb_find_file(VALUE path)
 	rb_raise(rb_eSecurityError, "loading from non-absolute path %s", f);
     }
 
-    if (rb_load_path) {
+    load_path = rb_get_load_path();
+    if (load_path) {
 	long i;
 
-	Check_Type(rb_load_path, T_ARRAY);
 	tmp = rb_ary_new();
-	for (i=0;i<RARRAY_LEN(rb_load_path);i++) {
-	    VALUE str = RARRAY_PTR(rb_load_path)[i];
+	for (i = 0; i < RARRAY_LEN(load_path); i++) {
+	    VALUE str = RARRAY_PTR(load_path)[i];
 	    FilePathValue(str);
 	    if (RSTRING_LEN(str) > 0) {
 		rb_ary_push(tmp, str);
@@ -4397,7 +4575,7 @@ rb_find_file(VALUE path)
     if (!lpath) {
 	return 0;		/* no path, no load */
     }
-    if (!(f = dln_find_file(f, lpath))) {
+    if (!(f = dln_find_file_r(f, lpath, fbuf, sizeof(fbuf)))) {
 	return 0;
     }
     if (rb_safe_level() >= 1 && !fpath_check(f)) {

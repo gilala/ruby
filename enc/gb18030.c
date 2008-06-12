@@ -166,12 +166,28 @@ gb18030_mbc_enc_len(const UChar* p, const UChar* e, OnigEncoding enc ARG_UNUSED)
 static OnigCodePoint
 gb18030_mbc_to_code(const UChar* p, const UChar* end, OnigEncoding enc)
 {
-  return onigenc_mbn_mbc_to_code(enc, p, end);
+  int c, i, len;
+  OnigCodePoint n;
+
+  len = enclen(enc, p, end);
+  n = (OnigCodePoint )(*p++);
+  if (len == 1) return n;
+
+  for (i = 1; i < len; i++) {
+    if (p >= end) break;
+    c = *p++;
+    n <<= 8;  n += c;
+  }
+  n &= 0x7FFFFFFF;
+  return n;
 }
 
 static int
 gb18030_code_to_mbc(OnigCodePoint code, UChar *buf, OnigEncoding enc)
 {
+  if ((code & 0xff000000) != 0) {
+	code |= 0x80000000;
+  }
   return onigenc_mb4_code_to_mbc(enc, code, buf);
 }
 

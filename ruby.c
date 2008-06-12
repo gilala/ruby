@@ -57,22 +57,21 @@
 char *getenv();
 #endif
 
-/* TODO: move to VM */
-VALUE ruby_debug = Qfalse;
-VALUE ruby_verbose = Qfalse;
 VALUE rb_parser_get_yydebug(VALUE);
 VALUE rb_parser_set_yydebug(VALUE, VALUE);
 
 const char *ruby_get_inplace_mode(void);
 void ruby_set_inplace_mode(const char *);
 
-extern VALUE rb_get_argv(void);
-#define rb_argv rb_get_argv()
-
 #define DISABLE_BIT(bit) (1U << disable_##bit)
 enum disable_flag_bits {
     disable_gems,
     disable_rubyopt,
+};
+
+#define DUMP_BIT(bit) (1U << dump_##bit)
+enum dump_flag_bits {
+    dump_insns,
 };
 
 struct cmdline_options {
@@ -86,7 +85,10 @@ struct cmdline_options {
     unsigned int disable;
     int verbose;
     int yydebug;
-    char *script;
+    unsigned int setids;
+    unsigned int dump;
+    const char *script;
+    VALUE script_name;
     VALUE e_script;
     struct {
 	struct {
@@ -94,7 +96,21 @@ struct cmdline_options {
 	    int index;
 	} enc;
     } src, ext;
+    VALUE req_list;
 };
+
+static void init_ids(struct cmdline_options *);
+
+#define src_encoding_index GET_VM()->src_encoding_index
+
+static struct cmdline_options *
+cmdline_options_init(struct cmdline_options *opt)
+{
+    MEMZERO(opt, *opt, 1);
+    init_ids(opt);
+    opt->src.enc.index = src_encoding_index;
+    return opt;
+}
 
 struct cmdline_arguments {
     int argc;
@@ -103,7 +119,8 @@ struct cmdline_arguments {
 };
 
 static NODE *load_file(VALUE, const char *, int, struct cmdline_options *);
-static void forbid_setid(const char *);
+static void forbid_setid(const char *, struct cmdline_options *);
+#define forbid_setid(s) forbid_setid(s, opt)
 
 static struct {
     int argc;
@@ -152,7 +169,7 @@ usage(const char *name)
 	printf("  %s\n", *p++);
 }
 
-extern VALUE rb_load_path;
+VALUE rb_get_load_path(void);
 
 #ifndef CharNext		/* defined as CharNext[AW] on Windows. */
 #define CharNext(p) ((p) + mblen(p, RUBY_MBCHAR_MAXSIZE))
@@ -226,6 +243,7 @@ push_include(const char *path, VALUE (*filter)(VALUE))
 {
     const char sep = PATH_SEP_CHAR;
     const char *p, *s;
+    VALUE load_path = GET_VM()->load_path;
 
     p = path;
     while (*p) {
@@ -233,7 +251,7 @@ push_include(const char *path, VALUE (*filter)(VALUE))
 	    p++;
 	if (!*p) break;
 	for (s = p; *s && *s != sep; s = CharNext(s));
-	rb_ary_push(rb_load_path, (*filter)(rubylib_mangled_path(p, s - p)));
+	rb_ary_push(load_path, (*filter)(rubylib_mangled_path(p, s - p)));
 	p = s;
     }
 }
@@ -331,6 +349,7 @@ DllMain(HINSTANCE dll, DWORD reason, LPVOID reserved)
 void
 ruby_init_loadpath(void)
 {
+    VALUE load_path;
 #if defined LOAD_RELATIVE
     char libpath[MAXPATHLEN + 1];
     char *p;
@@ -377,7 +396,8 @@ ruby_init_loadpath(void)
 #else
 #define RUBY_RELATIVE(path) (path)
 #endif
-#define incpush(path) rb_ary_push(rb_load_path, rubylib_mangled_path2(path))
+#define incpush(path) rb_ary_push(load_path, rubylib_mangled_path2(path))
+    load_path = GET_VM()->load_path;
 
     if (rb_safe_level() == 0) {
 	ruby_incpush(getenv("RUBYLIB"));
@@ -412,48 +432,35 @@ ruby_init_loadpath(void)
     }
 }
 
-struct req_list {
-    char *name;
-    struct req_list *next;
-};
-static struct {
-    struct req_list *last, head;
-} req_list = {&req_list.head,};
 
 static void
-add_modules(const char *mod)
+add_modules(struct cmdline_options *opt, const char *mod)
 {
-    struct req_list *list;
+    VALUE list = opt->req_list;
 
-    list = ALLOC(struct req_list);
-    list->name = ALLOC_N(char, strlen(mod) + 1);
-    strcpy(list->name, mod);
-    list->next = 0;
-    req_list.last->next = list;
-    req_list.last = list;
+    if (!list) {
+	opt->req_list = list = rb_ary_new();
+	RBASIC(list)->klass = 0;
+    }
+    rb_ary_push(list, rb_obj_freeze(rb_str_new2(mod)));
 }
 
 extern void Init_ext(void);
 extern VALUE rb_vm_top_self(void);
 
 static void
-require_libraries(void)
+require_libraries(struct cmdline_options *opt)
 {
-    struct req_list *list = req_list.head.next;
-    struct req_list *tmp;
-    ID require = rb_intern("require");
+    VALUE list = opt->req_list;
+    ID require;
 
     Init_ext();		/* should be called here for some reason :-( */
-    req_list.last = 0;
-    while (list) {
-	VALUE feature = rb_str_new2(list->name);
-	tmp = list->next;
-	free(list->name);
-	free(list);
-	list = tmp;
+    CONST_ID(require, "require");
+    while (list && RARRAY_LEN(list) > 0) {
+	VALUE feature = rb_ary_shift(list);
 	rb_funcall2(rb_vm_top_self(), require, 1, &feature);
     }
-    req_list.head.next = 0;
+    opt->req_list = 0;
 }
 
 static void
@@ -586,6 +593,14 @@ disable_option(const char *str, int len, void *arg)
     rb_warn("unknown argument for --disable: `%.*s'", len, str);
 }
 
+static void
+dump_option(const char *str, int len, void *arg)
+{
+#define SET_WHEN_DUMP(bit) SET_WHEN(#bit, DUMP_BIT(bit), str, len)
+    SET_WHEN_DUMP(insns);
+    rb_warn("don't know how to dump `%.*s', (insns)", len, str);
+}
+
 static int
 proc_options(int argc, char **argv, struct cmdline_options *opt)
 {
@@ -712,10 +727,10 @@ proc_options(int argc, char **argv, struct cmdline_options *opt)
 	  case 'r':
 	    forbid_setid("-r");
 	    if (*++s) {
-		add_modules(s);
+		add_modules(opt, s);
 	    }
 	    else if (argv[1]) {
-		add_modules(argv[1]);
+		add_modules(opt, argv[1]);
 		argc--, argv++;
 	    }
 	    break;
@@ -873,6 +888,10 @@ proc_options(int argc, char **argv, struct cmdline_options *opt)
 	    }
 	    else if (strcmp("yydebug", s) == 0)
 		opt->yydebug = 1;
+	    else if (strncmp("dump", s, n = 4) == 0 && (!s[n] || s[n] == '=')) {
+		if (!(s += n + 1)[-1] && (!--argc || !(s = *++argv)) && *s != '-') break;
+		ruby_each_words(s, dump_option, &opt->dump);
+	    }
 	    else if (strcmp("help", s) == 0) {
 		usage(origarg.argv[0]);
 		rb_exit(EXIT_SUCCESS);
@@ -916,9 +935,7 @@ void Init_prelude(void);
 static void
 ruby_init_gems(int enable)
 {
-    VALUE gem;
-    gem = rb_define_module("Gem");
-    rb_const_set(gem, rb_intern("Enable"), enable ? Qtrue : Qfalse);
+    if (enable) rb_define_module("Gem");
     Init_prelude();
 }
 
@@ -937,7 +954,8 @@ opt_enc_index(VALUE enc_name)
     return i;
 }
 
-static int src_encoding_index = -1; /* TODO: VM private */
+#define rb_progname (GET_VM()->progname)
+VALUE rb_argv0;
 
 static VALUE
 process_options(VALUE arg)
@@ -948,9 +966,12 @@ process_options(VALUE arg)
     char **argv = argp->argv;
     NODE *tree = 0;
     VALUE parser;
-    rb_encoding *enc;
+    VALUE iseq;
+    rb_encoding *enc, *lenc;
     const char *s;
+    char fbuf[MAXPATHLEN];
     int i = proc_options(argc, argv, opt);
+    int safe;
 
     argc -= i;
     argv += i;
@@ -1010,7 +1031,7 @@ process_options(VALUE arg)
 
     if (rb_safe_level() >= 4) {
 	OBJ_TAINT(rb_argv);
-	OBJ_TAINT(rb_load_path);
+	OBJ_TAINT(GET_VM()->load_path);
     }
 
     if (!opt->e_script) {
@@ -1029,29 +1050,36 @@ process_options(VALUE arg)
 
 		opt->script = 0;
 		if (path) {
-		    opt->script = dln_find_file(argv[0], path);
+		    opt->script = dln_find_file_r(argv[0], path, fbuf, sizeof(fbuf));
 		}
 		if (!opt->script) {
-		    opt->script = dln_find_file(argv[0], getenv(PATH_ENV));
+		    opt->script = dln_find_file_r(argv[0], getenv(PATH_ENV), fbuf, sizeof(fbuf));
 		}
 		if (!opt->script)
 		    opt->script = argv[0];
 	    }
-#if defined DOSISH || defined __CYGWIN__
-	    /* assume that we can change argv[n] if never change its length. */
-	    translate_char(opt->script, '\\', '/');
-#endif
 	    argc--;
 	    argv++;
 	}
     }
 
     ruby_script(opt->script);
+#if defined DOSISH || defined __CYGWIN__
+    translate_char(RSTRING_PTR(rb_progname), '\\', '/');
+#endif
+    opt->script_name = rb_str_new4(rb_progname);
+    opt->script = RSTRING_PTR(opt->script_name);
     ruby_set_argv(argc, argv);
     process_sflag(opt);
 
     ruby_init_loadpath();
+    safe = rb_safe_level();
+    rb_set_safe_level_force(0);
     ruby_init_gems(!(opt->disable & DISABLE_BIT(gems)));
+    lenc = rb_locale_encoding();
+    for (i = 0; i < RARRAY_LEN(rb_argv); i++) {
+	rb_enc_associate(RARRAY_PTR(rb_argv)[i], lenc);
+    }
     parser = rb_parser_new();
     if (opt->yydebug) rb_parser_set_yydebug(parser, Qtrue);
     if (opt->ext.enc.name != 0) {
@@ -1065,20 +1093,21 @@ process_options(VALUE arg)
 	enc = rb_enc_from_index(opt->ext.enc.index);
     }
     else {
-	enc = rb_locale_encoding();
+	enc = lenc;
     }
     rb_enc_set_default_external(rb_enc_from_encoding(enc));
 
+    rb_set_safe_level_force(safe);
     if (opt->e_script) {
 	rb_encoding *eenc;
 	if (opt->src.enc.index >= 0) {
 	    eenc = rb_enc_from_index(opt->src.enc.index);
 	}
 	else {
-	    eenc = rb_locale_encoding();
+	    eenc = lenc;
 	}
 	rb_enc_associate(opt->e_script, eenc);
-	require_libraries();
+	require_libraries(opt);
 	tree = rb_parser_compile_string(parser, opt->script, opt->e_script, 1);
     }
     else {
@@ -1095,7 +1124,7 @@ process_options(VALUE arg)
 
     if (rb_safe_level() >= 4) {
 	FL_UNSET(rb_argv, FL_TAINT);
-	FL_UNSET(rb_load_path, FL_TAINT);
+	FL_UNSET(GET_VM()->load_path, FL_TAINT);
     }
 
     if (opt->do_check) {
@@ -1103,16 +1132,23 @@ process_options(VALUE arg)
 	return Qtrue;
     }
 
-    if (tree) {
-	if (opt->do_print) {
-	    tree = rb_parser_append_print(parser, tree);
-	}
-	if (opt->do_loop) {
-	    tree = rb_parser_while_loop(parser, tree, opt->do_line, opt->do_split);
-	}
+    if (opt->do_print) {
+	tree = rb_parser_append_print(parser, tree);
+    }
+    if (opt->do_loop) {
+	tree = rb_parser_while_loop(parser, tree, opt->do_line, opt->do_split);
     }
 
-    return (VALUE)tree;
+    iseq = rb_iseq_new(tree, rb_str_new2("<main>"),
+		       opt->script_name, Qfalse, ISEQ_TYPE_TOP);
+
+    if (opt->dump & DUMP_BIT(insns)) {
+	rb_io_write(rb_stdout, ruby_iseq_disasm(iseq));
+	rb_io_flush(rb_stdout);
+	return Qtrue;
+    }
+
+    return iseq;
 }
 
 static NODE *
@@ -1241,7 +1277,7 @@ load_file(VALUE parser, const char *fname, int script, struct cmdline_options *o
 	else if (!NIL_P(c)) {
 	    rb_io_ungetc(f, c);
 	}
-	require_libraries();	/* Why here? unnatural */
+	require_libraries(opt);	/* Why here? unnatural */
     }
     if (opt->src.enc.index >= 0) {
 	enc = rb_enc_from_index(opt->src.enc.index);
@@ -1269,13 +1305,8 @@ rb_load_file(const char *fname)
 {
     struct cmdline_options opt;
 
-    MEMZERO(&opt, opt, 1);
-    opt.src.enc.index = src_encoding_index;
-    return load_file(rb_parser_new(), fname, 0, &opt);
+    return load_file(rb_parser_new(), fname, 0, cmdline_options_init(&opt));
 }
-
-VALUE rb_progname;
-VALUE rb_argv0;
 
 #if !defined(PSTAT_SETCMD) && !defined(HAVE_SETPROCTITLE)
 #if !defined(_WIN32) && !(defined(HAVE_SETENV) && defined(HAVE_UNSETENV))
@@ -1292,6 +1323,7 @@ get_arglen(int argc, char **argv)
     char *s = argv[0];
     int i;
 
+    if (!argc) return 0;
     s += strlen(s);
     /* See if all the arguments are contiguous in memory */
     for (i = 1; i < argc; i++) {
@@ -1322,7 +1354,7 @@ get_arglen(int argc, char **argv)
 static void
 set_arg0(VALUE val, ID id)
 {
-    char *s, *t;
+    char *s;
     long i;
 
     if (origarg.argv == 0)
@@ -1353,13 +1385,13 @@ set_arg0(VALUE val, ID id)
     }
 
     memcpy(origarg.argv[0], s, i);
-    t = origarg.argv[0] + i;
-    *t = '\0';
-
-    if (i + 1 < origarg.len) memset(t + 1, ' ', origarg.len - i - 1);
 
     {
 	int j;
+	char *t = origarg.argv[0] + i;
+	*t = '\0';
+
+	if (i + 1 < origarg.len) memset(t + 1, ' ', origarg.len - i - 1);
 	for (j = 1; j < origarg.argc; j++) {
 	    origarg.argv[j] = t;
 	}
@@ -1376,30 +1408,32 @@ ruby_script(const char *name)
     }
 }
 
-static int uid, euid, gid, egid;
-
 static void
-init_ids(void)
+init_ids(struct cmdline_options *opt)
 {
-    uid = (int)getuid();
-    euid = (int)geteuid();
-    gid = (int)getgid();
-    egid = (int)getegid();
+    rb_uid_t uid = getuid();
+    rb_uid_t euid = geteuid();
+    rb_gid_t gid = getgid();
+    rb_gid_t egid = getegid();
+
 #ifdef VMS
     uid |= gid << 16;
     euid |= egid << 16;
 #endif
-    if (uid && (euid != uid || egid != gid)) {
+    if (uid != euid) opt->setids |= 1;
+    if (egid != gid) opt->setids |= 2;
+    if (uid && opt->setids) {
 	rb_set_safe_level(1);
     }
 }
 
+#undef forbid_setid
 static void
-forbid_setid(const char *s)
+forbid_setid(const char *s, struct cmdline_options *opt)
 {
-    if (euid != uid)
+    if (opt->setids & 1)
         rb_raise(rb_eSecurityError, "no %s allowed while running setuid", s);
-    if (egid != gid)
+    if (opt->setids & 2)
         rb_raise(rb_eSecurityError, "no %s allowed while running setgid", s);
     if (rb_safe_level() > 0)
         rb_raise(rb_eSecurityError, "no %s allowed in tainted mode", s);
@@ -1426,8 +1460,6 @@ opt_W_getter(VALUE val, ID id)
 void
 ruby_prog_init(void)
 {
-    init_ids();
-
     rb_define_hooked_variable("$VERBOSE", &ruby_verbose, 0, verbose_setter);
     rb_define_hooked_variable("$-v", &ruby_verbose, 0, verbose_setter);
     rb_define_hooked_variable("$-w", &ruby_verbose, 0, verbose_setter);
@@ -1494,13 +1526,11 @@ ruby_process_options(int argc, char **argv)
     struct cmdline_options opt;
     NODE *tree;
 
-    MEMZERO(&opt, opt, 1);
     ruby_script(argv[0]);	/* for the time being */
-    rb_argv0 = rb_progname;
+    rb_argv0 = rb_str_new4(rb_progname);
     args.argc = argc;
     args.argv = argv;
-    args.opt = &opt;
-    opt.src.enc.index = src_encoding_index;
+    args.opt = cmdline_options_init(&opt);
     opt.ext.enc.index = -1;
     tree = (NODE *)rb_vm_call_cfunc(rb_vm_top_self(),
 				    process_options, (VALUE)&args,

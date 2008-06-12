@@ -1,4 +1,5 @@
 require 'test/unit'
+require_relative 'envutil'
 
 # use of $= is deprecated after 1.7.1
 def pre_1_7_1
@@ -57,6 +58,12 @@ class TestString < Test::Unit::TestCase
       assert_equal(S("Foo"), S("FooBar")[/([A-Z]..)([A-Z]..)/, -2])
       assert_equal(nil,      S("FooBar")[/([A-Z]..)([A-Z]..)/, -3])
     end
+
+    o = Object.new
+    def o.to_int; 2; end
+    assert_equal("o", "foo"[o])
+
+    assert_raise(ArgumentError) { "foo"[] }
   end
 
   def test_ASET # '[]='
@@ -136,6 +143,14 @@ class TestString < Test::Unit::TestCase
     s = S("a string")
     s[0..s.size] = S("another string")
     assert_equal(S("another string"), s)
+
+    o = Object.new
+    def o.to_int; 2; end
+    s = "foo"
+    s[o] = "bar"
+    assert_equal("fobar", s)
+
+    assert_raise(ArgumentError) { "foo"[1, 2, 3] = "" }
   end
 
   def test_CMP # '<=>'
@@ -150,6 +165,21 @@ class TestString < Test::Unit::TestCase
       assert_equal(0, S("ABCDEF") <=> S("abcdef"))
       $= = false
     end
+
+    assert_nil("foo" <=> Object.new)
+
+    o = Object.new
+    def o.to_str; "bar"; end
+    assert_nil("foo" <=> o)
+
+    def o.<=>(x); nil; end
+    assert_nil("foo" <=> o)
+
+    def o.<=>(x); 1; end
+    assert_equal(-1, "foo" <=> o)
+
+    def o.<=>(x); 2**100; end
+    assert_equal(-(2**100), "foo" <=> o)
   end
 
   def test_EQUAL # '=='
@@ -165,6 +195,13 @@ class TestString < Test::Unit::TestCase
 
     assert(S("CAT") != S('cat'))
     assert(S("CaT") != S('cAt'))
+
+    o = Object.new
+    def o.to_str; end
+    def o.==(x); false; end
+    assert_equal(false, "foo" == o)
+    def o.==(x); true; end
+    assert_equal(true, "foo" == o)
   end
 
   def test_LSHIFT # '<<'
@@ -176,6 +213,11 @@ class TestString < Test::Unit::TestCase
       s << s
       assert_equal("a" * (2 << i), s)
     }
+
+    s = ["foo"].pack("p")
+    l = s.size
+    s << "bar"
+    assert_equal(l + 3, s.size)
   end
 
   def test_MATCH # '=~'
@@ -187,6 +229,12 @@ class TestString < Test::Unit::TestCase
       assert_equal(10,  S("FeeFieFoo-Fum") =~ /FUM$/)
       $= = false
     end
+
+    o = Object.new
+    def o.=~(x); x + "bar"; end
+    assert_equal("foobar", S("foo") =~ o)
+
+    assert_raise(TypeError) { S("foo") =~ "foo" }
   end
 
   def test_MOD # '%'
@@ -329,7 +377,22 @@ class TestString < Test::Unit::TestCase
     b = a.dup
     assert_equal(S("hello"), a.chomp!)
     assert_equal(S("hello\n"), b)
-   
+
+    s = "foo\r\n"
+    s.chomp!
+    assert_equal("foo", s)
+
+    s = "foo\r"
+    s.chomp!
+    assert_equal("foo", s)
+
+    s = "foo\r\n"
+    s.chomp!("")
+    assert_equal("foo", s)
+
+    s = "foo\r"
+    s.chomp!("")
+    assert_equal("foo\r", s)
   end
 
   def test_chop
@@ -393,6 +456,8 @@ class TestString < Test::Unit::TestCase
     assert_equal(4, a.count(S("hello"), S("^l")))
     assert_equal(4, a.count(S("ej-m")))
     assert_equal(0, S("y").count(S("a\\-z")))
+
+    assert_raise(ArgumentError) { "foo".count }
   end
 
   def test_crypt
@@ -432,6 +497,12 @@ class TestString < Test::Unit::TestCase
     a.delete!(S("lo"))
     assert_equal(S("he"), a)
     assert_equal(S("hello"), b)
+
+    a = S("hello")
+    a.delete!(S("^el"))
+    assert_equal(S("ell"), a)
+
+    assert_raise(ArgumentError) { S("foo").delete! }
   end
 
 
@@ -525,6 +596,10 @@ class TestString < Test::Unit::TestCase
     assert_equal(S("world"),  res[1])
     
     $/ = save
+
+    s = nil
+    "foo\nbar".each_line(nil) {|s2| s = s2 }
+    assert_equal("foo\nbar", s)
   end
 
   def test_empty?
@@ -549,6 +624,10 @@ class TestString < Test::Unit::TestCase
     a = S("hello")
     a.taint
     assert(a.gsub(/./, S('X')).tainted?)
+
+    assert_equal("z", "abc".gsub(/./, "a" => "z"), "moved from btest/knownbug")
+
+    assert_raise(ArgumentError) { "foo".gsub }
   end
 
   def test_gsub!
@@ -637,6 +716,14 @@ class TestString < Test::Unit::TestCase
     assert_nil(S("hello").index(?z))
     assert_nil(S("hello").index(S("z")))
     assert_nil(S("hello").index(/z./))
+
+    o = Object.new
+    def o.to_str; "bar"; end
+    assert_equal(3, "foobarbarbaz".index(o))
+    assert_raise(TypeError) { "foo".index(Object.new) }
+
+    assert_nil("foo".index(//, -100))
+    assert_nil($~)
   end
 
   def test_intern
@@ -727,6 +814,15 @@ class TestString < Test::Unit::TestCase
     b = a.replace(S("xyz"))
     assert_equal(S("xyz"), b)
     assert(b.tainted?)
+
+    s = "foo" * 100
+    s2 = ("bar" * 100).dup
+    s.replace(s2)
+    assert_equal(s2, s)
+
+    s2 = ["foo"].pack("p")
+    s.replace(s2)
+    assert_equal(s2, s)
   end
 
   def test_reverse
@@ -768,6 +864,14 @@ class TestString < Test::Unit::TestCase
     assert_nil(S("hello").rindex(?z))
     assert_nil(S("hello").rindex(S("z")))
     assert_nil(S("hello").rindex(/z./))
+
+    o = Object.new
+    def o.to_str; "bar"; end
+    assert_equal(6, "foobarbarbaz".rindex(o))
+    assert_raise(TypeError) { "foo".rindex(Object.new) }
+
+    assert_nil("foo".rindex(//, -100))
+    assert_nil($~)
   end
 
   def test_rjust
@@ -935,6 +1039,8 @@ class TestString < Test::Unit::TestCase
       assert_nil(a.slice!(S("plugh")))
       assert_equal(S("FooBar"), a)
     end
+
+    assert_raise(ArgumentError) { "foo".slice! }
   end
 
   def test_split
@@ -958,6 +1064,11 @@ class TestString < Test::Unit::TestCase
 
     assert_equal([S("a"), S(""), S("b"), S("c")], S("a||b|c|").split(S('|')))
     assert_equal([S("a"), S(""), S("b"), S("c"), S("")], S("a||b|c|").split(S('|'), -1))
+
+    assert_equal([], "".split(//, 1))
+
+    assert_equal("[2, 3]", [1,2,3].slice!(1,10000).inspect, "moved from btest/knownbug")
+
   end
 
   def test_squeeze
@@ -1048,6 +1159,20 @@ class TestString < Test::Unit::TestCase
     a = S("hello")
     a.taint
     assert(a.sub(/./, S('X')).tainted?)
+
+    o = Object.new
+    def o.to_str; "bar"; end
+    assert_equal("fooBARbaz", "foobarbaz".sub(o, "BAR"))
+
+    assert_raise(TypeError) { "foo".sub(Object.new, "") }
+
+    assert_raise(ArgumentError) { "foo".sub }
+
+    assert_raise(IndexError) { "foo"[/(?:(o$)|(x))/, 2] = 'bar' }
+
+    o = Object.new
+    def o.to_s; self; end
+    assert_match(/^foo#<Object:0x.*>baz$/, "foobarbaz".sub("bar") { o })
   end
 
   def test_sub!
@@ -1382,6 +1507,73 @@ class TestString < Test::Unit::TestCase
     assert_equal(676, count)
   end
 
+  def test_mod_check
+    assert_raise(RuntimeError) {
+      s = ""
+      s.sub!(/\A/) { s.replace "z" * 2000; "zzz" }
+    }
+  end
+
+  def test_frozen_check
+    assert_raise(RuntimeError) {
+      s = ""
+      s.sub!(/\A/) { s.freeze; "zzz" }
+    }
+  end
+
+  def test_tainted_str_new
+    a = []
+    a << a
+    s = a.inspect
+    assert(s.tainted?)
+    assert_equal("[[...]]", s)
+  end
+
+  class S2 < String
+  end
+  def test_str_new4
+    s = (0..54).to_a.join # length = 100
+    s2 = S2.new(s[10,90])
+    s3 = s2[10,80]
+    assert_equal((10..54).to_a.to_a.join, s2)
+    assert_equal((15..54).to_a.to_a.join, s3)
+  end
+
+  def test_rb_str_new4
+    s = "a" * 100
+    s2 = s[10,90]
+    assert_equal("a" * 90, s2)
+    s3 = s2[10,80]
+    assert_equal("a" * 80, s3)
+  end
+
+  class StringLike
+    def initialize(str)
+      @str = str
+    end
+
+    def to_str
+      @str
+    end
+  end
+
+  def test_rb_str_to_str
+    assert_equal("ab", "a" + StringLike.new("b"))
+  end
+
+  def test_rb_str_shared_replace
+    s = "a" * 100
+    s.succ!
+    assert_equal("a" * 99 + "b", s)
+    s = ""
+    s.succ!
+    assert_equal("", s)
+  end
+
+  def test_times
+    assert_raise(ArgumentError) { "a" * (-1) }
+  end
+
   def test_splice!
     l = S("1234\n234\n34\n4\n")
     assert_equal(S("1234\n"), l.slice!(/\A.*\n/), "[ruby-dev:31665]")
@@ -1395,12 +1587,94 @@ class TestString < Test::Unit::TestCase
     assert("abc".end_with?("c"))
   end
 
-  def test_times
+  def test_times2
     s1 = ''
     100.times {|n|
       s2 = "a" * n
       assert_equal(s1, s2)
       s1 << 'a'
     }
+
+    assert_raise(ArgumentError) { "foo" * (-1) }
+  end
+
+  def test_respond_to
+    o = Object.new 
+    def o.respond_to?(arg) [:to_str].include?(arg) ? nil : super end
+    def o.to_str() "" end
+    def o.==(other) "" == other end
+    assert_equal(false, "" == o)
+  end
+
+  def test_match_method
+    assert_equal("bar", "foobarbaz".match(/bar/).to_s)
+
+    o = /foo/
+    def o.match(x, y, z); x + y + z; end
+    assert_equal("foobarbaz", "foo".match(o, "bar", "baz"))
+    x = nil
+    "foo".match(o, "bar", "baz") {|y| x = y }
+    assert_equal("foobarbaz", x)
+
+    assert_raise(ArgumentError) { "foo".match }
+  end
+
+  def test_clear
+    s = "foo" * 100
+    s.clear
+    assert_equal("", s)
+  end
+
+  def test_to_s_2
+    c = Class.new(String)
+    s = c.new
+    s.replace("foo")
+    assert_equal("foo", s.to_s)
+    assert_instance_of(String, s.to_s)
+  end
+
+  def test_partition
+    assert_equal(%w(he l lo), "hello".partition(/l/))
+    assert_equal(%w(he l lo), "hello".partition("l"))
+    assert_raise(TypeError) { "hello".partition(1) }
+  end
+
+  def test_rpartition
+    assert_equal(%w(hel l o), "hello".rpartition(/l/))
+    assert_equal(%w(hel l o), "hello".rpartition("l"))
+    assert_raise(TypeError) { "hello".rpartition(1) }
+  end
+
+  def test_setter
+    assert_raise(TypeError) { $/ = 1 }
+  end
+
+  def test_to_id
+    c = Class.new
+    c.class_eval do
+      def initialize
+        @foo = :foo
+      end
+    end
+
+    assert_raise(TypeError) do
+      c.class_eval { attr 1 }
+    end
+
+    o = Object.new
+    def o.to_str; :foo; end
+    assert_raise(TypeError) do
+      c.class_eval { attr 1 }
+    end
+
+    def o.to_str; "foo"; end
+    assert_nothing_raised do
+      c.class_eval { attr o }
+    end
+    assert_equal(:foo, c.new.foo)
+  end
+
+  def test_gsub_enumerator
+    assert_normal_exit %q{"abc".gsub(/./).next}, "[ruby-dev:34828]"
   end
 end

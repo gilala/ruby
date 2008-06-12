@@ -8,11 +8,12 @@ require 'rdoc/ri'
 # the documentation
 #++
 
-class RDoc::RI::RDoc::RI::NamedThing
+class RDoc::RI::NamedThing
   attr_reader :name
   def initialize(name)
     @name = name
   end
+
   def <=>(other)
     @name <=> other.name
   end
@@ -26,10 +27,11 @@ class RDoc::RI::RDoc::RI::NamedThing
   end
 end
 
-class RDoc::RI::AliasName < RDoc::RI::RDoc::RI::NamedThing; end
+class RDoc::RI::AliasName < RDoc::RI::NamedThing; end
 
-class RDoc::RI::Attribute < RDoc::RI::RDoc::RI::NamedThing
+class RDoc::RI::Attribute < RDoc::RI::NamedThing
   attr_reader :rw, :comment
+
   def initialize(name, rw, comment)
     super(name)
     @rw = rw
@@ -39,6 +41,7 @@ end
 
 class RDoc::RI::Constant < RDoc::RI::NamedThing
   attr_reader :value, :comment
+
   def initialize(name, value, comment)
     super(name)
     @value = value
@@ -80,7 +83,7 @@ class RDoc::RI::ModuleDescription < RDoc::RI::Description
   attr_accessor :constants
   attr_accessor :includes
 
-  # merge in another class desscription into this one
+  # merge in another class description into this one
   def merge_in(old)
     merge(@class_methods, old.class_methods)
     merge(@instance_methods, old.instance_methods)

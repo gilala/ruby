@@ -228,6 +228,21 @@ rb_hash_new(void)
     return hash_alloc(rb_cHash);
 }
 
+VALUE
+rb_hash_dup(VALUE hash)
+{
+    NEWOBJ(ret, struct RHash);
+    DUPSETUP(ret, hash);
+
+    if (!RHASH_EMPTY_P(hash))
+        ret->ntbl = st_copy(RHASH(hash)->ntbl);
+    if (FL_TEST(hash, HASH_PROC_DEFAULT)) {
+        FL_SET(ret, HASH_PROC_DEFAULT);
+    }
+    ret->ifnone = RHASH(hash)->ifnone;
+    return (VALUE)ret;
+}
+
 static void
 rb_hash_modify_check(VALUE hash)
 {
@@ -331,8 +346,8 @@ rb_hash_s_create(int argc, VALUE *argv, VALUE klass)
 	tmp = rb_hash_s_try_convert(Qnil, argv[0]);
 	if (!NIL_P(tmp)) {
 	    hash = hash_alloc(klass);
-	    if (RHASH(argv[0])->ntbl) {
-		RHASH(hash)->ntbl = st_copy(RHASH(argv[0])->ntbl);
+	    if (RHASH(tmp)->ntbl) {
+		RHASH(hash)->ntbl = st_copy(RHASH(tmp)->ntbl);
 	    }
 	    return hash;
 	}
@@ -787,6 +802,7 @@ delete_if_i(VALUE key, VALUE value, VALUE hash)
 VALUE
 rb_hash_delete_if(VALUE hash)
 {
+    RETURN_ENUMERATOR(hash, 0, 0);
     rb_hash_modify(hash);
     rb_hash_foreach(hash, delete_if_i, hash);
     return hash;
@@ -804,6 +820,8 @@ VALUE
 rb_hash_reject_bang(VALUE hash)
 {
     int n;
+
+    RETURN_ENUMERATOR(hash, 0, 0);
     if (!RHASH(hash)->ntbl)
         return Qnil;
     n = RHASH(hash)->ntbl->num_entries;
@@ -1454,7 +1472,6 @@ hash_i(VALUE key, VALUE val, int *hval)
 {
     if (key == Qundef) return ST_CONTINUE;
     *hval ^= rb_hash(key);
-    *hval *= 137;
     *hval ^= rb_hash(val);
     return ST_CONTINUE;
 }
@@ -1967,7 +1984,7 @@ ruby_setenv(const char *name, const char *value)
 	char **envp = origenviron;
 	while (*envp && *envp != environ[i]) envp++;
 	if (!*envp)
-	    free(environ[i]);
+	    xfree(environ[i]);
 	if (!value) {
 	    while (environ[i]) {
 		environ[i] = environ[i+1];
@@ -2070,8 +2087,7 @@ env_each_key(VALUE ehash)
     long i;
 
     RETURN_ENUMERATOR(ehash, 0, 0);
-    rb_secure(4);
-    keys = env_keys();
+    keys = env_keys();	/* rb_secure(4); */
     for (i=0; i<RARRAY_LEN(keys); i++) {
 	rb_yield(RARRAY_PTR(keys)[i]);
     }
@@ -2101,12 +2117,11 @@ env_values(void)
 static VALUE
 env_each_value(VALUE ehash)
 {
-    VALUE values = env_values();
+    VALUE values;
     long i;
 
     RETURN_ENUMERATOR(ehash, 0, 0);
-    rb_secure(4);
-    values = env_values();
+    values = env_values();	/* rb_secure(4); */
     for (i=0; i<RARRAY_LEN(values); i++) {
 	rb_yield(RARRAY_PTR(values)[i]);
     }
@@ -2142,14 +2157,14 @@ env_each_pair(VALUE ehash)
 }
 
 static VALUE
-env_reject_bang(void)
+env_reject_bang(VALUE ehash)
 {
     volatile VALUE keys;
     long i;
     int del = 0;
 
-    rb_secure(4);
-    keys = env_keys();
+    RETURN_ENUMERATOR(ehash, 0, 0);
+    keys = env_keys();	/* rb_secure(4); */
     for (i=0; i<RARRAY_LEN(keys); i++) {
 	VALUE val = rb_f_getenv(Qnil, RARRAY_PTR(keys)[i]);
 	if (!NIL_P(val)) {
@@ -2165,9 +2180,10 @@ env_reject_bang(void)
 }
 
 static VALUE
-env_delete_if(void)
+env_delete_if(VALUE ehash)
 {
-    env_reject_bang();
+    RETURN_ENUMERATOR(ehash, 0, 0);
+    env_reject_bang(ehash);
     return envtbl;
 }
 
@@ -2211,14 +2227,13 @@ env_select(VALUE ehash)
     return result;
 }
 
-static VALUE
-env_clear(void)
+VALUE
+rb_env_clear(void)
 {
     volatile VALUE keys;
     long i;
 
-    rb_secure(4);
-    keys = env_keys();
+    keys = env_keys();	/* rb_secure(4); */
     for (i=0; i<RARRAY_LEN(keys); i++) {
 	VALUE val = rb_f_getenv(Qnil, RARRAY_PTR(keys)[i]);
 	if (!NIL_P(val)) {
@@ -2500,8 +2515,7 @@ env_replace(VALUE env, VALUE hash)
     volatile VALUE keys;
     long i;
 
-    rb_secure(4);
-    keys = env_keys();
+    keys = env_keys();	/* rb_secure(4); */
     if (env == hash) return env;
     hash = to_hash(hash);
     rb_hash_foreach(hash, env_replace_i, keys);
@@ -2550,6 +2564,8 @@ env_update(VALUE env, VALUE hash)
 void
 Init_Hash(void)
 {
+#undef rb_intern
+
     id_hash = rb_intern("hash");
     id_yield = rb_intern("yield");
     id_default = rb_intern("default");
@@ -2636,7 +2652,7 @@ Init_Hash(void)
     rb_define_singleton_method(envtbl,"each_value", env_each_value, 0);
     rb_define_singleton_method(envtbl,"delete", env_delete_m, 1);
     rb_define_singleton_method(envtbl,"delete_if", env_delete_if, 0);
-    rb_define_singleton_method(envtbl,"clear", env_clear, 0);
+    rb_define_singleton_method(envtbl,"clear", rb_env_clear, 0);
     rb_define_singleton_method(envtbl,"reject", env_reject, 0);
     rb_define_singleton_method(envtbl,"reject!", env_reject_bang, 0);
     rb_define_singleton_method(envtbl,"select", env_select, 0);

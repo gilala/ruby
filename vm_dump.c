@@ -21,8 +21,8 @@ static void
 control_frame_dump(rb_thread_t *th, rb_control_frame_t *cfp)
 {
     int pc = -1, bp = -1, line = 0;
-    unsigned int lfp = cfp->lfp - th->stack;
-    unsigned int dfp = cfp->dfp - th->stack;
+    ptrdiff_t lfp = cfp->lfp - th->stack;
+    ptrdiff_t dfp = cfp->dfp - th->stack;
     char lfp_in_heap = ' ', dfp_in_heap = ' ';
     char posbuf[MAX_POSBUF+1];
 
@@ -34,11 +34,11 @@ control_frame_dump(rb_thread_t *th, rb_control_frame_t *cfp)
     }
 
     if (lfp < 0 || lfp > th->stack_size) {
-	lfp = (unsigned int)cfp->lfp;
+	lfp = (ptrdiff_t)cfp->lfp;
 	lfp_in_heap = 'p';
     }
     if (dfp < 0 || dfp > th->stack_size) {
-	dfp = (unsigned int)cfp->dfp;
+	dfp = (ptrdiff_t)cfp->dfp;
 	dfp_in_heap = 'p';
     }
     if (cfp->bp) {
@@ -46,34 +46,34 @@ control_frame_dump(rb_thread_t *th, rb_control_frame_t *cfp)
     }
 
     switch (VM_FRAME_TYPE(cfp)) {
-      case FRAME_MAGIC_TOP:
+      case VM_FRAME_MAGIC_TOP:
 	magic = "TOP";
 	break;
-      case FRAME_MAGIC_METHOD:
+      case VM_FRAME_MAGIC_METHOD:
 	magic = "METHOD";
 	break;
-      case FRAME_MAGIC_CLASS:
+      case VM_FRAME_MAGIC_CLASS:
 	magic = "CLASS";
 	break;
-      case FRAME_MAGIC_BLOCK:
+      case VM_FRAME_MAGIC_BLOCK:
 	magic = "BLOCK";
 	break;
-      case FRAME_MAGIC_FINISH:
+      case VM_FRAME_MAGIC_FINISH:
 	magic = "FINISH";
 	break;
-      case FRAME_MAGIC_CFUNC:
+      case VM_FRAME_MAGIC_CFUNC:
 	magic = "CFUNC";
 	break;
-      case FRAME_MAGIC_PROC:
+      case VM_FRAME_MAGIC_PROC:
 	magic = "PROC";
 	break;
-      case FRAME_MAGIC_LAMBDA:
+      case VM_FRAME_MAGIC_LAMBDA:
 	magic = "LAMBDA";
 	break;
-      case FRAME_MAGIC_IFUNC:
+      case VM_FRAME_MAGIC_IFUNC:
 	magic = "IFUNC";
 	break;
-      case FRAME_MAGIC_EVAL:
+      case VM_FRAME_MAGIC_EVAL:
 	magic = "EVAL";
 	break;
       case 0:
@@ -97,6 +97,8 @@ control_frame_dump(rb_thread_t *th, rb_control_frame_t *cfp)
 	    iseq_name = "<ifunc>";
 	}
 	else {
+	    int vm_get_sourceline(rb_control_frame_t *);
+
 	    pc = cfp->pc - cfp->iseq->iseq_encoded;
 	    iseq_name = RSTRING_PTR(cfp->iseq->name);
 	    line = vm_get_sourceline(cfp);
@@ -113,7 +115,7 @@ control_frame_dump(rb_thread_t *th, rb_control_frame_t *cfp)
 	line = -1;
     }
 
-    fprintf(stderr, "c:%04d ",
+    fprintf(stderr, "c:%04td ",
 	    (rb_control_frame_t *)(th->stack + th->stack_size) - cfp);
     if (pc == -1) {
 	fprintf(stderr, "p:---- ");
@@ -121,9 +123,9 @@ control_frame_dump(rb_thread_t *th, rb_control_frame_t *cfp)
     else {
 	fprintf(stderr, "p:%04d ", pc);
     }
-    fprintf(stderr, "s:%04d b:%04d ", cfp->sp - th->stack, bp);
-    fprintf(stderr, lfp_in_heap == ' ' ? "l:%06d " : "l:%06x ", lfp % 10000);
-    fprintf(stderr, dfp_in_heap == ' ' ? "d:%06d " : "d:%06x ", dfp % 10000);
+    fprintf(stderr, "s:%04td b:%04d ", cfp->sp - th->stack, bp);
+    fprintf(stderr, lfp_in_heap == ' ' ? "l:%06td " : "l:%06tx ", lfp % 10000);
+    fprintf(stderr, dfp_in_heap == ' ' ? "d:%06td " : "d:%06tx ", dfp % 10000);
     fprintf(stderr, "%-6s ", magic);
     if (line) {
 	fprintf(stderr, "%s", posbuf);
@@ -140,7 +142,7 @@ control_frame_dump(rb_thread_t *th, rb_control_frame_t *cfp)
 void
 vm_stack_dump_raw(rb_thread_t *th, rb_control_frame_t *cfp)
 {
-#if 0
+#if 1
     VALUE *sp = cfp->sp, *bp = cfp->bp;
     VALUE *lfp = cfp->lfp;
     VALUE *dfp = cfp->dfp;
@@ -148,11 +150,11 @@ vm_stack_dump_raw(rb_thread_t *th, rb_control_frame_t *cfp)
 
     fprintf(stderr, "-- stack frame ------------\n");
     for (p = st = th->stack; p < sp; p++) {
-	fprintf(stderr, "%04ld (%p): %08lx", p - st, p, *p);
+	fprintf(stderr, "%04ld (%p): %08"PRIxVALUE, (long)(p - st), p, *p);
 
 	t = (VALUE *)*p;
 	if (th->stack <= t && t < sp) {
-	    fprintf(stderr, " (= %ld)", (VALUE *)GC_GUARDED_PTR_REF(t) - th->stack);
+	    fprintf(stderr, " (= %ld)", (long)((VALUE *)GC_GUARDED_PTR_REF(t) - th->stack));
 	}
 
 	if (p == lfp)
@@ -172,6 +174,13 @@ vm_stack_dump_raw(rb_thread_t *th, rb_control_frame_t *cfp)
 	cfp++;
     }
     fprintf(stderr, "---------------------------\n");
+}
+
+void
+vm_stack_dump_raw_current(void)
+{
+    rb_thread_t *th = GET_THREAD();
+    vm_stack_dump_raw(th, th->cfp);
 }
 
 void
@@ -262,15 +271,15 @@ stack_dump_each(rb_thread_t *th, rb_control_frame_t *cfp)
 
     /* stack trace header */
 
-    if (VM_FRAME_TYPE(cfp) == FRAME_MAGIC_METHOD ||
-	VM_FRAME_TYPE(cfp) == FRAME_MAGIC_TOP ||
-	VM_FRAME_TYPE(cfp) == FRAME_MAGIC_BLOCK ||
-	VM_FRAME_TYPE(cfp) == FRAME_MAGIC_CLASS ||
-	VM_FRAME_TYPE(cfp) == FRAME_MAGIC_PROC ||
-	VM_FRAME_TYPE(cfp) == FRAME_MAGIC_LAMBDA ||
-	VM_FRAME_TYPE(cfp) == FRAME_MAGIC_CFUNC ||
-	VM_FRAME_TYPE(cfp) == FRAME_MAGIC_IFUNC ||
-	VM_FRAME_TYPE(cfp) == FRAME_MAGIC_EVAL) {
+    if (VM_FRAME_TYPE(cfp) == VM_FRAME_MAGIC_METHOD ||
+	VM_FRAME_TYPE(cfp) == VM_FRAME_MAGIC_TOP ||
+	VM_FRAME_TYPE(cfp) == VM_FRAME_MAGIC_BLOCK ||
+	VM_FRAME_TYPE(cfp) == VM_FRAME_MAGIC_CLASS ||
+	VM_FRAME_TYPE(cfp) == VM_FRAME_MAGIC_PROC ||
+	VM_FRAME_TYPE(cfp) == VM_FRAME_MAGIC_LAMBDA ||
+	VM_FRAME_TYPE(cfp) == VM_FRAME_MAGIC_CFUNC ||
+	VM_FRAME_TYPE(cfp) == VM_FRAME_MAGIC_IFUNC ||
+	VM_FRAME_TYPE(cfp) == VM_FRAME_MAGIC_EVAL) {
 
 	VALUE *ptr = dfp - local_size;
 
@@ -299,11 +308,11 @@ stack_dump_each(rb_thread_t *th, rb_control_frame_t *cfp)
 	    else {
 		rstr = rb_inspect(*ptr);
 	    }
-	    fprintf(stderr, "  stack %2d: %8s (%d)\n", i, StringValueCStr(rstr),
+	    fprintf(stderr, "  stack %2d: %8s (%td)\n", i, StringValueCStr(rstr),
 		   ptr - th->stack);
 	}
     }
-    else if (VM_FRAME_TYPE(cfp) == FRAME_MAGIC_FINISH) {
+    else if (VM_FRAME_TYPE(cfp) == VM_FRAME_MAGIC_FINISH) {
 	if ((th)->stack + (th)->stack_size > (VALUE *)(cfp + 2)) {
 	    stack_dump_each(th, cfp + 1);
 	}
@@ -336,7 +345,7 @@ debug_print_register(rb_thread_t *th)
 	dfp = -1;
 
     cfpi = ((rb_control_frame_t *)(th->stack + th->stack_size)) - cfp;
-    fprintf(stderr, "  [PC] %04d, [SP] %04d, [LFP] %04d, [DFP] %04d, [CFP] %04d\n",
+    fprintf(stderr, "  [PC] %04d, [SP] %04td, [LFP] %04d, [DFP] %04d, [CFP] %04d\n",
 	   pc, cfp->sp - th->stack, lfp, dfp, cfpi);
 }
 
@@ -353,11 +362,11 @@ debug_print_pre(rb_thread_t *th, rb_control_frame_t *cfp)
 {
     rb_iseq_t *iseq = cfp->iseq;
 
-    if (iseq != 0 && VM_FRAME_TYPE(cfp) != FRAME_MAGIC_FINISH) {
+    if (iseq != 0 && VM_FRAME_TYPE(cfp) != VM_FRAME_MAGIC_FINISH) {
 	VALUE *seq = iseq->iseq;
 	int pc = cfp->pc - iseq->iseq_encoded;
 
-	printf("%3d ", VM_CFP_CNT(th, cfp));
+	printf("%3td ", VM_CFP_CNT(th, cfp));
 	ruby_iseq_disasm_insn(0, seq, pc, iseq, 0);
     }
 
@@ -416,18 +425,16 @@ debug_print_post(rb_thread_t *th, rb_control_frame_t *cfp
 void
 vm_analysis_insn(int insn)
 {
-    static ID usage_hash;
-    static ID bigram_hash;
+    ID usage_hash;
+    ID bigram_hash;
     static int prev_insn = -1;
 
     VALUE uh;
     VALUE ihash;
     VALUE cv;
 
-    if (usage_hash == 0) {
-	usage_hash = rb_intern("USAGE_ANALYSIS_INSN");
-	bigram_hash = rb_intern("USAGE_ANALYSIS_INSN_BIGRAM");
-    }
+    CONST_ID(usage_hash, "USAGE_ANALYSIS_INSN");
+    CONST_ID(bigram_hash, "USAGE_ANALYSIS_INSN_BIGRAM");
     uh = rb_const_get(rb_cVM, usage_hash);
     if ((ihash = rb_hash_aref(uh, INT2FIX(insn))) == Qnil) {
 	ihash = rb_hash_new();
@@ -464,7 +471,7 @@ extern VALUE insn_operand_intern(int insn, int op_no, VALUE op,
 void
 vm_analysis_operand(int insn, int n, VALUE op)
 {
-    static ID usage_hash;
+    ID usage_hash;
 
     VALUE uh;
     VALUE ihash;
@@ -472,9 +479,7 @@ vm_analysis_operand(int insn, int n, VALUE op)
     VALUE valstr;
     VALUE cv;
 
-    if (usage_hash == 0) {
-	usage_hash = rb_intern("USAGE_ANALYSIS_INSN");
-    }
+    CONST_ID(usage_hash, "USAGE_ANALYSIS_INSN");
 
     uh = rb_const_get(rb_cVM, usage_hash);
     if ((ihash = rb_hash_aref(uh, INT2FIX(insn))) == Qnil) {
@@ -498,11 +503,11 @@ vm_analysis_operand(int insn, int n, VALUE op)
 void
 vm_analysis_register(int reg, int isset)
 {
-    static ID usage_hash;
+    ID usage_hash;
     VALUE uh;
     VALUE rhash;
     VALUE valstr;
-    char *regstrs[] = {
+    static const char regstrs[][5] = {
 	"pc",			/* 0 */
 	"sp",			/* 1 */
 	"cfp",			/* 2 */
@@ -511,7 +516,7 @@ vm_analysis_register(int reg, int isset)
 	"self",			/* 5 */
 	"iseq",			/* 6 */
     };
-    char *getsetstr[] = {
+    static const char getsetstr[][4] = {
 	"get",
 	"set",
     };
@@ -519,11 +524,10 @@ vm_analysis_register(int reg, int isset)
 
     VALUE cv;
 
-    if (usage_hash == 0) {
+    CONST_ID(usage_hash, "USAGE_ANALYSIS_REGS");
+    if (syms[0] == 0) {
 	char buff[0x10];
 	int i;
-
-	usage_hash = rb_intern("USAGE_ANALYSIS_REGS");
 
 	for (i = 0; i < sizeof(regstrs) / sizeof(regstrs[0]); i++) {
 	    int j;
@@ -562,17 +566,18 @@ thread_dump_state(VALUE self)
     return Qnil;
 }
 
+VALUE rb_make_backtrace(void);
+
 void
 rb_vm_bugreport(void)
 {
-    rb_thread_t *th = GET_THREAD();
     VALUE bt;
 
     if (GET_THREAD()->vm) {
 	int i;
 	SDR();
 
-	bt = vm_backtrace(th, 0);
+	bt = rb_make_backtrace();
 	if (TYPE(bt) == T_ARRAY)
 	for (i = 0; i < RARRAY_LEN(bt); i++) {
 	    dp(RARRAY_PTR(bt)[i]);

@@ -14,11 +14,11 @@
 #if VMDEBUG > 0
 #define DECL_SC_REG(type, r, reg) register type reg_##r
 
-#elif __GNUC__ && __x86_64
-#define DECL_SC_REG(type, r, reg) register type reg_##r asm("r" reg)
+#elif __GNUC__ && __x86_64__
+#define DECL_SC_REG(type, r, reg) register type reg_##r __asm__("r" reg)
 
 #elif __GNUC__ && __i386__
-#define DECL_SC_REG(type, r, reg) register type reg_##r asm("e" reg)
+#define DECL_SC_REG(type, r, reg) register type reg_##r __asm__("e" reg)
 
 #else
 #define DECL_SC_REG(type, r, reg) register type reg_##r
@@ -26,7 +26,7 @@
 /* #define DECL_SC_REG(r, reg) VALUE reg_##r */
 
 #if !OPT_CALL_THREADED_CODE
-VALUE
+static VALUE
 vm_eval(rb_thread_t *th, VALUE initial)
 {
 
@@ -131,7 +131,7 @@ vm_eval(rb_thread_t *th, VALUE initial)
 	}
     }
 
-    if (VM_FRAME_TYPE(th->cfp) != FRAME_MAGIC_FINISH) {
+    if (VM_FRAME_TYPE(th->cfp) != VM_FRAME_MAGIC_FINISH) {
 	rb_bug("cfp consistency error");
     }
 
@@ -140,3 +140,9 @@ vm_eval(rb_thread_t *th, VALUE initial)
     return ret;
 }
 #endif
+
+const void **
+vm_get_insns_address_table(void)
+{
+    return (const void **)vm_eval(0, 0);
+}

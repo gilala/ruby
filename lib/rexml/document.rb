@@ -148,7 +148,7 @@ module REXML
     # A controversial point is whether Document should always write the XML
     # declaration (<?xml version='1.0'?>) whether or not one is given by the
     # user (or source document).  REXML does not write one if one was not
-    # specified, because it adds unneccessary bandwidth to applications such
+    # specified, because it adds unnecessary bandwidth to applications such
     # as XML-RPC.
     #
     # See also the classes in the rexml/formatters package for the proper way
@@ -169,7 +169,7 @@ module REXML
     #   indentation will be twice this number of spaces, and children will be
     #   indented an additional amount.  For a value of 3, every item will be 
     #   indented 3 more levels, or 6 more spaces (2 * 3). Defaults to -1
-    # trans::
+    # transitive::
     #   If transitive is true and indent is >= 0, then the output will be
     #   pretty-printed in such a way that the added whitespace does not affect
     #   the absolute *value* of the document -- that is, it leaves the value
@@ -185,14 +185,14 @@ module REXML
         output = Output.new( output, xml_decl.encoding )
       end
       formatter = if indent > -1
-		if transitive
-		  REXML::Formatters::Transitive.new( indent, ie_hack )
-		else
-		  REXML::Formatters::Pretty.new( indent, ie_hack )
-		end
-	  else
-		REXML::Formatters::Default.new( ie_hack )
-	  end
+          if transitive
+            REXML::Formatters::Transitive.new( indent, ie_hack )
+          else
+            REXML::Formatters::Pretty.new( indent, ie_hack )
+          end
+        else
+          REXML::Formatters::Default.new( ie_hack )
+        end
       formatter.write( self, output )
 	end
 

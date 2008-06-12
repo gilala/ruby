@@ -2,7 +2,7 @@
 #--
 # set.rb - defines the Set class
 #++
-# Copyright (c) 2002 Akinori MUSHA <knu@iDaemons.org>
+# Copyright (c) 2002-2008 Akinori MUSHA <knu@iDaemons.org>
 #
 # Documentation by Akinori MUSHA and Gavin Sinclair. 
 #
@@ -204,8 +204,10 @@ class Set
   end
 
   # Calls the given block once for each element in the set, passing
-  # the element as parameter.
+  # the element as parameter.  Returns an enumerator if no block is
+  # given.
   def each
+    block_given? or return enum_for(__method__)
     @hash.each_key { |o| yield(o) }
     self
   end
@@ -248,12 +250,14 @@ class Set
   # Deletes every element of the set for which block evaluates to
   # true, and returns self.
   def delete_if
-    @hash.delete_if { |o,| yield(o) }
+    block_given? or return enum_for(__method__)
+    to_a.each { |o| @hash.delete(o) if yield(o) }
     self
   end
 
-  # Do collect() destructively.
+  # Replaces the elements with ones returned by collect().
   def collect!
+    block_given? or return enum_for(__method__)
     set = self.class.new
     each { |o| set << yield(o) }
     replace(set)
@@ -263,6 +267,7 @@ class Set
   # Equivalent to Set#delete_if, but returns nil if no changes were
   # made.
   def reject!
+    block_given? or return enum_for(__method__)
     n = size
     delete_if { |o| yield(o) }
     size == n ? nil : self
@@ -354,6 +359,8 @@ class Set
   #             #     2001=>#<Set: {"c.rb", "d.rb", "e.rb"}>,
   #             #     2002=>#<Set: {"f.rb"}>}
   def classify # :yields: o
+    block_given? or return enum_for(__method__)
+
     h = {}
 
     each { |i|
@@ -381,6 +388,8 @@ class Set
   #             #            #<Set: {3, 4}>,
   #             #            #<Set: {6}>}>
   def divide(&func)
+    func or return enum_for(__method__)
+
     if func.arity == 2
       require 'tsort'
 
@@ -499,8 +508,9 @@ class SortedSet < Set
 	  end
 
 	  def delete_if
+            block_given? or return enum_for(__method__)
 	    n = @hash.size
-	    @hash.delete_if { |o,| yield(o) }
+	    super
 	    @keys = nil if @hash.size != n
 	    self
 	  end
@@ -511,7 +521,9 @@ class SortedSet < Set
 	  end
 
 	  def each
+	    block_given? or return enum_for(__method__)
 	    to_a.each { |o| yield(o) }
+	    self
 	  end
 
 	  def to_a
@@ -925,9 +937,11 @@ class TC_Set < Test::Unit::TestCase
     ary = [1,3,5,7,10,20]
     set = Set.new(ary)
 
-    assert_raises(LocalJumpError) {
-      set.each
-    }
+    ret = set.each { |o| }
+    assert_same(set, ret)
+
+    e = set.each
+    assert_instance_of(Enumerable::Enumerator, e)
 
     assert_nothing_raised {
       set.each { |o|
@@ -1172,11 +1186,33 @@ class TC_SortedSet < Test::Unit::TestCase
     assert_equal([-10,-8,-6,-4,-2], s.to_a)
 
     prev = nil
-    s.each { |o| assert(prev < o) if prev; prev = o }
+    ret = s.each { |o| assert(prev < o) if prev; prev = o }
     assert_not_nil(prev)
+    assert_same(s, ret)
 
     s = SortedSet.new([2,1,3]) { |o| o * -2 }
     assert_equal([-6,-4,-2], s.to_a)
+
+    s = SortedSet.new(['one', 'two', 'three', 'four'])
+    a = []
+    ret = s.delete_if { |o| a << o; o.start_with?('t') }
+    assert_same(s, ret)
+    assert_equal(['four', 'one'], s.to_a)
+    assert_equal(['four', 'one', 'three', 'two'], a)
+
+    s = SortedSet.new(['one', 'two', 'three', 'four'])
+    a = []
+    ret = s.reject! { |o| a << o; o.start_with?('t') }
+    assert_same(s, ret)
+    assert_equal(['four', 'one'], s.to_a)
+    assert_equal(['four', 'one', 'three', 'two'], a)
+
+    s = SortedSet.new(['one', 'two', 'three', 'four'])
+    a = []
+    ret = s.reject! { |o| a << o; false }
+    assert_same(nil, ret)
+    assert_equal(['four', 'one', 'three', 'two'], s.to_a)
+    assert_equal(['four', 'one', 'three', 'two'], a)
   end
 end
 

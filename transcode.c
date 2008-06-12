@@ -309,7 +309,7 @@ str_transcode(int argc, VALUE *argv, VALUE *self)
 	return -1;
     }
 
-    while (!final_encoding) { /* loop for multistep transcoding */
+    do { /* loop for multistep transcoding */
 	/* later, maybe use smaller intermediate strings for very long strings */
 	if (!(my_transcoder = transcode_dispatch(from_e, to_e))) {
 	    rb_raise(rb_eArgError, "transcoding not supported (from %s to %s)", from_e, to_e);
@@ -326,7 +326,7 @@ str_transcode(int argc, VALUE *argv, VALUE *self)
 	    my_transcoding.ruby_string_dest = dest;
 	    (*my_transcoder->preprocessor)(&fromp, &bp, (sp+slen), (bp+blen), &my_transcoding);
 	    if (fromp != sp+slen) {
-		rb_raise(rb_eArgError, "not fully converted, %d bytes left", sp+slen-fromp);
+		rb_raise(rb_eArgError, "not fully converted, %td bytes left", sp+slen-fromp);
 	    }
 	    buf = (unsigned char *)RSTRING_PTR(dest);
 	    *bp = '\0';
@@ -343,7 +343,7 @@ str_transcode(int argc, VALUE *argv, VALUE *self)
 
 	transcode_loop(&fromp, &bp, (sp+slen), (bp+blen), my_transcoder, &my_transcoding, options);
 	if (fromp != sp+slen) {
-	    rb_raise(rb_eArgError, "not fully converted, %d bytes left", sp+slen-fromp);
+	    rb_raise(rb_eArgError, "not fully converted, %td bytes left", sp+slen-fromp);
 	}
 	buf = (unsigned char *)RSTRING_PTR(dest);
 	*bp = '\0';
@@ -358,7 +358,7 @@ str_transcode(int argc, VALUE *argv, VALUE *self)
 	    my_transcoding.ruby_string_dest = dest;
 	    (*my_transcoder->postprocessor)(&fromp, &bp, (sp+slen), (bp+blen), &my_transcoding);
 	    if (fromp != sp+slen) {
-		rb_raise(rb_eArgError, "not fully converted, %d bytes left", sp+slen-fromp);
+		rb_raise(rb_eArgError, "not fully converted, %td bytes left", sp+slen-fromp);
 	    }
 	    buf = (unsigned char *)RSTRING_PTR(dest);
 	    *bp = '\0';
@@ -372,7 +372,7 @@ str_transcode(int argc, VALUE *argv, VALUE *self)
 	    from_e = my_transcoder->to_encoding;
 	    str = dest;
 	}
-    }
+    } while (!final_encoding);
     /* set encoding */
     if (!to_enc) {
 	to_encidx = rb_define_dummy_encoding(to_e);
@@ -397,7 +397,7 @@ str_transcode(int argc, VALUE *argv, VALUE *self)
  */
 
 static VALUE
-rb_str_transcode_bang(int argc, VALUE *argv, VALUE str)
+str_encode_bang(int argc, VALUE *argv, VALUE str)
 {
     VALUE newstr = str;
     int encidx = str_transcode(argc, argv, &newstr);
@@ -432,10 +432,16 @@ rb_str_transcode_bang(int argc, VALUE *argv, VALUE str)
  */
 
 static VALUE
-rb_str_transcode(int argc, VALUE *argv, VALUE str)
+str_encode(int argc, VALUE *argv, VALUE str)
 {
     str = rb_str_dup(str);
-    return rb_str_transcode_bang(argc, argv, str);
+    return str_encode_bang(argc, argv, str);
+}
+
+VALUE
+rb_str_transcode(VALUE str, VALUE to)
+{
+    return str_encode(1, &to, str);
 }
 
 void
@@ -447,6 +453,6 @@ Init_transcode(void)
     sym_invalid = ID2SYM(rb_intern("invalid"));
     sym_ignore = ID2SYM(rb_intern("ignore"));
 
-    rb_define_method(rb_cString, "encode", rb_str_transcode, -1);
-    rb_define_method(rb_cString, "encode!", rb_str_transcode_bang, -1);
+    rb_define_method(rb_cString, "encode", str_encode, -1);
+    rb_define_method(rb_cString, "encode!", str_encode_bang, -1);
 }

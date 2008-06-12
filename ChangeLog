@@ -1,3 +1,3070 @@
+Thu Jun 12 17:11:24 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* regint.h: undefine USE_CAPTURE_HISTORY which is mentioned as
+	  unsupported in the Onigiruma document.
+
+Thu Jun 12 13:36:54 2008  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/ruby.h (rb_intern): use rb_intern2 with strlen for
+	  constant symbols to optimize strlen.
+
+Thu Jun 12 08:47:51 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* io.c (read_all): should use io_read_encoding(), not
+	  io_input_encoding().
+
+	* io.c (rb_io_getline_1): reduce calling of io_read_encoding().
+
+	* string.c (rb_str_scan): need not to restore $~ value, so avoid
+	  pinning match object.
+
+Thu Jun 12 02:49:40 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* ext/stringio/stringio.c (strio_init): rewind when reopened.
+
+Thu Jun 12 02:43:27 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* array.c (rb_ary_zip): ANSI style.
+
+Thu Jun 12 02:25:54 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* io.c (rb_io_reopen): clear read buffer.
+
+Thu Jun 12 00:56:20 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/tk: check proper conditions.  [ruby-dev:35047]
+
+Wed Jun 11 23:33:13 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* io.c (io_fread): bypass buffered read if reading buffer is empty.
+
+	* io.c (remain_size): do not add extra one byte.
+
+Wed Jun 11 12:15:17 2008  Tanaka Akira  <akr@fsij.org>
+
+	* bootstraptest/runner.rb (assert_normal_exit): hide stderr output
+	  when success.
+
+Wed Jun 11 09:26:43 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* common.mk (encs): need to pass miniruby path for windows.
+
+Wed Jun 11 05:53:20 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* vm.c, eval_intern.h (PASS_PASSED_BLOCK):
+	  set a VM_FRAME_FLAG_PASSED flag to skip this frame when
+	  searching ruby-level-cfp.
+
+	* eval.c, eval_intern.h, proc.c: fix to check cfp.  if there is
+	  no valid ruby-level-cfp, cause RuntimeError exception.
+	  [ruby-dev:34128]
+
+	* vm_core.h, vm_evalbody.c, vm.c, vm_dump.c, vm_insnhelper.c,
+	  insns.def: rename FRAME_MAGIC_* to VM_FRAME_MAGIC_*.
+
+	* KNOWNBUGS.rb, bootstraptest/test*.rb: move solved bugs.
+
+Wed Jun 11 05:55:31 2008  Hidetoshi NAGAI  <nagai@ai.kyutech.ac.jp>
+
+	* ext/tk/tcltklib.c: SEGV when tcltk-stubs is enabled.
+
+	* ext/tk/tcltklib.c: avoid error on a shared object.
+
+	* ext/tk/extconf.rb: support --with-tcltkversion
+
+	* ext/tk/README.tcltklib: add document about --with-tcltkversion
+
+	* ext/tk/lib/tk.rb, ext/tk/lib/multi-tk.rb, ext/tk/lib/remote-tk.rb: 
+	  not work on $SAFE==4
+
+	* ext/tk/lib/multi-tk.rb: Object#methods returns Symbols on Ruby1.9.
+
+	* ext/tk/lib/tk/timer.rb: add TkTimer#at_end(proc) to register the 
+	  procedure which called at end of the timer.
+
+	* ext/tk/lib/tk.rb, ext/tk/lib/tk/itemfont.rb, ext/tk/lib/font.rb: 
+	  support __IGNORE_UNKNOWN_CONFIGURE_OPTION__ about font options.
+
+	* ext/tk/lib/*: treat __IGNORE_UNKNOWN_CONFIGURE_OPTION__
+
+	* ext/tk/lib/tkextlib/iwidgets/scrolledcanvas.rb, 
+	  ext/tk/lib/tkextlib/iwidgets/scrolledlistbox.rb, 
+	  ext/tk/lib/tkextlib/iwidgets/scrolledtext.rb: bug fix. 
+
+	* ext/tk/lib/tk/text.rb: typo. call a wrong method.
+
+	* ext/tk/lib/tk/itemconfig.rb: ditto.
+
+	* ext/tk/lib/tk.rb, ext/tk/lib/tk/itemconfig.rb, 
+	  ext/tk/lib/tk/canvas.rb: support alias names of option keys.
+
+	* ext/tk/lib/tk/grid.rb: lack of module-method definitions.
+
+	* ext/tk/lib/tk/pack.rb, ext/tk/lib/tk/grid.rb: increase supported 
+	  parameter patterns of configure method.
+
+	* ext/tk/lib/tk.rb: add TkWindow#grid_anchor, grid_column, grid_row.
+
+	* ext/tk/lib/tk/wm.rb: methods of Tk::Wm_for_General module cannot
+	  pass the given block to methods of Tk::Wm module.
+
+	* ext/tk/lib/tk/wm.rb: Wm#overrideredirect overwrites arguemnt to 
+	  an invalid value.
+
+	* ext/tk/lib/tk.rb: fix memory (object) leak bug.
+
+	* ext/tk/tcltklib.c, ext/tk/tkutil/tkutil.c: fix memory leak.
+
+	* ext/tk/sample/demos-jp/aniwave.rb, ext/tk/sample/demos-en/aniwave.rb:
+	  bug fix.
+
+	* ext/tk/lib/tkextlib/blt/component.rb, 
+	  ext/tk/lib/tkextlib/tile/tentry.rb, 
+	  ext/tk/lib/tkextlib/tile/treeview.rb: ditto.
+
+	* ext/tk/lib/tkextlib/tile/tpaned.rb: improve TPaned#add.
+
+	* ext/tk/sample/demos-jp/widget, ext/tk/sample/demos-en/widget, 
+	  ext/tk/sample/demos-jp/style.rb, ext/tk/sample/demos-en/style.rb, 
+	  ext/tk/sample/demos-jp/bind.rb, ext/tk/sample/demos-en/bind.rb: 
+	  bug fix.
+
+	* ext/tk/sample/ttk_wrapper.rb: ditto.
+
+	* ext/tk/sample/ttk_wrapper.rb: support "if __FILE__ == $0" idiom.
+
+	* ext/tk/sample/tktextio.rb: add binding for 'Ctrl-u' at console mode.
+
+	* ext/tk/lib/tkextlib/tile.rb, ext/tk/lib/tkextlib/tile/style.rb, 
+	  ext/tk/sample/ttk_wrapper.rb: improve treating and control themes. 
+	  add Tk::Tile.themes and Tk::Tile.set_theme(theme).
+
+	* ext/tk/lib/tkextlib/tile.rb: lack of autoload definitions.
+
+	* ext/tk/lib/tkextlib/tile/tnotebook.rb: cannot use kanji (not UTF-8) 
+	  characters for headings.
+
+	* ext/tk/lib/tkextlib/tkDND/shape.rb: wrong package name.
+
+	* ext/tk/tkutil/tkutil.c: improve handling callback-subst-keys. 
+	  Now, support longnam-keys (e.g. '%CTT' on tkdnd-2.0; however, still
+	  not support tkdnd-2.0 on tkextlib), and symbols of parameters (e.g. 
+	  :widget=>'%W', :keycode=>'%k', '%x'=>:x, '%X'=>:root_x, and so on; 
+	  those are attributes of event object). It means that Ruby/Tk accepts
+	  not only "widget.bind(ev, '%W', '%k', ...){|w, k, ...| ... }", but 
+	  also "widget.bind(ev, :widget, :keycode, ...){|w, k, ...| ... }". 
+	  It is potentially incompatible, when user passes symbols to the
+	  arguments of the callback block (the block receives the symbols as
+	  strings). I think that is very rare case (probably, used by Ruby/Tk
+	  experts only). When causes such trouble, please give strings instead
+	  of such symbol parameters (e.g. call Symbol#to_s method).
+
+	* ext/tk/lib/tk/event.rb, ext/tk/lib/tk/validation.rb, 
+	  ext/tk/lib/tkextlib/blt/treeview.rb, 
+	  ext/tk/lib/tkextlib/winico/winico.rb: ditto.
+
+	* ext/tk/tkutil/tkutil.c: strings are available on subst_tables on 
+	  TkUtil::CallbackSubst class (it is useful on Ruby 1.9). 
+
+	* ext/tk/lib/tk/spinbox.rb, ext/tk/lib/tkextlib/iwidgets/hierarchy.rb, 
+	  ext/tk/lib/tkextlib/iwidgets/spinner.rb, 
+	  ext/tk/lib/tkextlib/iwidgets/entryfield.rb, 
+	  ext/tk/lib/tkextlib/iwidgets/calendar.rb, 
+	  ext/tk/lib/tkextlib/blt/dragdrop.rb, 
+	  ext/tk/lib/tkextlib/tkDND/tkdnd.rb, 
+	  ext/tk/lib/tkextlib/treectrl/tktreectrl.rb, 
+	  ext/tk/lib/tkextlib/tktable/tktable.rb: disable code piece became 
+	  unnecessary by reason of the changes of ext/tk/tkutil/tkutil.c.
+
+	* ext/tk/lib/tk.rb, ext/tk/lib/multi-tk.rb: change strategy to define
+	  the constant WITH_ENCODING.
+
+	* ext/tk/lib/tk.rb: fix bug on Tk::Encoding.tk_encoding_names.
+
+Wed Jun 11 03:40:37 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* lib/find.rb (Find#find): Return an enumerator if no block is
+	  given.
+
+Wed Jun 11 01:28:12 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* include/ruby/intern.h, proc.c: revert rb_proc_call() and
+	  create rb_proc_call_with_block() instaed.
+
+	* include/ruby/ruby.h, eval_jump.c, thread.c, vm_insnhelper.c: 
+	  rb_blockptr should not be exposed.
+
+Tue Jun 10 21:07:19 2008  Kazuhiro NISHIYAMA  <zn@mbf.nifty.com>
+
+	* test/ruby/test_float.rb: add tests. [ruby-dev:35009]
+
+Tue Jun 10 20:55:57 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* complex.c (nucomp_s_convert): need not to initialize optional
+	  argument for rb_scan_args().
+
+Tue Jun 10 20:13:56 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/extmk.rb: negate default of --without-ext if --with-ext is
+	  given.
+
+	* ext/extmk.rb: negate default of --without-ext.
+
+Tue Jun 10 17:43:35 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* array.c (rb_ary_shuffle_bang): update RDoc.  [ruby-dev:35034]
+
+Tue Jun 10 17:30:19 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby/intern.h (rb_obj_instance_exec, rb_mod_module_exec):
+	  added prototypes.
+
+Tue Jun 10 17:00:29 2008  wanabe  <s.wanabe@gmail.com>
+
+	* util.c (ruby_strtod): ruby_strtod don't allow a trailing
+	  decimal point like "7.". [ruby-dev:34835] [ruby-dev:35009]
+
+Tue Jun 10 13:48:38 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* rational.c (nurat_s_convert): need not to initialize optional
+	  argument for rb_scan_args().
+
+Tue Jun 10 12:58:07 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/io/wait/wait.c (FIONREAD_POSSIBLE_P): suppress warnings.
+
+Tue Jun 10 12:43:19 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby/ruby.h (CONST_ID_CACHE): fixed statement expression.
+
+Tue Jun 10 11:25:15 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ruby.c (rb_argv0): revised for ext/tk.
+
+	* include/ruby/encoding.h: not to use varargs.h since requiring C89.
+
+Tue Jun 10 00:50:51 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* include/ruby/ruby.h, vm_core.h: add a type rb_blockptr.
+
+	* vm_insnhelper.c (vm_yield_with_cfunc): vm_yield_with_cfunc receives
+	  blockptr and passes it to iterating block.
+
+	* proc.c (rb_proc_call), include/ruby/intern.h: rb_proc_call receives
+	  blockptr.  "rb_proc_call(self, args, blockptr)" in C corresponds to
+	  "self.call(*args, &block)" in Ruby.
+
+	* proc.c (proc_call): pass blockptr to block that is written in C.
+
+	* proc.c (curry): receive blockptr and pass it to original proc.
+	  [ruby-core:15551]
+
+	* vm.c (invoke_block_from_c): fix for change of vm_yield_with_cfunc.
+
+	* thread.c (call_trace_proc), eval_jump.c (rb_call_end_proc): fix for
+	  change of rb_proc_call.
+
+Tue Jun 10 00:10:49 2008  Tanaka Akira  <akr@fsij.org>
+
+	* common.mk (test-knownbug): give $(OPTS) for bootstraptest/runner.rb.
+
+Mon Jun  9 23:10:50 2008  Tanaka Akira  <akr@fsij.org>
+
+	* eval.c (Init_stack): don't declare.  it is a macro now.
+
+Mon Jun  9 22:46:47 2008  wanabe  <s.wanabe@gmail.com>
+
+	* compile.c : treat []&&= in virtually the same way as []||=.
+	  [ruby-dev:34679]
+
+Mon Jun  9 21:17:26 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* enc/depend (clean): remove build directories.
+
+	* test_knownbug.rb -> KNOWNBUGS.rb: renamed.
+
+	* common.mk: apply above change.
+
+Mon Jun  9 21:14:26 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/mkmf.rb (configuration): set flags.
+
+Mon Jun  9 21:09:02 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* bootstraptest/test_knownbug.rb -> ./test_knownbug.rb: moved.
+
+	* common.mk: add a rule "test-knownbug".
+
+Mon Jun  9 21:00:32 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* complex.c (nucomp_s_convert): can accept Complex('i').
+	  [ruby-dev:34991]
+
+Mon Jun  9 18:25:30 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby/ruby.h (CONST_ID): constant ID cache for non-gcc.
+
+	* *.c: no cache in init functions.
+
+Mon Jun  9 17:56:30 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* lib/set.rb (Set#delete_if): Call to_a.
+	  (SortedSet#delete_if, TC_SortedSet#test_sortedset): Use super to
+	  yield elements in sorted order; [ruby-core:17144] by Arthur
+	  Schreiber.
+	  (SortedSet#each, SortedSet#each, TC_Set#test_each)
+	  (TC_SortedSet#test_sortedset): Return self; [ruby-dev:35002] by
+	  Arthur Schreiber.
+
+Mon Jun  9 17:47:09 2008  Tanaka Akira  <akr@fsij.org>
+
+	* io.c (fptr_finalize): close IO object if fd is already closed.
+	  (rb_p): call rb_io_write just once.
+
+Mon Jun  9 15:37:38 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* ruby.c (require_libraries): req_list may be NULL.  [ruby-dev:35008]
+
+Mon Jun  9 14:18:01 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm_core.h (struct rb_vm_struct): moved src_encoding_index,
+	  ruby_debug, ruby_verbose, and rb_progname.
+
+	* ruby.c (rb_argv0): no longer used.
+
+	* ruby.c (struct cmdline_options): moved setids and req_list, and the
+	  latter is now an array, to prevent memory leak.
+
+	* ruby.c (cmdline_options_init): added.
+
+	* ruby.c (add_modules, require_libraries, init_ids, forbid_setid): use
+	  struct cmdline_options.
+
+	* vm.c (vm_init2): initialize src_encoding_index.
+
+	* vm.c: getters/setters for ruby_{debug,verbose}.
+
+Mon Jun  9 09:54:13 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby/intern.h (Init_stack): make to call ruby_init_stack.
+
+Mon Jun  9 08:12:40 2008  wanabe  <s.wanabe@gmail.com>
+
+	* vm_insnhelper.c, vm.c, proc.c : revert r17021. [ruby-dev:34997]
+
+Mon Jun  9 03:12:23 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* bootstraptest/pending.rb: move/remove solved issues.
+
+	* bootstraptest/test_class.rb: ditto.
+
+Mon Jun  9 02:32:58 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* ext/zlib/zlib.c (rb_deflate_init_copy): Copy buffers as well.
+	  [ruby-list:45018]
+
+Sun Jun  8 22:22:20 2008  wanabe  <s.wanabe@gmail.com>
+
+	* vm_insnhelper.c, vm.c, proc.c (proc_call): allow call method with
+	  block that both is written in C. [ruby-dev:34273] [ruby-core:15551]
+
+	*  proc.c (curry): use proc_call instead of rb_proc_call.
+	  [ruby-dev:34273] [ruby-core:15551]
+
+Sun Jun  8 21:50:27 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/zlib/test_zlib.rb: add tests to achieve over 90% test coverage
+	  of zlib.
+
+Sun Jun  8 20:12:47 2008  wanabe  <s.wanabe@gmail.com>
+
+	* vm_insnhelper.c (vm_throw): regard break as return in lambda.
+	  [ruby-dev:34646]
+
+Sun Jun  8 19:17:59 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* gc.c: add a build option "CALC_EXACT_MALLOC_SIZE".
+	  This option enables to calculate exact size of current 
+	  allocated size by malloc().  You can access these information
+	  with GC.malloc_allocated_size and GC.malloc_allocations.
+	  This option consume additional memory as a header of each memory
+	  object.  This option also helps to find out xmalloc()/xfree()
+	  consistency.  If you get trouble with this option, some extension
+	  using "free()" instead of "xfree()".
+	  This options is disabled by default.
+
+Sun Jun  8 18:15:38 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* array.c, bignum.c, cont.c, dir.c, dln.c, encoding.c, enumerator.c,
+	  enumerator.c (enumerator_allocate), eval_jump.c, file.c, hash.c,
+	  io.c, load.c, pack.c, proc.c, random.c, re.c, ruby.c, st.c,
+	  string.c, thread.c, thread_pthread.c, time.c, util.c, variable.c,
+	  vm.c, gc.c:
+	  allocated memory objects by xmalloc (ruby_xmalloc) should be
+	  freed by xfree (ruby_xfree).
+
+	* ext/curses/curses.c, ext/dbm/dbm.c, ext/digest/digest.c, 
+	  ext/gdbm/gdbm.c, ext/json/ext/parser/parser.c, 
+	  ext/json/ext/parser/unicode.c, ext/openssl/ossl_cipher.c,
+	  ext/openssl/ossl_hmac.c, ext/openssl/ossl_pkey_ec.c,
+	  ext/sdbm/init.c, ext/strscan/strscan.c, ext/zlib/zlib.c:
+	  ditto.
+
+Sun Jun  8 01:15:11 2008  Tanaka Akira  <akr@fsij.org>
+
+	* hash.c (hash_i): make Hash#hash order insensitive.
+	  (rb_hash_dup): use DUPSETUP.
+
+Sat Jun  7 23:47:35 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* ext/zlib/zlib.c (rb_deflate_initialize, Init_zlib): Fix up
+	  initialize_copy; [ruby-list:45016].
+
+Sat Jun  7 22:15:02 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in (VENDOR_DIR): use LIBDIR instead of PREFIX as well as
+	  SITE_DIR.  a patch from Richard Brown <rbrown AT exherbo.org> in
+	  [ruby-core:17129].
+
+Sat Jun  7 21:37:58 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* io.c (rb_f_open), re.c (rb_reg_search), transcode.c (str_transcode):
+	  suppress warnings.
+
+	* util.c (quorem, rv_alloc, nrv_alloc): only used in dtoa().
+
+Sat Jun  7 16:06:14 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in (CFLAGS, CXXFLAGS): append default flags.
+
+Sat Jun  7 01:23:59 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* io.c (rb_open_file, rb_io_s_sysopen): fmode should be unsigned int.
+	  fixed [ruby-dev:34979]
+
+Fri Jun  6 23:46:19 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* vm_insnhelper.c (vm_callee_setup_arg): check simple flag before
+	  calling setup_arg function().  this change reduce function call.
+
+Fri Jun  6 21:51:46 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* win32/Makefile.sub (COMMON_HEADERS): include ws2tcpip.h.
+
+	* ext/socket/addrinfo.h (addrinfo, getaddrinfo, getnameinfo,
+	  freehostent, freeaddrinfo): undef before define because these are
+	  macros in some versions of Windows SDK.
+
+	  merged from ruby_1_8.
+
+Fri Jun  6 18:25:43 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* test/iconv/utils.rb (default_test): override not to croak.
+
+Fri Jun  6 16:41:45 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* include/ruby/win32.h: include ws2tcpip.h. fixed [ruby-Bugs-20528]
+
+Fri Jun  6 15:05:02 2008  Tanaka Akira  <akr@fsij.org>
+
+	* gc.c (count_objects): clear hash after counting objects.
+
+Fri Jun  6 12:43:41 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* test/ruby/test_dir.rb (TestDir::test_glob): glob file names not sorted.
+
+Fri Jun  6 00:05:33 2008  Tanaka Akira  <akr@fsij.org>
+
+	* lib/time.rb (Time.xmlschema): don't use float.  fix
+	  http://rubyforge.org/tracker/index.php?func=detail&group_id=426&atid=1698&aid=20504
+
+Thu Jun  5 23:56:18 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_gc.rb: add tests to achieve over 90% test coverage of
+	  gc.c.
+
+	* test/ruby/test_objectspace.rb: ditto.
+
+	* test/ruby/test_marshal.rb: ditto.
+
+Thu Jun  5 23:40:08 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* gc.c (rb_objspace_alloc): this function is needed only when
+	  ENABLE_VM_OBJSPACE macro is defined.
+
+	* vm.c: ditto.
+
+Thu Jun  5 23:31:21 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/stringio/test_stringio.rb: add tests to achieve over 95% test
+	  coverage of stringio.
+
+	* test/strscan/test_stringscanner.rb: ditto for strscan.
+
+Thu Jun  5 23:25:34 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* eval.c (ruby_finalize_0): clear trace_func after executing END
+	  procs.
+
+	* thread.c: fix typo.
+
+Thu Jun  5 22:50:50 2008  Tanaka Akira  <akr@fsij.org>
+
+	* gc.c (os_obj_of): heaps may be modified in yield.
+
+Thu Jun  5 21:46:50 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* st.c (st_reverse_foreach): comment out unused function.
+
+	* util.c (dtoa): ditto.
+
+Thu Jun  5 20:30:46 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* ext/openssl/ossl_ssl_session.c (ossl_ssl_session_initialize):
+	  Add a null check for ssl; submitted by akira yamada
+	  in [ruby-dev:34950].
+
+	* ext/openssl/ossl_ssl.c (Init_ossl_ssl): Define OP_NO_TICKET if
+	  SSL_OP_NO_TICKET is present; submitted by akira yamada
+	  in [ruby-dev:34944].
+
+	* test/openssl/test_ssl.rb (OpenSSL#test_server_session): Add a
+	  workaround for the case where OpenSSL is configured with
+	  --enable-tlsext; submitted by akira yamada in [ruby-dev:34944].
+
+Thu Jun  5 20:24:15 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* thread.c (thread_set_trace_func_m): fix check for proc argument.
+
+Thu Jun  5 20:17:29 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* lib/rexml/document.rb (REXML::Document:write): leaky modification
+	  trans -> transitive.  [ruby-dev:32040], r13686
+
+	* lib/rexml/text.rb (Text.check): fix check for illigal characher.
+
+Thu Jun  5 14:03:44 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/iconv/iconv.c (iconv_create): find encoding without options.
+
+Thu Jun  5 07:48:32 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* string.c (hash): should be "static".
+
+Thu Jun  5 01:47:18 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_transcode.rb: add tests for iso-2022-jp.
+
+Thu Jun  5 01:27:42 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_process.rb: add tests.
+
+Wed Jun  4 23:10:08 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* ext/zlib/zlib.c (rb_gzfile_set_mtime): fix typo.
+
+Wed Jun  4 18:53:39 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* object.c (rb_obj_alloc): RDoc updated.  a patch from Gaston
+	  Ramos <ramos.gaston at gmail.com> in [ruby-core:17073].
+
+Wed Jun  4 18:36:11 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* lib/rdoc.rb: massive spelling correction patch from Evan Farrar
+	  <evanfarrar at gmail.com> in [ruby-doc:1382] applied.
+
+Wed Jun  4 17:52:18 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/iconv/iconv.c (iconv_iconv): fix for length argument and now
+	  allows range.  [ruby-core:17092]
+
+Wed Jun  4 15:45:41 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* enumerator.c (enumerator_with_index, enumerator_with_memo): Fix
+	  grammo in rdoc.
+
+Wed Jun  4 13:06:58 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in (CFLAGS, CXXFLAGS): include additional flags to
+	  CFLAGS and CXXFLAGS while configuration.
+
+Tue Jun  3 23:06:35 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* ext/strscan/strscan.c (strscan_scan_full, strscan_search_full): fix
+	  document.
+
+Tue Jun  3 22:37:26 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* ext/strscan/strscan.c (strscan_exist_p): fix document.
+
+Tue Jun  3 22:33:29 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_dir.rb: add tests to achieve over 90% test coverage
+	  of dir.c.
+
+	* test/ruby/test_encoding.rb: add tests for dummy?, name_list and
+	  aliases.
+
+	* test/ruby/test_marshal.rb: add some tests.
+
+Tue Jun  3 22:25:51 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/etc/test_etc.rb: new tests for etc.
+
+Tue Jun  3 19:35:02 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* enumerator.c (enumerator_with_memo): New method: with_memo().
+
+Tue Jun  3 20:04:03 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* win32/Makefile.sub (miniruby$(EXEEXT)): miniruby cannot be
+	  written by miniruby itself.
+
+Tue Jun  3 19:33:22 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* enumerator.c (enumerator_init_copy): Take care of
+	  initialize_copy as well as initialize.
+
+Tue Jun  3 16:06:09 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* file.c (file_expand_path): fix for non-existent files and SFN of
+	  symlinks.  [ruby-talk:303736]
+
+Tue Jun  3 15:12:01 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* lib/set.rb (Set#classify): Back out the `group_by' alias.
+	  Better think twice.
+
+Tue Jun  3 15:00:22 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* lib/set.rb (Set#collect, Set#select): Back out.  I thought it
+	  was consistent but turned out to be wrong.
+
+Tue Jun  3 13:41:08 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* lib/set.rb (Set#collect, Set#select): Override Enumerable
+	  methods and make them return a set. [ruby-core:17055]
+	  (Set#delete_if, Set#collect!, Set#reject!, Set#classify)
+	  (Set#divide, Set#delete_if): Return an enumerator if no block is
+	  given.
+	  (Set#classify): Define an alias `group_by' to override that of
+	  Enumerable.
+
+Tue Jun  3 13:35:40 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* process.c (run_exec_pgroup): C99 ism.
+
+Tue Jun  3 12:51:57 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* enumerator.c (enumerator_allocate, enumerator_ptr): Properly
+	  detect if the object is initialized and raise error when
+	  appropriate.
+	  (enumerator_initialize): Fix a typo in rdoc. [ruby-core:17052]
+
+Tue Jun  3 01:21:51 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_method.rb: add a test.
+
+Tue Jun  3 00:26:48 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* marshal.c (w_object): add a check for modification of array during
+	  its dump.
+
+Mon Jun  2 22:27:57 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* enc/iso_8859_5.c: Large omicron should lowercase to small omicron.
+
+	* test/ruby/test_big5.rb, test/ruby/test_cp949.rb,
+	  test/ruby/test_euc_jp.rb, test/ruby/test_euc_kr.rb,
+	  test/ruby/test_euc_tw.rb, test/ruby/test_gb18030.rb,
+	  test/ruby/test_gbk.rb, test/ruby/test_iso_8859.rb,
+	  test/ruby/test_koi8.rb, test/ruby/test_shift_jis.rb,
+	  test/ruby/test_windows_1251.rb: new tests for encoding.
+
+	* test/ruby/test_utf16.rb, test/ruby/test_utf32.rb,
+	  test/ruby/test_regexp.rb: add tests.
+
+Mon Jun  2 21:56:47 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_file.rb: add tests for uninitialized object.
+
+	* test/ruby/test_class.rb: ditto.
+
+	* test/ruby/test_thread.rb: ditto.
+
+Mon Jun  2 21:44:15 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* re.c: fix SEGV by Regexp.allocate.names, Match.allocate.names, etc.
+
+	* test/ruby/test_regexp.rb: add tests for above.
+
+	* io.c: fix SEGV by IO.allocate.print, etc.
+
+	* test/ruby/test_io.rb: add tests for above.
+
+Mon Jun  2 19:17:47 2008  Tanaka Akira  <akr@fsij.org>
+
+	* test/ruby/test_argf.rb (teardown): remove renamed temporary files.
+
+Mon Jun  2 18:51:15 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/un.rb (wait_writable): wait until target files can be
+	  written actually.
+
+	* win32/Makefile.sub (LDSHARED_0, LINK_SO): get rid of failure of
+	  mt.exe.
+
+Mon Jun  2 16:26:17 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* lib/delegate.rb (Delegator::MethodDelegation#respond_to):
+	  respond_to? should now take optional second argument; submitted
+	  by Jeremy Kemper <jeremy at bitsweat.net> in [ruby-core:17045].
+
+Mon Jun  2 16:14:18 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* lib/erb.rb (ERB::Compiler::TrimScanner#scan_line): Oops.  This
+	  change did not apply to trunk.  Backed out.
+
+Mon Jun  2 16:08:24 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* lib/erb.rb (ERB::Compiler::TrimScanner#scan_line): Fix a bug
+	  where tokens are not yilelded one by one.
+
+	* test/erb/test_erb.rb (TestERBCore#_test_01)
+	  (TestERBCore#test_02_safe_04): The expected value should come
+	  first for assert_equal().
+
+Mon Jun  2 13:06:38 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* mkconfig.rb: hide build path from rbconfig.rb.
+
+Mon Jun  2 08:46:52 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* util.c (ruby_strtod, dtoa): initialize more variables for error
+	  handling.
+
+Mon Jun  2 04:55:05 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* suppress warnings on cygwin, mingw and mswin.
+
+Mon Jun  2 04:35:32 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* enc/gb18030.c (gb18030_code_to_mbc): add 0x80000000
+	  for 4bytes character.
+
+Mon Jun  2 03:52:04 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ruby.c (set_arg0): reverted used variable definition.
+
+Mon Jun  2 03:23:25 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* enc/gb18030.c (gb18030_mbc_to_code): mask by 0x7FFFFFFF
+	  because OnigCodePoint will be used as 32bit signed int.
+	  Masking by 0x7FFFFFFF is ok on GB18030;
+	  Minumum 4bytes character is 0x81308130.
+
+Sun Jun  1 22:29:35 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* rational.c (string_to_r_internal): use rb_isdigit.
+
+	* marshal.c (long_toobig): use %zd.
+
+	* ruby.c (set_arg0): move unused variable definition.
+
+Sun Jun  1 12:18:12 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* insns.def (DEFINE_INSN): subtract of pointers is ptrdiff_t.
+	  this is not int on 64bit system.
+
+	* vm_dump.c (control_frame_dump): ditto.
+
+	* vm_dump.c (stack_dump_each): ditto.
+
+	* vm_dump.c (debug_print_register): ditto.
+
+	* vm_dump.c (debug_print_pre): ditto.
+
+	* transcode.c (str_transcode): ditto.
+
+Sun Jun  1 10:32:18 2008  Tanaka Akira  <akr@fsij.org>
+
+	* test/ruby/envutil.rb (assert_normal_exit): show coredump status.
+
+Sat May 31 23:33:34 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* README, README.ja: Add a note about default C flags.
+
+Sat May 31 23:02:00 2008  Tanaka Akira  <akr@fsij.org>
+
+	* gc.c (count_objects): clear given hash.
+
+Sat May 31 20:28:10 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_regexp.rb: add tests.
+
+Sat May 31 19:11:39 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* enc/utf_16{be,le}.c (utf16{be,le}_code_to_mbc):
+	  fix codepoint to bytes.
+
+Sat May 31 18:28:17 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* suppress warnings with -Wwrite-string.
+
+Sat May 31 18:26:33 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* array.c (rb_ary_delete_if): should return enumerator if no block
+	  is given.  [ruby-dev:34901]
+
+Sat May 31 15:58:08 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* Makefile.in, configure.in (warnflags): defaulted to -Wall
+	  -Wno-parentheses with gcc.  [ruby-dev:34810]
+
+Sat May 31 15:17:36 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby/mvm.h: new header file for MVM, and moved rb_vm_t and
+	  rb_thread_t from vm_core.h.
+
+Sat May 31 12:02:23 2008  Tanaka Akira  <akr@fsij.org>
+
+	* test/ruby/envutil.rb (assert_normal_exit): show pid when fail.
+
+Fri May 30 23:55:56 2008  Kazuhiro NISHIYAMA  <zn@mbf.nifty.com>
+
+	* test/ruby/test_rubyoptions.rb: add a test of RUBY_DESCRIPTION.
+
+Fri May 30 22:47:17 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_regexp.rb: add tests.
+
+Fri May 30 22:40:53 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_signal.rb: add tests to achieve over 80% test
+	  coverage of signal.c.
+
+Fri May 30 22:28:03 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* signal.c (esignal_signo): fix SignalException#signo which returned
+	  nil absolutely.
+
+	* signal.c (esignal_init): always prepend "SIG" to a string that is
+	  returned by SignalException#signm.
+
+Fri May 30 22:17:39 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_argf.rb: rename a conflicting method name.
+
+	* test/ruby/test_string.rb: ditto.
+
+	* test/ruby/test_io.rb: ditto.
+
+Fri May 30 22:14:37 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* compile.c (defined_expr): fix SEGV by defined?([1]).
+
+Fri May 30 12:18:43 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* common.mk (prelude.c): simply depends on PREP.  [ruby-dev:34877]
+
+	* enc/make_encdb.rb, enc/trans/make_transdb.rb: ditto.
+
+Fri May 30 10:55:42 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm_core.h (struct rb_unblock_callback), thread.c
+	  (set_unblock_function), thread_{pthread,win32}.c (native_sleep):
+	  extracted from struct rb_thread_struct.
+
+	* thread.c (reset_unblock_function): not check interrupts at leaving
+	  blocking region.  [ruby-dev:34874]
+
+Fri May 30 06:09:31 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* enc/utf_8.c: add UTF8-MAC (UTF-8-MAC).
+
+Fri May 30 04:17:13 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* enum.c (enum_count, count_all_i, Init_Enumerable),
+	  array.c (rb_ary_count): If no argument or block is given, count
+	  the number of all elements.
+
+Fri May 30 03:12:18 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* ext/openssl/ossl_bn.c (ossl_bn_s_rand, ossl_bn_s_pseudo_rand):
+	  Int should be enough here.
+
+Fri May 30 02:35:00 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* ext/openssl/ossl_bn.c (ossl_bn_s_rand, ossl_bn_s_pseudo_rand),
+	  ext/openssl/ossl_pkey_dh.c (ossl_dh_s_generate)
+	  (ossl_dh_initialize),
+	  ext/openssl/ossl_pkey_dsa.c (ossl_dsa_s_generate),
+	  ext/openssl/ossl_rand.c (ossl_rand_bytes)
+	  (ossl_rand_pseudo_bytes, ossl_rand_egd_bytes),
+	  ext/openssl/ossl_x509store.c (ossl_x509stctx_set_error): Do not
+	  use FIX2INT() without checking the value type.  Use NUM2INT()
+	  instead; found by akr in [ruby-dev:34890].
+
+Fri May 30 02:08:20 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* signal.c (esignal_init): handle a non-integer argument correctly,
+	  allowing SignalException.new(:INT).
+
+Fri May 30 00:59:47 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_regexp.rb: add tests.
+
+Thu May 29 22:51:05 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_require.rb: add a test for load with wrap flag, to
+	  achieve 100% test coverage of eval_jump.c.
+
+Thu May 29 22:47:53 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_argf.rb: new tests for ARGF, to achieve over 85% test
+	  coverage of file.c.
+
+	* test/ruby/test_io.rb: add tests.
+
+Thu May 29 22:41:48 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* io.c (argf_readchar): raise EOFError, synchronizing IO#readchar.
+
+Thu May 29 22:29:39 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* io.c (argf_external_encoding, argf_internal_encoding): fix SEGV by
+	  ARGF.external_encoding.
+
+Thu May 29 17:52:31 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/zlib/extconf.rb: search zlib1, and regard mswin32 later than VC6
+	  as WIN32.  [ruby-core:16984]
+
+Wed May 28 18:05:28 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* array.c (rb_ary_nitems, Init_Array): Axe Array#nitems().
+	  cf. [ruby-dev:34676]-[ruby-dev:34713]
+
+Wed May 28 17:50:32 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* win32/mkexports.rb (Exports#objdump, Exports#each_line): extracted.
+
+Wed May 28 17:41:43 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* Makefile.in (MKPREP): appended $(RBCONFIG).
+
+	* common.mk (enc.mk, prelude.c): not depend on $(RBCONFIG) on mswin32
+	  to get of compiling twice each time.
+
+	* win32/Makefile.sub (prelude.c): not depend on $(PREP).
+
+Wed May 28 17:37:07 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* win32/mkexports.rb (Exports::Mswin#each_export): speed up.
+
+Wed May 28 16:41:59 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* array.c (rb_ary_slice_bang): Call rb_ary_modify_check() at the
+	  beginning. [rubyspec]
+
+Wed May 28 16:12:44 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* lib/webrick/httpservlet/cgihandler.rb (WEBrick::HTTPServlet::CGIHandler#do_GET):
+	  Set the HTTP status code to 302 if a Location header field is
+	  present and the status code is not valid as a client
+	  redirection.  cf. RFC 3875 6.2.3, 6.2.4.
+
+Wed May 28 15:53:52 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* enc/trans/japanese.c (to_SHIFT_JIS_EF_infos): typo.
+
+Wed May 28 15:18:16 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/singleton.rb (SingletonClassMethods): _load should be public.
+
+Wed May 28 13:30:43 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* enc/trans/japanese.c: add workarround for Unicode to CP932.
+	  U+2015->0x815C, U+2225->0x8161, U+FF0D->0x817C, U+FF3C->0x815F,
+	  U+FF5E->0x8160, U+FFE0->0x8191, U+FFE1->0x8192, U+FFE2->0x81CA
+
+Wed May 28 12:52:41 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* marshal.c (w_object, marshal_dump, r_object0, marshal_load): search
+	  private methods too.  [ruby-dev:34671]
+
+	* object.c (convert_type): ditto.
+
+Wed May 28 08:42:51 2008  Tanaka Akira  <akr@fsij.org>
+
+	* numeric.c: "%" is required before PRI?VALUE.
+
+Tue May 27 22:10:44 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* eval_error.c (error_handle): SystemExit and SignalException throws
+	  TAG_RAISE but not TAG_FATAL.
+
+	* thread.c (rb_thread_execute_interrupts): delay interrupts during
+	  raising exceptions.  [ruby-dev:34855]
+
+Tue May 27 20:18:30 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* array.c (rb_ary_slice_bang): Return an empty array instead of
+	  nil when pos is valid and len is adjusted from a valid value to
+	  zero; caught by RubySpec.
+
+Tue May 27 19:12:37 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* Makefile.in (MKPREP), common.mk, win32/Makefile.sub (prelude.c): get
+	  rid of depending PREP with nmake.
+
+	* common.mk (encs): depends on libruby.
+
+Tue May 27 19:00:22 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* ext/stringio/stringio.c (strio_each_char, Init_stringio): Add
+	  StringIO#{each_char,chars}.
+	  (Init_stringio): Fix StringIO#bytes.
+
+Tue May 27 17:54:35 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* ext/stringio/stringio.c (strio_each_byte): Return self instead
+	  of nil as the rdoc says.
+
+Tue May 27 15:36:27 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* numeric.c (check_int): use PRIxVALUE format specifier.
+
+	* numeric.c (check_uint, rb_num2fix, int_chr): ditto.
+
+	* numeric.c (num_fdiv): fallback to_f should always return float
+	  result.  should not use #quo that may return rational.
+
+	* numeric.c (num_div): should raise ZeroDivisionError.
+
+	* numeric.c (fix_divide): ditto.
+
+	* test/ruby/test_numeric.rb (TestNumeric::test_divmod): avoid
+	  ZeroDivisionError in tests.
+
+Tue May 27 13:14:53 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* enum.c (enum_to_a): Pass arguments through to #each().
+	  (enum_sort): Follow the enum_to_a signature change.
+	  (enum_reverse_each): Add #reverse_each().
+
+Tue May 27 13:12:37 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* io.c (Init_IO): Define ARGF.{lines,bytes,chars}.
+
+Tue May 27 12:06:37 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* file.c (BUFCHECK): wrong condition. [ruby-core:16921]
+
+	* file.c (file_expand_buf): shouldn't use buflen for length of string.
+
+Mon May 26 18:24:48 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* file.c (BUFCHECK): no resize if enough room.
+
+	* file.c (file_expand_path): use BUFCHECK.
+
+Mon May 26 17:48:42 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* enumerator.c (struct enumerator, enumerator_init)
+	  (enumerator_init_copy, enumerator_each): Eliminate iter.
+	  (enumerator_ptr): Do not hardcode the class name.
+	  (enumerator_with_index): Delay variable initialization after
+	  RETURN_ENUMERATOR().
+
+Mon May 26 17:23:49 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* file.c (file_expand_path): add more space for '/'.
+
+	* file.c (file_expand_path): should reset address of p after calling
+	  rb_str_resize(). [ruby-dev:34800]
+
+Mon May 26 16:49:55 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* misc/ruby-mode.el (ruby-mode): use run-hooks if run-mode-hook is
+	  not available.  a patch from Kazuhiro NISHIYAMA <zn at mbf.nifty.com>
+	  in [ruby-dev:34853].
+
+Mon May 26 16:41:35 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* file.c (ntfs_tail): filename which starts with '.' is valid.
+
+	* file.c (file_expand_path): cygwin symlink support.
+
+Mon May 26 07:15:52 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm_dump.c (rb_vm_bugreport): rb_make_backtrace has no arguments.
+
+Mon May 26 01:17:54 2008  Tanaka Akira  <akr@fsij.org>
+
+	* test/ruby/envutil.rb (assert_normal_exit): signal description
+	  refined.
+
+Mon May 26 00:52:52 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* hash.c (env_each_key, env_each_value, env_reject_bang)
+	  (rb_env_clear, env_replace): Omit duplicated secure level check.
+
+Mon May 26 00:37:16 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* hash.c (env_each_value): Do not call env_values() twice.
+
+Sun May 25 17:54:36 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* compile.c (iseq_compile): set local_table for
+	  ISEQ_TYPE_DEFINED_GUARD.
+
+Sun May 25 17:52:25 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* compile.c (iseq_build_body): remove side effect from
+	  VM::InstructionSequence.load.
+
+Sun May 25 04:30:45 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_modules.rb (remove_json_mixins): change judgment
+	  condition.
+
+Sun May 25 03:54:39 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_modules.rb (test_ancestors, test_included_modules):
+	  ignore json mixins.
+
+Sun May 25 02:37:25 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* eval_method.c: renamed from vm_method.c.  "vm_method.c" is included
+	  by "vm.c".
+
+	* vm_eval.c: added.  Some codes are moved from "eval.c"
+
+	* common.mk: fix for above changes.
+
+	* compile.c: make a vm_eval(0)
+
+	* eval.c, eval_error.c, eval_intern.h, eval_jump.c, proc.c, vm.c,
+	  id.c, id.h, vm_core.h, vm_dump.c, vm_evalbody.c, vm_insnhelper.c,
+	  blockinlining.c: fix for above changes.  and do some refactoring.
+	  this changes improve rb_yield() performance.
+
+Sat May 24 22:32:49 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* util.c (ruby_strtod): clear errno at the top of our own
+	  impelementation of strtod(3).  [ruby-dev:34834] [ruby-dev:34839]
+
+Sat May 24 15:26:16 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* compile.c (iseq_set_exception_table, NODE_WHILE, NODE_NEXT): remove
+	  special handling that decrements sp in CATCH_TYPE_NEXT for NODE_WHILE.
+
+	* vm.c (vm_eval_body), vm_insnhelper.c (vm_throw): remove unused code.
+
+Sat May 24 08:13:34 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* transcode.c (rb_str_transcode): argc is 1, and argv is &to.
+
+Fri May 23 17:55:11 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* array.c (rb_ary_slice_bang): Be consistent with Array#slice()
+	  and String#slice!().  Just return nil when a negative length or
+	  out of boundary index is given instead of raising an exception
+	  via internal functions.
+
+Fri May 23 16:44:34 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* enumerator.c (Init_Enumerator): Override
+	  Enumerable::Enumerator#each_with_index with #with_index.
+
+Fri May 23 12:23:05 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm_core.h (rb_num_t): moved form vm.h.
+
+	* tool/instruction.rb (RubyVM::Instruction#sp_increase_c_expr),
+	  tool/instruction.rb (RubyVM::VmBodyGenerator#make_header_operands):
+	  omit unused variables.
+
+Fri May 23 08:47:02 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* error.c (exc_equal): == operator should be transitional.  
+	  [ruby-dev:34808]
+
+	* error.c (syserr_eqq): === should be able to handle delegated
+	  objects as well.
+
+Fri May 23 06:15:20 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* iseq.c (rb_iseq_compile_with_option): get rid of segv.
+
+Fri May 23 02:29:14 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* insns.def (opt_gt|ge|lt|le): use values directly to compare.
+
+Fri May 23 01:15:09 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* eval.c, eval_intern.h, include/ruby/intern.h, include/ruby/ruby.h,
+	  vm.c, vm_core.h, vm_insnhelper.c: remove pointless "const".
+
+Thu May 22 23:45:17 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* compile.c (get_destination_insn, get_next_insn, get_prev_insn):
+	  peephole optimization should not ignore ISEQ_ELEMENT_ADJUST.
+
+Thu May 22 20:20:54 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* marshal.c (check_dump_arg, check_load_arg): check if reentered.
+	  [ruby-dev:34802]
+
+Thu May 22 20:14:28 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* iseq.c (iseq_load, iseq_data_to_ary): support
+	  ISEQ_TYPE_DEFINED_GUARD.
+
+Thu May 22 19:01:29 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm.c (vm_get_ruby_level_cfp): moved from eval_intern.h.
+
+	* vm.c (sdr, nsdr): define methods only if VMDEBUG is defined.
+
+Thu May 22 17:18:35 2008  Tanaka Akira  <akr@fsij.org>
+
+	* array.c (rb_ary_compact_bang): fix reallocation size.
+
+Thu May 22 15:20:20 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* eval_intern.h, vm_core.h, include/ruby/intern.h, include/ruby/ruby.h,
+	  vm.c: need to add const to prototypes, of course.
+
+Thu May 22 13:24:43 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* eval.c, vm.c, vm_core.h, vm_insnhelper.c: specify "const".
+
+	* vm_opts.h: add a OPT_TOKEN_THREADED_CODE macro.
+
+Thu May 22 12:51:41 2008  Tanaka Akira  <akr@fsij.org>
+
+	* insns.def (newhash): fix a variable definition: "const k".
+
+Thu May 22 12:40:54 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* array.c (flatten): check if reentered.  [ruby-dev:34798]
+
+Thu May 22 11:39:59 2008  Tanaka Akira  <akr@fsij.org>
+
+	* test/ruby/envutil.rb (assert_normal_exit): capture stdout and stderr
+	  of the child process.
+
+Thu May 22 08:28:49 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* array.c (flatten): free memo hash table before raising exception.
+	  [ruby-dev:34789]
+
+Thu May 22 06:30:10 2008  Hidetoshi NAGAI  <nagai@ai.kyutech.ac.jp>
+
+	* array.c (flatten): fix memory leak.
+
+Thu May 22 06:21:34 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ext/nkf/nkf-utf8/nkf.c (nkf_str_caseeql): added.
+
+	* ext/nkf/nkf-utf8/nkf.c (nkf_enc_find_index): use nkf_str_caseeql.
+
+Thu May 22 05:45:30 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* proc.c (proc_dup): should copy safe_level from src proc
+	  properly.  a patch from Keita Yamaguchi
+	  <keita.yamaguchi at gmail.com>
+
+Thu May 22 02:46:08 2008  Shugo Maeda  <shugo@ruby-lang.org>
+
+	* lib/net/imap.rb: do not use Thread#raise. [ruby-dev:34739]
+
+Thu May 22 00:30:06 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_require.rb: new tests for library requiring, to
+	  achieve over 90% test coverage of dln.c.
+
+	* test/ruby/test_class.rb: add tests to achieve over 90% test coverage
+	  of class.c.
+
+	* test/ruby/test_module.rb: ditto.
+
+Thu May 22 00:15:44 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* insns.def, vm_insnhelper.c: specify "const".
+
+Wed May 21 23:20:21 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* bootstraptest/test_eval.rb: fix syntax.
+
+Wed May 21 17:46:17 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ext/nkf/nkf-utf8/nkf.c (nkf_enc_find_index):
+	  use strcasecmp. [ruby-dev:34787]
+
+Wed May 21 16:48:22 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* array.c (rb_ary_compact_bang): avoid forceful realloc.
+
+Wed May 21 07:42:28 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* string.c (rb_usascii_str_new): use rb_str_new.
+
+	* string.c (rb_enc_str_new): ditto.
+
+	* string.c (rb_usascii_str_new2): use rb_str_new2.
+
+Wed May 21 07:22:01 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* encoding.c, include/ruby/encoding.h
+	  (rb_enc_associate, rb_enc_associate_index):
+	  returns obj. [ruby-dev:34778]
+
+Wed May 21 04:20:20 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* encoding.c (rb_ascii8bit_encoding): use ENCINDEX_ASCII.
+
+	* encoding.c, include/ruby/encoding.h (rb_ascii8bit_encindex):
+	  added.
+
+	* encoding.c (rb_locale_encoding): use rb_usascii_encoding().
+
+Wed May 21 01:45:58 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* test/ruby/test_file_exhaustive.rb (setup): workaround for Windows
+	  Vista.
+
+	* test/ruby/envutil.rb (rubyexec): now Open3.open3 is supported on
+	  Windows.
+
+	* test/ruby/test_process.rb: use ``||'' instead of ``;'' because
+	  cmd.exe not support it.
+
+Wed May 21 01:28:47 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* transcode.c, include/ruby/encodng.h (rb_str_transcode):
+	  C API of encoding conversion for Ruby object.
+	  VALUE rb_str_transcode(VALUE str, VALUE to).
+
+	* transcode.c (str_encode, str_encode_bang):
+	  rename from rb_tr_transcode or rb_str_transcode_bang.
+
+Tue May 20 23:26:05 2008  Yusuke Endoh	<mame@tsg.ne.jp>
+
+	* test/ruby/test_array.rb: fix tests for 64bit CPU.
+
+Tue May 20 20:59:56 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ext/nkf/nkf-utf8/nkf.c (rb_nkf_convert) (nkf_enc_without_bom):
+	  reverted. nkf-utf8/nkf.c should be independent of ruby.
+
+	* ext/nkf/nkf.c (options):
+	  moved from nkf-utf8/nkf.c. 
+	  override nkf's original settings for Unicode BOM.
+
+Tue May 20 13:20:51 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/nkf/nkf.c (rb_nkf_convert), ext/nkf/nkf-utf8/nkf.c
+	  (nkf_enc_without_bom): BOM is not a part of encodings.
+
+	* ext/nkf/nkf.c (Init_nkf), ext/nkf/nkf-utf8/nkf.c (options):
+	  UTF-{16,32} without endian have no sense.
+
+Tue May 20 12:13:50 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ruby.c (proc_options, process_options): --dump option.
+
+Tue May 20 11:36:06 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby/ruby.h (PRI[diouxX]VALUE): printf format for VALUE.
+
+	* gc.c (assign_heap_slot): suppress a warning.
+
+Tue May 20 03:42:43 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* eval.c, vm_insnhelper.c: fix cref in instance_eval
+	  and cvar_base search protocol.
+
+	* bootstraptest/test_knownbug.rb, test_eval.rb: move soleved test
+	  and add new tests.
+
+	* test/ruby/test_eval.rb: fix tests for spec.
+
+Tue May 20 01:43:44 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* bootstraptest/test_knownbug.rb: fix a test.
+	  "block_given?" returns true if "yield" can be used.
+
+Tue May 20 01:07:19 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* parse.y (assignable_gen): when "self = 1" was evalueted, unnecessary
+	  error message was output, which might cause null pointer access.
+
+Tue May 20 08:38:56 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* string.c (rb_enc_strlen_cr): need to set ENC_CODERANGE_7BIT if
+	  search_nonascii() fails.    [ruby-dev:34751]
+
+	* string.c (rb_str_reverse): preserve coderange info if the
+	  receiver is 7bit string.
+
+	* string.c (rb_str_reverse_bang): ditto.
+
+	* string.c (rb_str_reverse_bang): should have called
+	  single_byte_optimizable before rb_str_modify() that clears
+	  coderange info.
+
+	* string.c (tr_trans): handle single bytes more eagerly.
+
+Mon May 19 23:32:12 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* vm.c (invoke_block_from_c): fix call flow.
+
+Mon May 19 23:19:35 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* regexec.c (slow_search): check the case when the length is 1.
+	  The behavior of memcmp is undefined if the third argument is 0.
+
+Mon May 19 21:07:48 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* thread_pthread.c (native_thread_apply_priority): 
+	  fix argument range check.  [ruby-dev:33124]
+
+Mon May 19 18:22:35 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* ext/openssl/ossl_pkcs5.c (ossl_pkcs5_pbkdf2_hmac): Fix the type
+	  of md; pointed out by Takahiro Kambe <taca at back-street.net>
+	  in [ruby-dev:34748].
+
+Mon May 19 17:23:55 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* regparse.c (PINC): use optimized enclen() instead of
+	  ONIGENC_MBC_ENC_LEN().
+
+	* regparse.c (PFETCH): ditto.
+
+	* regparse.c (PFETCH): small optimization.
+
+	* regexec.c (slow_search): single byte encoding optimization.
+
+	* regenc.h (enclen): avoid calling function when encoding's
+	  min_len == max_len.
+
+	* re.c (rb_reg_regsub): rb_enc_ascget() optimization for single
+	  byte encoding.
+
+	* re.c (rb_reg_search): avoid allocating new re_registers if we
+	  already have MatchData.
+
+	* re.c (match_init_copy): avoid unnecessary onig_region_free()
+	  before onig_region_copy. 
+
+	* encoding.c (rb_enc_get_index): remove implicit enc_capable check
+	  each time.
+
+	* encoding.c (rb_enc_set_index): ditto.
+
+	* encoding.c (enc_compatible_p): small refactoring.
+
+	* include/ruby/encoding.h (rb_enc_dummy_p): inline
+	  rb_enc_dummy_p() and export related code.
+
+Mon May 19 14:32:03 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* version.h: fix strange change by version.h update tool.
+
+Mon May 19 14:18:13 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* bootstraptest/test_knownbug.rb: move solved tests.
+
+	* bootstraptest/test_eval.rb, test_literal.rb, test_syntax.rb,
+	  test_thread.rb: ditto.
+
+	* test/ruby/test_m17n.rb, test_proc.rb, test_sprintf.rb,
+	  test_string.rb, test/ruby/test_struct.rb: ditto.
+
+Mon May 19 13:23:03 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* process.c (rb_spawn_internal): set last_status when status == -1
+	  because there is no path to set it on win32. this patch is derived
+	  from [ruby-core:16787], submitted by Luis Lavena <luislavena at
+	  gmail.com>
+
+Mon May 19 11:32:47 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* vm.c, insns.def, eval.c, vm_insnhelper.c: fix CREF handling.
+	  VM value stack frame of block contains cref information.
+	 (dfp[-1] points CREF)
+
+	* compile.c, eval_intern.h, eval_method.c, load.c, proc.c,
+	  vm_dump.h, vm_core.h: ditto.
+
+	* include/ruby/ruby.h, gc.c: remove T_VALUES because of above
+	  changes.
+
+	* bootstraptest/test_eval.rb, test_knownbug.rb: move solved test.
+
+Sun May 18 22:26:51 2008  GOTOU Yuuzou  <gotoyuzo@notwork.org>
+
+	* lib/webrick/httpservlet/filehandler.rb: should normalize path
+	  name in path_info to prevent script disclosure vulnerability on
+	  DOSISH filesystems. (fix: CVE-2008-1891)
+	  Note: NTFS/FAT filesystem should not be published by the platforms
+	  other than Windows. Pathname interpretation (including short
+	  filename) is less than perfect.
+
+	* lib/webrick/httpservlet/abstract.rb
+	  (WEBrick::HTTPServlet::AbstracServlet#redirect_to_directory_uri):
+	  should escape the value of Location: header.
+
+	* lib/webrick/httpservlet/cgi_runner.rb: accept interpreter
+	  command line arguments.
+
+Sun May 18 02:54:46 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* pack.c (pack_pack): check errno to detect error of ruby_strtoul.
+
+	* pack.c (pack_unpack): ditto.
+
+	* test/ruby/test_pack.rb: add a test for above.
+
+Sat May 17 23:53:57 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* file.c (file_expand_path): fix for short file name on Cygwin.
+
+Sat May 17 18:03:52 2008  Yuki Sonoda (Yugui) <yugui@yugui.jp>
+
+	* vm.c (Init_VM): removed the definition of Thread#initialize,
+	  which is overwritten in Init_Thread and is never used.
+
+Sat May 17 14:01:50 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* array.c (rb_ary_sort_bang): should not free shared pointer, and set
+	  shared.  [ruby-dev:34732]
+
+Sat May 17 12:34:54 2008  Yuki Sonoda (Yugui) <yugui@yugui.jp>
+
+	* thread_pthread.c (Init_native_thread): Kernel#.sleep used never to
+	  sleep on Mac OS X. Reported by arton <artonx AT yahoo.co.jp>.
+
+	* thread_pthread.c (native_sleep): added error checks.
+
+Sat May 17 11:29:11 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* file.c (rb_file_s_extname): first dot is not an extension name.
+
+Sat May 17 03:21:29 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* array.c (rb_ary_sort_bang): stop memory leak.  [ruby-dev:34726]
+
+	* re.c (rb_reg_search): need to free allocated buffer in re_register.
+
+	* regexec.c (onig_region_new): more pedantic malloc check.
+
+	* regexec.c (onig_region_resize): ditto.
+
+	* regexec.c (STATE_CHECK_BUFF_INIT): ditto.
+
+	* regexec.c (onig_region_copy): use onig_region_resize.
+
+Fri May 16 12:48:33 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* math.c (to_flo): rb_Float() accepts even strings for input.
+
+	* complex.c (nucomp_to_f): fix wrong message.
+
+	* complex.c (nucomp_to_r): ditto.
+
+	* object.c (rb_Float): do not check NaN for error.  NaN is a part
+	  of valid float values.
+
+Thu May 15 23:36:09 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_string.rb: add tests to achieve over 90% test
+	  coverage of string.c.
+
+	* test/ruby/test_m17n.rb: ditto.
+
+	* test/ruby/test_symbol.rb: ditto.
+
+	* test/ruby/test_pack.rb: ditto.
+
+Thu May 15 23:01:06 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* string.c (tr_find): String#delete returned wrong result when multiple
+	  utf-8 arguments are passed.
+
+	* test/ruby/test_m17n.rb (test_delete): add a test for above.
+
+Thu May 15 22:37:56 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* parse.y (ripper_warningS): now used.
+
+Thu May 15 15:33:59 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* file.c (file_expand_path): support for alternative data stream
+	  and ignored trailing garbages of NTFS.
+
+	* file.c (rb_file_s_basename): ditto.
+
+	* file.c (rb_file_s_extname): ditto.
+
+Thu May 15 13:43:36 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* object.c (rb_cstr_to_dbl): no need for forceful warning when
+	  converting to float.  overflow is a nature of float values.
+
+	* parse.y (parser_yylex): ditto.
+
+Thu May 15 13:23:20 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* re.c (rb_reg_prepare_enc): error condition was updated for non
+	  ASCII compatible strings.
+
+Thu May 15 12:19:42 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* ext/openssl/openssl_missing.c (HMAC_CTX_copy): adopted
+	  prototype change in openssl bundled with newer OpenBSD.
+	  a patch from Takahiro Kambe <taca at back-street.net> in
+	  [ruby-dev:34691].
+
+Wed May 14 22:09:25 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* ChangeLog: fix typo.
+
+Wed May 14 21:49:14 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_object.rb: new tests to achieve over 90% test
+	  coverage of object.c, eval.c and eval_method.c.
+
+	* test/ruby/test_module.rb: ditto.
+
+	* test/ruby/test_trace.rb: ditto.
+
+	* test/ruby/test_integer.rb: ditto.
+
+	* test/ruby/test_float.rb: ditto.
+
+	* test/ruby/test_method.rb: ditto.
+
+	* test/ruby/test_variable.rb: ditto.
+
+	* test/ruby/test_eval.rb: ditto.
+
+	* test/ruby/test_exception.rb: ditto.
+
+	* test/ruby/test_class.rb: ditto.
+
+Wed May 14 12:46:37 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* iseq.c (insn_operand_intern): remove Qundef related code.
+
+Wed May 14 12:42:36 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* array.c (rb_ary_count): Override Enumerable#count for better
+	  performance.
+
+Wed May 14 11:29:06 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* insns.def: add a "putcbase" instruction.
+
+	* compile.c, insns.def: fix to use putcbase instruction for
+	  class search.  Qundef should not be used.
+
+Wed May 14 07:49:35 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* eval.c (rb_call0): defer calling of rb_frame_self() until it
+	  become really necessary.
+
+	* eval.c (rb_call): ditto.
+
+Wed May 14 00:55:56 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_io_m17n.rb: remove a duplicative method.
+
+	* test/ruby/test_utf16.rb: rename a conflicting method name.
+
+	* test/ruby/test_array.rb: ditto.
+
+	* test/ruby/test_file_exhaustive.rb: ditto.
+
+	* test/ruby/test_hash.rb: ditto.
+
+	* test/ruby/test_env.rb: ditto.
+
+	* test/ruby/test_fixnum.rb: ditto.
+
+	* test/ruby/test_rational.rb: ditto.
+
+Wed May 14 00:45:58 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* eval_method.c (rb_add_method): fix check for warning when
+	  Object#initialize is redefined. (same as 1.8)
+
+Tue May 13 23:32:44 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* enum.c (enum_yield): use rb_yield_values2.
+
+	* enum.c (DEFINE_ENUMFUNCS): macro to define enumerator and yielding
+	  functions.
+
+	* enum.c (enum_all_func, enum_any_func, enum_one_func,
+	  enum_none_func): reduced duplicate code.
+
+Tue May 13 15:09:38 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* enumerator.c: Update rdoc.
+	  (enumerator_initialize): Discourage the use.
+	  (enum_each_slice, enum_each_cons, enumerator_each)
+	  (enumerator_with_index): Add a note about a call without a block.
+
+Tue May 13 08:25:31 2008  Tanaka Akira  <akr@fsij.org>
+
+	* io.c (rb_f_gets): re-enable rdoc.
+	  (rb_f_readline): ditto.
+	  (rb_f_readlines): ditto.
+
+Tue May 13 07:56:36 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* string.c (rb_str_cat): fixed buffer overrun reported by
+	  Christopher Thompson <cthompson at nexopia.com> in [ruby-core:16746]
+
+Mon May 12 23:37:57 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* vm.c (collect_local_variables_in_env): remove unnecessary check
+	  which causes: x=1;proc{local_variables}.call #=> []
+
+	* test/ruby/test_variable.rb: add a test for above.
+
+Mon May 12 23:05:24 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* process.c, include/ruby/intern.h (rb_run_exec_options): externed.
+
+	* process.c (save_redirect_fd, save_env_i, save_env, run_exec_dup2,
+	  run_exec_open, run_exec_pgroup, run_exec_rlimit, rb_run_exec_options):
+	  save parent's process environments.
+
+	* process.c (rb_spawn_internal): remove calling run_exec_options()
+	  because cannot restore after spawn.
+
+	* io.c (pipe_open): ditto.
+
+	* test/ruby/test_process.rb (test_execopts_env): upcase environment
+	  variable name for case insensitive platforms.
+
+	* win32/win32.c (init_env): set USER environment variable only when
+	  USERNAME is available.
+
+Mon May 12 22:23:01 2008  Tanaka Akira  <akr@fsij.org>
+
+	* lib/date.rb (once): use Object#object_id instead of Symbol#to_i.
+
+Mon May 12 21:34:46 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* test/ruby/envutil.rb (rubybin): return expanded rubyexe instead of
+	  expanded ruby if available.
+
+Mon May 12 20:19:55 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* enum.c (grep_i): Be aware of multiple values;
+	  fix [ruby-dev:34653].
+	  (grep_iter_i): Ditto.
+	  (count_i): Ditto.
+	  (find_i): Ditto.
+	  (find_index_i): Ditto.
+	  (find_all_i): Ditto.
+	  (reject_i): Ditto.
+	  (inject_i): Ditto.
+	  (inject_op_i): Ditto.
+	  (partition_i): Ditto.
+	  (group_by_i): Ditto.
+	  (first_i): Ditto.
+	  (sort_by_i): Ditto.
+	  (all_i): Ditto.
+	  (all_iter_i): Ditto.
+	  (any_i): Ditto.
+	  (any_iter_i): Ditto.
+	  (one_i): Ditto.
+	  (one_iter_i): Ditto.
+	  (none_i): Ditto.
+	  (none_iter_i): Ditto.
+	  (min_i): Ditto.
+	  (min_ii): Ditto.
+	  (max_i): Ditto.
+	  (max_ii): Ditto.
+	  (minmax_i): Ditto.
+	  (minmax_ii): Ditto.
+	  (min_by_i): Ditto.
+	  (max_by_i): Ditto.
+	  (minmax_by_i): Ditto.
+	  (member_i): Ditto.
+	  (take_i): Ditto.
+	  (take_while_i): Ditto.
+	  (drop_i): Ditto.
+	  (drop_while_i): Ditto.
+	  (cycle_i): Ditto.
+
+	* enum.c (each_with_index): Update rdoc.  each_with_index() takes
+	  argments that are passed through to each(), and a hash preserves
+	  key order.
+
+Mon May 12 19:05:24 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* process.c (rb_spawn_internal): remove calling run_exec_options()
+	  because cannot restore after spawn. we'll fix this later.
+
+Mon May 12 18:16:44 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* process.c (rb_spawn_internal): need to call run_exec_options() before
+	  spawn if the platform doesn't have fork. [ruby-dev:34647]
+
+Mon May 12 15:20:02 2008  Tanaka Akira  <akr@fsij.org>
+
+	* gc.c (ruby_vm_xmalloc): increase malloc_increase only if malloc
+	  succeeds.  failed malloc size can be huge.  it may increase
+	  malloc_limit too big which cause less GC and memory full.
+	  (ruby_vm_xrealloc): ditto.
+	  (rb_objspace): make params.limit and params.increase size_t.
+
+Mon May 12 15:04:58 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* re.c (rb_reg_prepare_re): made non static with small refactoring.
+
+	* ext/strscan/strscan.c (strscan_do_scan): should adjust encoding
+	  before regex searching.
+
+Mon May 12 13:57:19 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* eval.c (is_defined): add NODE_OP_ASGN_{OR,AND}.  "defined?(a||=1)"
+	  should not operate assignment.  [ruby-dev:34645]
+
+Mon May 12 13:29:26 2008  Tanaka Akira  <akr@fsij.org>
+
+	* bignum.c (bigzero_p): check from MSB to LSB.  [ruby-dev:34649]
+
+Mon May 12 12:32:10 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* common.mk (RUBYOPT): affected BASERUBY too.  [ruby-talk:301514]
+
+Mon May 12 12:27:55 2008  Tanaka Akira  <akr@fsij.org>
+
+	* gc.c (assign_heap_slot): fix condition for number of objects in
+	  a heap.
+
+Mon May 12 12:24:48 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* string.c (sym_to_i): really removed.  [ruby-dev:34641]
+
+Mon May 12 11:15:55 2008  Yuki Sonoda (Yugui) <yugui@yugui.jp>
+
+	* gc.c (assign_heap_slot):  put the binary search routine in order.
+
+Mon May 12 10:52:51 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ruby.c (ruby_init_gems), gem_prelude.rb: check if Gem is defined
+	  instead of Gem::Enable.
+
+	* gem_prelude.rb (load_full_rubygems_library, const_missing): prevent
+	  infinite recursion.  [ruby-dev:34539]
+
+Sun May 11 23:19:39 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* enum.c (all_iter_i, any_iter_i): reduced duplicated code.
+
+Sun May 11 22:54:02 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* bootstraptest/runner.rb (main): leave -I options for purelib.rb
+	  untouched.
+
+	* bootstraptest/runner.rb (main): handle relative path -r options.
+
+Sun May 11 19:04:06 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_thread.rb: kill and join temporal threads that are
+	  created in each test.
+
+Sun May 11 17:58:45 2008  Tanaka Akira  <akr@fsij.org>
+
+	* test/ruby/test_process.rb (TestProcess#with_stdin): defined.
+	  (TestProcess#test_argv0_noarg): don't use redirect_fds.
+	  [ruby-dev:34647]
+
+Sun May 11 17:57:36 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in (MINIRUBY): should not include extension library path.
+
+Sun May 11 14:40:36 2008  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/ruby.h (SIZET2NUM): new macro.
+	  (NUM2SIZET): new macro.
+
+	* gc.c (struct rb_objspace): use size_t for increment, length and
+	  used for 64bit.
+	  (allocate_heaps): ditto.
+	  (assign_heap_slot): ditto.
+	  (set_heaps_increment): ditto.
+	  (gc_mark_all): ditto.
+	  (is_pointer_to_heap): ditto.
+	  (free_unused_heaps): ditto.
+	  (gc_sweep): ditto.
+	  (os_obj_of): ditto.
+	  (rb_gc_call_finalizer_at_exit): ditto.
+	  (count_objects): ditto.
+
+Sun May 11 13:14:09 2008  Tanaka Akira  <akr@fsij.org>
+
+	* thread.c (thread_cleanup_func_before_exec): extracted from
+	  thread_cleanup_func not to touch pthread data.
+	  pthread_cond_destroy in forked process may cause deadlock on
+	  Debian GNU/Linux Etch on x86, x86-64 and IA64.
+	  this doesn't cause resource leak because the process will exec soon.
+	  (terminate_atfork_before_exec_i): defined.
+	  (rb_thread_atfork_before_exec): defined.
+
+	* include/ruby/intern.h (rb_thread_atfork_before_exec): declared.
+
+	* process.c (rb_exec_atfork): call rb_thread_atfork_before_exec
+	  instead of rb_thread_atfork.
+
+	* io.c (popen_exec): call rb_thread_atfork_before_exec instead of
+	  rb_thread_atfork.
+
+Sat May 10 22:14:03 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* string.c (tr_trans): single '^' does not mean negation.
+	  [ruby-dev:34632]
+
+	* string.c (tr_trans): should check src size, not str size.
+	  [ruby-dev:34637]
+
+	* string.c (tr_trans): should not turn on modify flag if no
+	  modification happens.  [ruby-dev:34631]
+
+Sat May 10 18:11:18 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* string.c (rb_str_each_line): zero length record separator should
+	  split a string into paragraphs.  [ruby-dev:34586]
+
+	* string.c (rb_str_each_line): RDoc updated.
+
+Sat May 10 11:36:20 2008  Tanaka Akira  <akr@fsij.org>
+
+	* vm.c (env_mark): mark env->block.self.  prevent SEGV when GC occur
+	  in prepare_iseq_build with gcc version 3.4.6 [FreeBSD] 20060305 on
+	  FreeBSD/amd64.
+
+Fri May  9 19:16:00 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* thread.c (timeofday): use monotonic clock.  based on a patch
+	  from zimbatm <zimbatm at oree.ch> in [ruby-core:16627].
+
+Fri May  9 07:47:07 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* cont.c (cont_restore_0): dynamic stack direction code should be
+	  consistent with static one.  [ruby-talk:301152]
+
+Fri May  9 00:03:50 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* parse.y (arg): operator assignment "a += b rescue c" should be
+	  parsed as "a += (b rescue c)" just like normal assignment.
+	  [ruby-talk:301000]
+
+Thu May  8 18:14:00 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* bignum.c (rb_big_and): bit-wise operation should not take float
+	  values.  [ruby-dev:34612]
+
+	* bignum.c (rb_big_or): ditto.
+
+	* bignum.c (rb_big_xor): ditto.
+
+Thu May  8 17:44:13 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* common.mk, ext/extmk.rb, lib/mkmf.rb: use absolute path for RUBYOPT.
+
+	* file.c (rb_find_file_ext): guard load_path from GC.
+	  gcc version 4.1.2 20061115 (prerelease) (Debian 4.1.1-21) optimizes
+	  load_path by holding only RARRAY_LEN(load_path) and
+	  RARRAY_PTR(load_path) in registers on IA64 GNU/Linux Etch.
+
+Thu May  8 16:41:20 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in (MINIRUBY), common.mk (RUBYOPT): add purelib.rb.
+	  [ruby-core:16642]
+
+Thu May  8 16:00:41 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* parse.y (parser_yylex): ! and ? at the bottom are no longer part
+	  of valid symbol names.  [ruby-dev:34590]
+
+Thu May  8 15:36:11 2008  Tanaka Akira  <akr@fsij.org>
+
+	* thread.c (rb_gc_save_machine_context): call FLUSH_REGISTER_WINDOWS
+	  to mark the register stack from GC on another thread.
+
+Thu May  8 15:14:34 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* array.c (rb_ary_sort_bang): freeze temporary array.
+
+Thu May  8 13:19:18 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm.c (rb_thread_mark): mark stat_insn_usage only when ptr is not
+	  null.
+
+Thu May  8 10:44:04 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* array.c (sort_reentered): reentered check may be called from
+	  Array#sort.
+
+Thu May  8 09:51:52 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* array.c (sort_1, sort_2): check for reentered and if elements are
+	  accessible.  [ruby-core:16679]
+
+Thu May  8 06:43:52 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* dln.c (dln_find_exe_r, dln_find_file_r): reentrant versions.
+
+	* file.c (rb_find_file_ext, rb_find_file), process.c (proc_exec_v),
+	  (rb_proc_exec, proc_spawn_v, proc_spawn), ruby.c (process_options):
+	  use reentrant versions.
+
+Thu May  8 06:27:33 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* thread.c (rb_thread_key_p): thread local storage stores ID.
+
+Thu May  8 01:10:03 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* string.c (tr_trans): should squeeze properly.  [ruby-dev:34587]
+
+	* string.c (tr_trans): had a bug in treating multi-byte character
+	  replacement.
+
+	* string.c (rb_str_delete_bang): need not to do anything for empty
+	  strings.
+
+	* test/ruby/test_m17n_comb.rb (TestM17NComb::test_str_delete): add
+	  test for empty receiver.
+
+Wed May  7 20:19:18 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* ruby.c (process_options, ruby_set_argv): set encoding of rb_argv
+	  after Init_prelude() because cannot load encoding extensions before
+	  it.
+
+Wed May  7 20:00:21 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* numeric.c (bit_coerce): float should not be a valid operand of
+	  bitwise operations.  [ruby-dev:34583]
+
+Wed May  7 19:35:29 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* thread.c (rb_thread_key_p): should always convert symbol to ID.
+	  [ruby-dev:34588]
+
+Wed May  7 19:30:34 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* numeric.c (fix_divide): float division should floor() before
+	  rounding into integer.  [ruby-dev:34584]
+
+Wed May  7 18:02:01 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* string.c (sym_to_i): remove obsolete method.  preparation for
+	  symbol GC.
+
+	* numeric.c (fix_to_sym): ditto.
+
+	* numeric.c (fix_id2name): ditto.
+
+Wed May  7 17:43:22 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* io.c (io_puts_ary): check recursion first.  [ruby-dev:34580]
+
+Wed May  7 17:41:14 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm.c (vm_eval_body): initialize retval.  [ruby-dev:34576]
+
+Wed May  7 13:02:56 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* bignum.c (rb_big_fdiv): flo.fdiv(NaN) should result NaN.
+
+	* numeric.c (num_quo): renamed and moved from bignum.c.
+	  [ruby-dev:34582]
+
+	* bignum.c (rb_big_fdiv): update RDoc description
+
+	* rational.c (nurat_s_new_m): small refactoring.
+
+	* bignum.c (rb_big2dbl): no need for forceful warning when
+	  converting to float.  overflow is a nature of float values.
+
+Wed May  7 00:54:25 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* ext/zlib/zlib.c (gzreader_gets): may cause infinite loop.
+	  a patch from Kouya <kouyataifu4 at gmail.com> in
+	  [ruby-reference-manual:762].
+
+Tue May  6 02:08:18 2008  Tanaka Akira  <akr@fsij.org>
+
+	* test/io/nonblock/test_flush.rb: don't set Thread.abort_on_exception.
+
+	* test/net/imap/test_imap.rb: ensure disconnecting imap to terminate
+	  receiver thread.
+
+Tue May  6 00:29:21 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* iseq.c (insn_operand_intern): should handle Qundef embedded in
+	  operand.  [ruby-core:16656]
+
+Tue May  6 00:00:02 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* compile.c (iseq_compile_each): should call compile_cpath() for
+	  modules as well.  [ruby-dev:34585]
+
+	* insns.def (defineclass): add undef handling.
+
+Mon May  5 23:49:40 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* insns.def (defineclass): was using wrong variable.  [ruby-dev:34592]
+
+Mon May  5 20:07:59 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* io.c (io_fflush): IO#flush problem within threads.  a patch from
+	  <s.wanabe at gmail.com> in [ruby-dev:34595].
+
+Mon May  5 19:58:44 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* compile.c (defined_expr): protect some expression from
+	  segmentation fault.  a patch from wanabe <s.wanabe at gmail.com>
+	  in [ruby-dev:34593].
+
+Mon May  5 19:49:59 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* struct.c (rb_struct_s_def): Struct.new(0) should not SEGV.
+	  based on the patch from wanabe <s.wanabe at gmail.com> in
+	  [ruby-dev:34594].
+
+	* struct.c (make_struct): call to_str on name object.
+
+Mon May  5 17:17:40 2008  Tanaka Akira  <akr@fsij.org>
+
+	* eval.c (ruby_cleanup): wrap ruby_finalize_0 by SAVE_ROOT_JMPBUF to
+	  avoid SEGV by at_exit { Fiber.new{}.resume } on IA64.
+
+Mon May  5 12:12:11 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* array.c (rb_ary_slice_bang): should adjust length before making
+	  sub-array.
+
+Mon May  5 11:36:14 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* array.c (rb_ary_dup): should dupe corresponding information.
+	  [ruby-dev:34581]
+
+Mon May  5 11:13:50 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* compile.c (compile_cpath): use Qundef to denote cbase lookup.
+
+	* insns.def (defineclass): Qundef is passed for cbase.
+
+	* insns.def (setconstant): ditto.
+
+	* vm_insnhelper.c (vm_check_if_namespace): use rb_inspect()
+	  instead of rb_obj_as_string() for better description.
+
+Mon May  5 02:10:23 2008  Tanaka Akira  <akr@fsij.org>
+
+	* gc.c (set_heaps_increment): fix memory allocation strategy by
+	  determining heaps_inc from heaps_used, not objects_delta.
+	  (struct rb_objspace): delta removed.  change increment, length and
+	  used to long for LP64.
+	  (objects_delta): removed.
+	  (allocate_heaps): add next_heaps_length argument.
+	  (init_heap): renamed from add_heap.
+	  (garbage_collect): use heaps_increment in dont_gc.
+
+Sun May  4 21:09:32 2008  Tanaka Akira  <akr@fsij.org>
+
+	* lib/getoptlong.rb: use $stderr instead of $deferr.
+
+Sun May  4 16:04:28 2008  Tanaka Akira  <akr@fsij.org>
+
+	* time.c (obj2nsec): fix string argument.
+
+Sun May  4 14:29:14 2008  Tanaka Akira  <akr@fsij.org>
+
+	* eval.c (rb_obj_respond_to): check the result of respond_to? method
+	  by RTEST.
+
+Sun May  4 12:57:58 2008  Tanaka Akira  <akr@fsij.org>
+
+	* string.c (rb_str_each_line): return original string.
+
+Sat May  3 20:57:06 2008  Tanaka Akira  <akr@fsij.org>
+
+	* test/ruby/envutil.rb (Test::Unit::Assertions#assert_normal_exit):
+	  new method.
+
+Sat May  3 18:10:54 2008  Tanaka Akira  <akr@fsij.org>
+
+	* time.c (time_timespec): raise TypeError for nil and other objects
+	  which has no divmod method.
+
+Fri May  2 23:59:26 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* io.c (internal_read_func, internal_write_func): split from
+	  internal_io_func.
+
+Fri May  2 23:55:15 2008  Tanaka Akira  <akr@fsij.org>
+
+	* variable.c (rb_define_hooked_variable): guard *var from GC to
+	  prevent collecting argf under RUBY_DEBUG=gc_stress.
+
+Fri May  2 17:29:59 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* range.c (range_step): call to_int if step is not a numeric
+	  value.  [ruby-dev:34575]
+
+Fri May  2 16:10:57 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* range.c (range_step): do not forcefully convert steps into
+	  integers.  [ruby-dev:34571]
+
+Fri May  2 14:52:33 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* misc/ruby-mode.el: move fontifying code from hook.  a patch from
+	  Phil Hagelberg <phil at hagelb.org> in [ruby-core:16636].
+
+Fri May  2 14:10:17 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* range.c (range_step): step may be bignum.
+
+Fri May  2 13:52:36 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* re.c (Init_Regexp): remove MatchData#select.  [ruby-dev:34563]
+
+Thu May  1 23:59:59 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* bignum.c (rb_big_divide), numeric.c (fix_divide): check for result
+	  domain.  [ruby-dev:34559]
+
+Thu May  1 23:57:06 2008  James Edward Gray II  <jeg2@ruby-lang.org>
+
+	* lib/net/telnet.rb:  This patch from Brian Candler adds a FailEOF mode which
+	  can be activated to have net/telnet raise EOFError exceptions when the
+	  remote connection is closed.  The default behavior remains unchanged though.
+
+Thu May  1 23:43:21 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* range.c (range_step): check if step can be converted to an integer.
+	  [ruby-dev:34558]
+
+	* range.c (range_step): allow float step bigger than zero but less
+	  than one.  [ruby-dev:34557]
+
+Thu May  1 23:20:12 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* bignum.c (rb_big_divide): return an integer for idiv.
+	  [ruby-dev:34553]
+
+Thu May  1 20:47:30 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* hash.c (rb_hash_s_create): should access converted hash value.
+	  [ruby-dev:34555]
+
+Thu May  1 20:31:09 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* test/ruby/test_parse.rb (TestParse::test_void_expr_stmts_value):
+	  shut up warning.
+
+	* rational.c (nurat_to_f): no need for forceful warning when
+	  converting to float.  overflow is a nature of float values.
+
+Thu May  1 16:10:21 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* hash.c (env_delete_if): return enumerator if no block given.
+	  [ruby-dev:34554]
+
+Wed Apr 30 21:36:40 2008  Masatoshi SEKI  <m_seki@mva.biglobe.ne.jp>
+
+	* lib/erb.rb (url_encode): [ruby-dev:34497] ERB::Util#url_encode
+	  bug fix. Reported by rubikitch.
+
+	* test/erb/test_erb.rb: ditto
+
+Wed Apr 30 20:11:36 2008  James Edward Gray II  <jeg2@ruby-lang.org>
+
+	* lib/net/telnet.rb:  Fixing a bug where line endings would not be properly
+	  escaped when the two character ending was broken up into separate TCP
+	  packets.  Issue reported and patched by Brian Candler.
+
+Wed Apr 30 18:03:01 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* load.c (rb_load_path), vm_core.h (rb_vm_t): moved to VM.
+
+	* load.c (rb_get_load_path): returns absolute load path.
+
+	* load.c (load_path_getter): $LOAD_PATH getter.
+
+	* file.c (rb_find_file_ext, rb_find_file), ruby.c (push_include,
+	  ruby_init_loadpath): use the accessor.
+
+	* vm.c (rb_vm_mark): mark load_path.
+
+Wed Apr 30 17:47:21 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* re.c (rb_reg_search): use local variable.  a patch from wanabe
+	  <s.wanabe AT gmail.com> in [ruby-dev:34537].  [ruby-dev:34492]
+
+Wed Apr 30 16:10:18 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* eval_intern.h: specify the values of the enumeration constants
+	  explicitly.  [ruby-dev:34489]
+
+Wed Apr 30 12:32:39 2008  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (check_exec_redirect_fd): prohibit duplex IO.
+	  (check_exec_fds): record maxhint even if close_others is not
+	  specified.
+	  (rb_exec_arg_fixup): renamed from rb_exec_arg_fix.
+
+Mon Apr 28 20:24:27 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* rational.c (nurat_marshal_load): checks the given
+	  denominator. [ruby-dev:34536]
+
+Mon Apr 28 14:21:18 2008  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/ruby.h (POSFIXABLE): use FIXNUM_MAX+1 instead of
+	  FIXNUM_MAX to make it possible to convert to double accurately on
+	  environments with 64bit VALUE and 64bit double.
+	  It assumes FLT_RADIX is 2.
+	  fix RubyForge bug #14102.
+
+Mon Apr 28 12:48:57 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* process.c (rb_exec_arg_addopt, rb_exec_arg_addopt): now can specify
+	  close_exec on having no fork environment (but still meaningless).
+
+Mon Apr 28 11:11:29 2008  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (run_exec_options): don't call FIX2INT for nil.
+
+Mon Apr 28 11:11:38 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* proc.c (method_name): should return symbols instead of strings.
+	  [ruby-dev:34531]
+
+Mon Apr 28 09:02:43 2008  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/intern.h (rb_exec_arg_init): declared.
+	  (rb_exec_arg_addopt): declared.
+	  (rb_exec_arg_fix): declared.
+	  (rb_exec_initarg): removed.
+	  (rb_exec_getargs): removed.
+	  (rb_exec_initarg2): removed.
+
+	* io.c (struct popen_arg): make execarg as a pointer.
+	  (popen_exec): follow popen_arg change.
+	  (pipe_open): add eargp argument.  extract argc and argv from eargp.
+	  use rb_exec_arg_addopt to add redirect options.
+	  (pipe_open_v): set up struct rb_exec_arg.
+	  (pipe_open_s): set up struct rb_exec_arg.
+
+	* process.c (rb_exec_arg_addopt): new function extracted from
+	  check_exec_options_i.
+	  (check_exec_options_i): use rb_exec_arg_addopt.
+	  (rb_check_exec_options): opthash is always a hash now.
+	  (rb_exec_getargs): make it static.
+	  (rb_exec_fillarg): renamed from rb_exec_initarg2.  don't set up
+	  redirect_fds.
+	  (rb_exec_arg_init): new function.
+	  (rb_exec_arg_fix): new function.
+	  (rb_f_exec): use rb_exec_arg_init and rb_exec_arg_fix.  use
+	  rb_exec_arg_addopt to set close_others option.
+	  (run_exec_options): make close_others by default.
+	  (rb_spawn_internal): use rb_exec_arg_init and rb_exec_arg_fix.  use
+	  rb_exec_arg_addopt to set close_others option.
+
+Sun Apr 27 18:59:04 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* rational.c (nurat_expt): use f_rational_new2. [ruby-dev:34524]
+
+Sun Apr 27 15:23:40 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* gc.c (gc_count): add a GC.count method.  This method returns
+	  a GC invoking count.
+
+Sun Apr 27 12:20:33 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm_core.h (rb_vm_t), gc.c (rb_objspace, rb_newobj), vm.c
+	  (Init_BareVM): per-VM object space support, which is disabled now.
+
+	* gc.c (rb_objspace_alloc), vm.c (Init_BareVM): should not use ruby
+	  malloc here.
+
+	* gc.c (garbage_collect, etc): performance improvement by passing the
+	  reference instead of referring the global variable in each functions.
+
+Sun Apr 27 08:06:15 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ruby.c (ruby_set_argv): ARGV should be locale encoding.
+	  [ruby-list:44861]
+
+Sun Apr 27 01:46:29 2008  Tanaka Akira  <akr@fsij.org>
+
+	* lib/open3.rb (Open3.popen3w): removed.
+	  (Open3.popen3): notice wait_thr.
+
+Sun Apr 27 01:13:05 2008  Eric Hodel  <drbrain@segment7.net>
+
+	* lib/rdoc, test/rdoc:  Update to RDoc 2.0.0 r56.
+
+Sat Apr 26 21:30:40 2008  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/intern.h (rb_hash_dup): declared.
+
+	* hash.c (rb_hash_dup): new function.
+
+	* process.c (rb_spawn_internal): don't modify option hash.
+
+Sat Apr 26 18:36:31 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* io.c, signal.c, thread.c, thread_win32.c, include/ruby/intern.h:
+	  suppress warnings.
+
+Sat Apr 26 17:42:30 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* error.c (builtin_types), gc.c (count_objects): added Complex and
+	  Rational.
+
+Sat Apr 26 17:35:19 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* error.c (rb_eNOERROR): renamed.
+
+Sat Apr 26 17:30:11 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* include/ruby/ruby.h, gc.c: remove T_BLOCK.
+
+	* include/ruby/ruby.h: re-number T_xxx.
+
+Sat Apr 26 17:31:09 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* process.c (rb_cProcessTms, rb_cProcessStatus): renamed.
+
+	* error.c (builtin_types), signal.c (siglist), st.c (primes),
+	  struct.c (ref_func), time.c (months): constified.
+
+Sat Apr 26 13:00:41 2008  Tanaka Akira  <akr@fsij.org>
+
+	* lib/open3.rb: double fork is replaced by spawn with Process.detach.
+	  (Open3.popen3w): new method to access the thread returned by
+	  Process.detach.
+
+Sat Apr 26 00:47:43 2008  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_spawn_internal): new function to specify
+	  default_close_others.
+	  (rb_spawn): specify default_close_others true.
+	  (rb_f_system): call rb_spawn_internal with default_close_others as
+	  false.
+
+Sat Apr 26 12:26:41 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* range.c (range_each): use INT2FIX() for fixnum values.
+
+Fri Apr 25 17:56:25 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* gc.c (free_unused_heaps): preserve last used heap segment to
+	  reduce malloc() call.
+
+Fri Apr 25 17:54:10 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* gc.c (HEAP_SIZE): use smaller heap segment (2K) for more chance
+	  to be freed.  based on patch from authorNari <authornari at gmail.com>.
+
+	* gc.c (rb_newobj_from_heap): eventually allocate heap segments.
+
+Fri Apr 25 15:35:36 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* process.c (rb_spawn): rb_exec_initarg() returns new argc and argv in
+	  earg.
+
+Fri Apr 25 12:37:54 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* array.c (flatten): returns an instance of same class.
+	  [ruby-core:16554]
+
+Fri Apr 25 10:52:27 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* include/ruby/win32.h: define mode_t for umask.
+
+	* process.c (check_exec_options_i, check_exec_fds, run_exec_options):
+	  support "close_others" only when fork(2) is available.
+
+Fri Apr 25 00:16:11 2008  Tanaka Akira  <akr@fsij.org>
+
+	* process.c: include sys/stat.h for umask.
+
+Thu Apr 24 23:25:17 2008  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/intern.h (rb_env_clear): declared.
+	  (rb_io_mode_modenum): declared.
+	  (rb_close_before_exec): declared.
+	  (struct rb_exec_arg): add options and redirect_fds field.
+	  (rb_check_argv): removed.
+	  (rb_exec_initarg): declared.
+	  (rb_exec_getargs): declared.
+	  (rb_exec_initarg2): declared.
+	  (rb_fork): add third argument: fds.
+
+	* io.c (max_file_descriptor): new static variable to record maximum
+	  file descriptor ruby used.
+	  (UPDATE_MAXFD): new macro.
+	  (UPDATE_MAXFD_PIPE): new macro.
+	  (rb_io_mode_modenum): externed.
+	  (rb_sysopen): update max_file_descriptor.
+	  (rb_close_before_exec): new function.
+	  (popen_exec): redirection removed because it is done by extended
+	  spawn mechanism.
+	  (pipe_open): generate a hash for spawn options to specify
+	  redirections.
+	  (pipe_open_v): use rb_exec_getargs.
+	  (pipe_open_s): use rb_exec_getargs.
+	  (rb_io_initialize): update max_file_descriptor.
+
+	* process.c (hide_obj): new function.
+	  (check_exec_redirect_fd): new function.
+	  (check_exec_redirect): new function.
+	  (check_exec_options_i): new function.
+	  (check_exec_fds): new function.
+	  (rb_check_exec_options): new function.
+	  (check_exec_env_i): new function.
+	  (rb_check_exec_env): new function.
+	  (rb_exec_getargs): new function.
+	  (rb_exec_initarg2): new function.
+	  (rb_exec_initarg): new function.
+	  (rb_f_exec): use rb_exec_initarg.
+	  (intcmp): new function.
+	  (run_exec_dup2): new function.
+	  (run_exec_close): new function.
+	  (run_exec_open): new function.
+	  (run_exec_pgroup): new function.
+	  (run_exec_rlimit): new function.
+	  (run_exec_options): new function.
+	  (rb_exec): call run_exec_options.
+	  (move_fds_to_avoid_crash): new function.
+	  (pipe_nocrash): new function.
+	  (rb_fork): use pipe_nocrash to avoid file descriptor conflicts.
+	  (rb_spawn): use rb_exec_initarg.
+	  (rlimit_resource_name2int): extracted from rlimit_resource_type.
+	  (rlimit_type_by_hname): new function.
+	  (rlimit_type_by_lname): new function.
+	  (rlimit_resource_type): use rlimit_type_by_hname.
+	  (proc_daemon): add fds argument for rb_fork.
+
+	* hash.c (rb_env_clear): renamed from env_clear and externed.
+
+	[ruby-dev:34086]
+
+Thu Apr 24 23:00:58 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_thread.rb: fix typos.
+
+	* test/ruby/envutil.rb (rubyexec): move Open3.popen3 call into timeout
+	  block.
+
+Thu Apr 24 22:34:52 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_comparable.rb: new tests for Comparable, to achieve
+	  100% test coverage of compar.c.
+
+Thu Apr 24 17:19:01 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* ruby.c (process_options): set safe_level before loading script.
+	  [ruby-dev:34421]
+
+Thu Apr 24 14:15:11 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* dln.c (dln_find_1): prior files with extensions to files sans
+	  extensions.  [ruby-core:16517]
+
+Thu Apr 24 00:26:06 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* lib/rdoc/ri/descriptions.rb: fixed wrong class nestings.
+
+Thu Apr 24 00:20:01 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_settracefunc.rb: add a test for set_trace_func.
+
+	* test/ruby/envutil.rb: move "rubyexec" method from test_rubyoptions.rb.
+
+	* test/ruby/test_rubyoptions.rb: use rubyexec in envutil.rb.
+
+	* test/ruby/test_thread.rb: add tests to achieve over 90% test coverage
+	  of thread.c.
+
+Wed Apr 23 15:28:52 2008  Kazuhiro NISHIYAMA  <zn@mbf.nifty.com>
+
+	* test/gdbm/test_gdbm.rb (TestGDBM#test_s_open_no_create): failed
+	  notice moved from comment to assertion message. [ruby-dev:29127]
+
+Wed Apr 23 11:49:54 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* lib/set.rb (Set#each, SortedSet#each, TC_Set#test_each): Return
+	  an enumerator if no block is given.
+
+Wed Apr 23 00:36:03 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/openssl/test_ssl.rb (start_server): add timeout to server.join.
+
+Wed Apr 23 00:18:45 2008  Kazuhiro NISHIYAMA  <zn@mbf.nifty.com>
+
+	* test/ruby/test_symbol.rb (TestSymbol#test_to_proc): Improve
+	  tests of Symbol#to_proc.
+
+Tue Apr 22 22:40:57 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* lib/drb/drb.rb (DRb::DRbServer::check_insecure_method): should
+	  check method names by symbols, not by strings.  a patch from
+	  Kazuhiro NISHIYAMA <zn at mbf.nifty.com> in [ruby-dev:34487].
+
+Tue Apr 22 22:15:54 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* misc/ruby-style.el (ruby-style-{case,label}-indent): up list from
+	  indentation point.
+
+Tue Apr 22 21:09:05 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ext/nkf/nkf-utf8/nkf.c (score_table_A0, score_table_F0):
+	  type of content is unsigned char.
+
+	* ext/nkf/nkf-utf8/nkf.c (push_broken_buf): 'c' is nkf_char.
+
+	* ext/nkf/nkf-utf8/nkf.c (push_broken_buf): enc is 0 or pointer.
+
+	* ext/nkf//nkf.c (options): type of option is unsigned char.
+
+Tue Apr 22 20:51:58 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ext/nkf/nkf-utf8/nkf.c (z_conv): characters must be nkf_char.
+
+Tue Apr 22 19:23:05 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* enumerator.c (enumerator_initialize): Remove an undocumented
+	  feature (passing a block to the constructor) that's broken.
+	  This is not what I intended.
+
+Tue Apr 22 17:54:05 2008  URABE Shyouhei  <shyouhei@ruby-lang.org>
+
+	* vm_core.h (exec_event_hooks): ``inline'' is a type modifier, not
+	a type itself.
+
+Tue Apr 22 16:24:27 2008  URABE Shyouhei  <shyouhei@ruby-lang.org>
+
+	* string.c (rb_enc_cr_str_buf_cat): do not use C++ comments.
+
+Tue Apr 22 16:23:53 2008  URABE Shyouhei  <shyouhei@ruby-lang.org>
+
+	* configure.in: use AC_USE_SYSTEM_EXTENSIONS.
+
+Tue Apr 22 16:23:16 2008  URABE Shyouhei  <shyouhei@ruby-lang.org>
+
+	* vm_evalbody.c (DECL_SC_REG): use __asm__ instead.
+
+Tue Apr 22 16:18:30 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm_evalbody.c (DECL_SC_REG): typo fixed.
+
+Tue Apr 22 15:25:04 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in (struct timespec): needs time.h according to POSIX.
+
+Tue Apr 22 13:19:48 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* thread.c (rb_thread_stop_timer_thread): should clear
+	  timer_thread_id after stopping it.
+
+Tue Apr 22 13:12:58 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* thread.c (thread_join): remove the current thread from the join list
+	  of the target thread.
+
+Tue Apr 22 12:03:50 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm_insnhelper.c (vm_get_ev_const): search from the base klass if it
+	  is given.
+
+Tue Apr 22 09:58:13 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* ext/win32ole/win32ole.c: avoid warnings.
+
+Tue Apr 22 09:56:51 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* file.c (eaccess): workaround for recent msvcrt's behavior.
+	  [ruby-core:16460]
+
+Mon Apr 21 19:08:32 2008  Tanaka Akira  <akr@fsij.org>
+
+	* io.c (copy_stream_body): call rb_io_check_readable and
+	  rb_io_check_writable.
+
+Mon Apr 21 17:45:27 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* ext/dbm/dbm.c (fdbm_each_value, fdbm_each_key, fdbm_each_pair):
+	  GDBM#{each,each_pair,each_key,each_value}: Return an enumerator
+	  if no block is given.
+
+	* ext/gdbm/gdbm.c (fgdbm_each_value, fgdbm_each_key,
+	  fgdbm_each_pair): GDBM#{each,each_pair,each_key,each_value}:
+	  Return an enumerator if no block is given.
+
+	* ext/openssl/ossl_config.c (ossl_config_each):
+	  OpenSSL::Config#each: Return an enumerator if no block is given.
+
+	* ext/readline/readline.c (hist_each): Readline::HISTORY#each:
+	  Return an enumerator if no block is given.
+
+	* ext/sdbm/init.c (fsdbm_each_value, fsdbm_each_key,
+	  fsdbm_each_pair): SDBM#{each,each_pair,each_key,each_value}:
+	  Return an enumerator if no block is given.
+
+	* ext/stringio/stringio.c (strio_each_byte, strio_each):
+	  StringIO#{each,each_line,each_byte}: Return an enumerator if no
+	  block is given.
+
+	* ext/stringio/stringio.c (Init_stringio): Add #lines and #bytes,
+	  which are aliases to #each_line and #each_byte, respectively.
+
+	* ext/win32ole/win32ole.c (fole_each): WIN32OLE#each: Return an
+	  enumerator if no block is given.
+
+	* ext/zlib/zlib.c (rb_gzreader_each_byte, rb_gzreader_each):
+	  Zlib::GzipReader#{each,each_line,each_byte}: Return an
+	  enumerator if no block is given.
+
+	* ext/zlib/zlib.c (Init_zlib): Add Zlib::GzipReader#lines and
+	  #bytes, which are aliases to #each_line and #each_byte,
+	  respectively.
+
+Mon Apr 21 17:01:44 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* iseq.c (rb_iseq_compile_with_option): check if src is a string.
+	  [ruby-core:16453]
+
+Mon Apr 21 16:06:47 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* enumerator.c (enumerator_init): preserve the method name in ID.
+
+	* enumerator.c (enumerator_each): need not to call rb_to_id().
+
+	* enumerator.c (enumerator_with_index): ditto.
+
+Mon Apr 21 11:00:27 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* compile.c (defined_expr): capture exception during defined?
+	  evaluation.  a patch from wanabe <s.wanabe at gmail.com> in
+	  [ruby-dev:34461].  [ruby-core:16010]
+
+Mon Apr 21 10:06:26 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* time.c: should include <errno.h> to refer errno.
+
+Mon Apr 21 09:58:04 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* time.c (rb_strftime): check errno to detect strftime(3)'s error.
+	  this is workaround for recent version of MSVCRT.
+	  [ruby-dev:34456]
+
+Mon Apr 21 08:54:30 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* gc.c (ruby_xmalloc): use size_t for malloc argument instead of long.
+
+Sun Apr 20 21:00:21 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* enumerator.c, include/ruby/ruby.h: Export rb_cEnumerator.
+
+Sun Apr 20 20:47:50 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* enumerator.c: Resolve the method every time an enumeration
+	  method is run, not once when the enumerator is initialized as it
+	  was before, so that method_missing() and method (re)definition
+	  afterwards are both in effect; pointed out in: [ruby-core:16441]
+
+Sun Apr 20 15:11:00 2008  Tanaka Akira  <akr@fsij.org>
+
+	* io.c (copy_stream_rbuf_to_dst): removed.
+	  (copy_stream_fallback_body): don't bypass write method.
+	  (copy_stream_body): simplified.
+
+Sun Apr 20 15:01:25 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm_core.h (struct iseq_compile_data): moved label_no from
+	  new_label_body().
+
+	* compile.c (iseq_set_exception_table): allocates catch_table only
+	  when entries exist.
+
+	* compile.c (struct iseq_link_element, struct iseq_insn_data): made
+	  enum for debuggers.
+
+Sun Apr 20 14:44:45 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* compile.c (iseq_compile_each): fix for splat in when and rescue.
+	  a patch from wanabe <s.wanabe AT gmail.com> in [ruby-dev:34429].
+	  [ruby-core:14537]
+
+Sun Apr 20 13:55:37 2008  Tanaka Akira  <akr@fsij.org>
+
+	* io.c (copy_stream_fallback): write directly (bypassing write method)
+	  if possible.
+
+Sun Apr 20 12:49:03 2008  Tanaka Akira  <akr@fsij.org>
+
+	* io.c (copy_stream_fallback): read directly (bypassing readpartial
+	  method) if possible.
+
+Sun Apr 20 04:45:13 2008  Tanaka Akira  <akr@fsij.org>
+
+	* io.c (copy_stream_body): use readpartial and write method for
+	  non-IOs such as StringIO and ARGF.
+
+Fri Apr 18 20:57:33 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_array.rb: add tests to achieve over 95% test coverage
+	  of array.c.
+
+Fri Apr 18 17:37:48 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* gc.c (rb_gc_mark_locations): get rid of underflow.
+
+	* gc.c (mark_current_machine_context): check if the main thread stack
+	  position may shrink under the initialized position.  [ruby-core:16436]
+
+Thu Apr 17 22:20:52 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* enc/trans/utf_16_32.c (fun_so_to_utf_16be, fun_so_to_utf_16le): add
+	  parentheses to remove warnings of gcc.
+
+	* io.c (rb_io_getc): remove unused variables.
+
+	* compile.c (NODE_NEXT, NODE_REDO): remove unused labels.
+
+	* ext/nkf/nkf.c (rb_nkf_convert): remove unused variables.
+
+	* ext/syck/rubyext.c (syck_resolver_initialize,
+	  syck_resolver_detect_implicit, syck_emitter_emit): remove unused
+	  variables.
+
+Thu Apr 17 20:12:47 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_rubyoptions.rb (test_search): enable some assertions.
+
+	* test/ruby/test_rubyoptions.rb: flunk message in win32.
+
+Thu Apr 17 16:07:12 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* test/ruby/test_rubyoptions.rb (ruby): run in C locale.
+
+	* test/ruby/test_rubyoptions.rb (test_encoding): --encoding does not
+	  affect source code.
+
+Thu Apr 17 00:45:41 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_process.rb (test_rlimit_nofile): reset RLIMIT_NOFILE
+	  before exit (for gcov).
+
+	* test/ruby/test_rubyoptions.rb: new tests for option of ruby
+	  interpreter, to achieve over 95% test coverage of ruby.c.
+
+Wed Apr 16 02:40:44 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ruby.c (process_options): preludes and parser need to run in safe
+	  level 0.  [ruby-dev:34407]
+
+Wed Apr 16 02:26:27 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ruby.c (process_options): dln_find_file returns the pointer to a
+	  static buffer, so should copy it.  [ruby-dev:34409]
+
+Tue Apr 15 23:08:46 2008  Kouhei Sutou  <kou@cozmixng.org>
+
+	* lib/xmlrpc/client.rb: fix cookie handling. [ruby-dev:34403]
+
+	* test/xmlrpc/test_cookie.rb: add a test for the above fix.
+
+Tue Apr 15 19:20:14 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* io.c: #undef rb_argv moved before #define.
+
+Tue Apr 15 18:02:17 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby/intern.h (rb_argv): replaced with rb_get_argv().
+	  [ruby-Bugs-19514]
+
+Tue Apr 15 17:10:59 2008  Kazuhiro NISHIYAMA  <zn@mbf.nifty.com>
+
+	* lib/net/http.rb, lib/net/smtp.rb, lib/net/pop.rb: update
+	  URLs of Japanese documents.
+
+Tue Apr 15 16:45:14 2008  Kazuhiro NISHIYAMA  <zn@mbf.nifty.com>
+
+	* test/ruby/test_symbol.rb (TestSymbol#test_to_proc): add tests.
+
+Tue Apr 15 15:38:02 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* misc/ruby-mode.el (ruby-encoding-map): added shift-jis for older
+	  versions.
+
+	* misc/ruby-mode.el (ruby-mode-set-encoding):
+	  coding-system-to-mime-charset is not a standard function.
+	  [carbon-emacs:795]
+	  fix for the case that magic comment exists but coding system is
+	  absent.
+
+	* misc/ruby-mode.el (ruby-mode): use write-contents-functions or
+	  write-contents-hooks for older versions.
+
+Tue Apr 15 07:21:21 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* complex.c (nucomp_div): [ruby-dev:34357]
+
+	* complex.c (nucomp_abs): use hypot.
+
+	* complex.c (nucomp_quo): do not force conversion.
+
+	* test/ruby/test_complex.rb: omitted some meaningless tests.
+
+Mon Apr 14 23:25:50 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_objectspace.rb: add a test for
+	  ObjectSpace.count_objects.
+
+Mon Apr 14 22:44:24 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* file.c (SET_EXTERNAL_ENCODING): avoid call rb_enc_check() on
+	  half-baked result string.
+
+	* re.c (rb_reg_search): make search reentrant.  [ruby-dev:34223]
+
+	* test/ruby/test_parse.rb (TestParse::test_global_variable):
+	  should preserve $& variable.
+
+Mon Apr 14 17:23:27 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* hash.c (rb_hash_delete_if, rb_hash_reject_bang, env_delete_if,
+	  env_reject_bang): Return an enumerator if no block is given.
+
+Mon Apr 14 14:33:59 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* compile.c, compile.h (compile_debug): made runtime option.
+
+	* debug.c (ruby_debug_print_indent): returns if debug_level exceeds
+	  the threshold.
+
+	* debug.c (ruby_debug_printf): printf to stderr.
+
+	* iseq.c (make_compile_option, make_compile_option_value): added
+	  debug_level option.
+
+	* vm_core.h (rb_compile_option_t): added debug_level.
+
+	* vm_core.h (struct iseq_compile_data): added node_level.
+
+Mon Apr 14 12:52:25 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* gc.c (Init_stack): use ruby_init_stack.  [ruby-dev:34350]
+
+	* gc.c (rb_objspace_t): packed globals.  [ruby-dev:34348]
+
+	* gc.c (finalizers): removed.  [ruby-dev:34349]
+
+Mon Apr 14 11:30:07 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* array.c (ary_new): new integer overflow check condition.
+	  suggested by TOYOFUKU Chikanobu <nobu_toyofuku at nifty.com> in
+	  [ruby-dev:34156].
+
+	* array.c (rb_ary_initialize): ditto.
+
+Mon Apr 14 00:51:40 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/ruby/test_parse.rb: add tests to achieve over 95% test coverage
+	  of parse.y.
+
+Sun Apr 13 23:53:58 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* enum.c (enum_cycle): Make Enumerable#cycle do a finite loop when
+	  the number of cycles is specified.
+
+	* array.c (rb_ary_cycle): Ditto for Array#cycle.
+
+Sun Apr 13 18:52:27 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* thread_pthread.c (lock_func): should not check interrupts in
+	  blocking region.  [ruby-dev:34378]
+
+Sat Apr 12 12:41:49 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* eval.c (ruby_exec_node, ruby_run_node), ruby.c (process_options):
+	  use iseq instead of NODE.
+
+	* gc.c (source_filenames): removed.
+
+	* include/ruby/intern.h, parse.y (yycompile, parser_mark, parser_free,
+	  ripper_initialize): rb_source_filename() is no longer used.
+
+	* compile.c, compile.h (ERROR_ARGS), parse.y (node_newnode, fixpos,
+	  parser_warn, e_option_supplied, warn_unless_e_option, range_op,
+	  cond0): nd_file is no longer used.
+
+Sat Apr 12 12:17:31 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* prelude.rb (require_relative): move require_relative from
+	  lib/require_relative.rb.  [ruby-core:16356]
+
+	* lib/require_relative.rb: removed.
+
+Sat Apr 12 05:55:57 2008  Eric Hodel  <drbrain@segment7.net>
+
+	* lib/rubygems*, test/rubygems*:  Update to RubyGems 1.1.1 r1701.
+
+Sat Apr 12 03:13:38 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* file.c (file_expand_path): set external encoding.
+
+	* file.c (rb_file_s_basename, rb_file_s_dirname, rb_file_s_extname):
+	  copy encoding.
+
+Fri Apr 11 17:35:06 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* enum.c (count_i): modified to shut warning up.
+
+Fri Apr 11 17:25:09 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* enum.c (count_i, count_iter_i, enum_count, enum_find_index):
+	  Reduce code.
+
+Fri Apr 11 17:06:01 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* enum.c (find_index_i): modified to shut warning up.
+
+	* enum.c (find_index_iter_i): ditto.
+
+Fri Apr 11 16:44:43 2008  Akinori MUSHA  <knu@iDaemons.org>
+
+	* enum.c (enum_find_index): Add support for find_index(obj);
+	  [ruby-dev:34313].
+
+	* array.c (rb_ary_index): Define find_index as an alias to index.
+
+Fri Apr 11 16:42:33 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* lib/yaml/store.rb (YAML::load): modified to support empty
+	  database.
+
 Fri Apr 11 08:05:12 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 	* marshal.c (w_object): add volatile to avoid potential GC bug.  a
@@ -9,9 +3076,9 @@ Thu Apr 10 23:08:52 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
 	* lib/pstore.rb (PStore::dump, PStore::load): allow subclass
 	  overriding.  [ruby-dev:34305]
 
-	* lib/yaml/store.rb (YAML::Store::marshal_dump_supports_canonical_option?): 
+	* lib/yaml/store.rb (YAML::Store::marshal_dump_supports_canonical_option?):
 	  add a method to support faster PStore.
-	
+
 Thu Apr 10 20:36:45 2008  Akinori MUSHA  <knu@iDaemons.org>
 
 	* misc/rdebug.el, misc/README: Remove rdebug.el as per request
@@ -352,82 +3419,82 @@ Sat Mar 29 14:18:41 2008  Hidetoshi NAGAI  <nagai@ai.kyutech.ac.jp>
 
 	* ext/tk/*: full update Ruby/Tk to support Ruby(1.9|1.8) and Tc/Tk8.5.
 
-	* ext/tk/lib/tkextlib/tile.rb: [incompatible] remove TileWidgets' 
+	* ext/tk/lib/tkextlib/tile.rb: [incompatible] remove TileWidgets'
 	  instate/state/identify method to avoid the conflict with standard
 	  widget options. Those methods are renamed to ttk_instate/ttk_state/
-	  ttk_identify (tile_instate/tile_state/tile_identify are available 
-	  too). Although I don't recommend, if you realy need old methods, 
-	  please define "Tk::USE_OBSOLETE_TILE_STATE_METHOD = true" before 
+	  ttk_identify (tile_instate/tile_state/tile_identify are available
+	  too). Although I don't recommend, if you really need old methods,
+	  please define "Tk::USE_OBSOLETE_TILE_STATE_METHOD = true" before
 	  "require 'tkextlib/tile'".
 
 	* ext/tk/lib/tkextlib/tile.rb: "Tk::Tile::__Import_Tile_Widgets__!"
-	  is obsolete. It outputs warning. To control default widget set, 
+	  is obsolete. It outputs warning. To control default widget set,
 	  use "Tk.default_widget_set = :Ttk".
 
-	* ext/tk/lib/tk.rb: __IGNORE_UNKNOWN_CONFIGURE_OPTION__ method and 
-	  __set_IGNORE_UNKNOWN_CONFIGURE_OPTION__!(mode) method are defind 
-	  as module methods of TkConfigMethod. It may help users to wrap old 
+	* ext/tk/lib/tk.rb: __IGNORE_UNKNOWN_CONFIGURE_OPTION__ method and
+	  __set_IGNORE_UNKNOWN_CONFIGURE_OPTION__!(mode) method are defined
+	  as module methods of TkConfigMethod. It may help users to wrap old
 	  Ruby/Tk scripts (use standard widgets) to force to use Ttk widgets.
-	  Ttk widgets don't have some options of standard widgets which are 
-	  control the view of widgets. When set ignore-mode true, configure 
-	  method tries to ignoure such unknown options with no exception. 
-	  Of course, it may raise other troubles on the GUI design. 
-	  So, those are a little danger methods. 
+	  Ttk widgets don't have some options of standard widgets which are
+	  control the view of widgets. When set ignore-mode true, configure
+	  method tries to ignore such unknown options with no exception.
+	  Of course, it may raise other troubles on the GUI design.
+	  So, those are a little danger methods.
 
-	* ext/tk/lib/tk/itemconfig.rb: __IGNORE_UNKNOWN_CONFIGURE_OPTION__ 
-	  method and __set_IGNORE_UNKNOWN_CONFIGURE_OPTION__!(mode) method 
-	  are defind as module methods of TkItemConfigMethod as the same 
+	* ext/tk/lib/tk/itemconfig.rb: __IGNORE_UNKNOWN_CONFIGURE_OPTION__
+	  method and __set_IGNORE_UNKNOWN_CONFIGURE_OPTION__!(mode) method
+	  are defined as module methods of TkItemConfigMethod as the same
 	  purpose as TkConfigMethod's ones.
 
-	* ext/tk/sample/ttk_wrapper.rb: A new example. This is a tool for 
-	  wrapping old Ruby/Tk scripts (which use standard widgets) to use 
+	* ext/tk/sample/ttk_wrapper.rb: A new example. This is a tool for
+	  wrapping old Ruby/Tk scripts (which use standard widgets) to use
 	  Ttk (Tile) widgets as default.
 
-	* ext/tk/sample/tkextlib/tile/demo.rb: use ttk_instate/ttk_state 
+	* ext/tk/sample/tkextlib/tile/demo.rb: use ttk_instate/ttk_state
 	  method instead of instate/state method.
 
 	* ext/tk/lib/tk/root, ext/tk/lib/tk/namespace.rb,
-	  ext/tk/lib/tk/text.rb, ext/tk/lib/tkextlib/*: some 'instance_eval's  
+	  ext/tk/lib/tk/text.rb, ext/tk/lib/tkextlib/*: some 'instance_eval's
 	  are replaced to "instance_exec(self)".
 
-	* ext/tk/lib/tk/event.rb: bug fix on KEY_TBL and PROC_TBL (?x is not 
+	* ext/tk/lib/tk/event.rb: bug fix on KEY_TBL and PROC_TBL (?x is not
 	  a character code on Ruby1.9).
 
-	* ext/tk/lib/tk/variable.rb: support new style of operation argument 
-	  on Tcl/Tk's 'trace' command for variables. 
+	* ext/tk/lib/tk/variable.rb: support new style of operation argument
+	  on Tcl/Tk's 'trace' command for variables.
 
 	* ext/tk/sample/demos-jp/widget, ext/tk/sample/demos-en/widget: bug fix
 
-	* ext/tk/sammple/demos-jp/textpeer.rb, 
-	  ext/tk/sammple/demos-en/textpeer.rb: new widget demo.
+	* ext/tk/sample/demos-jp/textpeer.rb,
+	  ext/tk/sample/demos-en/textpeer.rb: new widget demo.
 
-	* ext/tk/tcltklib.c: decrase SEGV troubles (probably)
+	* ext/tk/tcltklib.c: decrease SEGV troubles (probably)
 
 	* ext/tk/lib/tk.rb: remove Thread.critical access if Ruby1.9
 
 	* ext/tk/lib/tk/multi-tk.rb: support Ruby1.9 (probably)
 
-	* ext/tk/lib/tkextlib/tile.rb: add method to define Tcl/Tk command 
-	  to make Tcl/Tk theme sources (based on different version of Tile 
-	  extension) available. 
-	  (Tk::Tile::__define_LoadImages_proc_for_comaptibility__)
+	* ext/tk/lib/tkextlib/tile.rb: add method to define Tcl/Tk command
+	  to make Tcl/Tk theme sources (based on different version of Tile
+	  extension) available.
+	  (Tk::Tile::__define_LoadImages_proc_for_compatibility__)
 
 	* ext/tk/lib/tk.rb, ext/tk/lib/tk/wm.rb: support dockable frames
-	  (Tcl/Tk8.5 feature). 'wm' command can treat many kinds of widgets 
+	  (Tcl/Tk8.5 feature). 'wm' command can treat many kinds of widgets
 	  as toplevel widgets.
 
 	* ext/tk/lib/tkextlib/tile/style.rb: ditto.
 	  (Tk::Tile::Style.__define_wrapper_proc_for_compatibility__)
 
-	* ext/tk/lib/tk/font.rb: add actual_hash and metrics_hash to get 
-	  properties as a hash. metrics_hash method returns a boolean value 
-	  for 'fixed' option. But metrics method returns numeric value 
-	  (0 or 1) for 'fixed' option, because of backward compatibility. 
+	* ext/tk/lib/tk/font.rb: add actual_hash and metrics_hash to get
+	  properties as a hash. metrics_hash method returns a boolean value
+	  for 'fixed' option. But metrics method returns numeric value
+	  (0 or 1) for 'fixed' option, because of backward compatibility.
 
-	* ext/tk/lib/tk/timer.rb: somtimes fail to set callback procedure.
+	* ext/tk/lib/tk/timer.rb: sometimes fail to set callback procedure.
 
-	* ext/tk/lib/tk.rb: add Tk.sleep and Tk.wakeup method. Tk.sleep 
-	  doesn't block the eventloop. It will be better to use the method 
+	* ext/tk/lib/tk.rb: add Tk.sleep and Tk.wakeup method. Tk.sleep
+	  doesn't block the eventloop. It will be better to use the method
 	  in event callbacks.
 
 	* ext/tk/sample/tksleep_sample.rb: sample script about Tk.sleep.
@@ -566,7 +3633,7 @@ Thu Mar 20 21:20:19 2008  Tadayoshi Funaba  <tadf@dotrb.org>
 	* rational.c: some improvements (include Shin-ichiro HARA's
 	  effort).
 
-	* complex.c: some improvemtns.
+	* complex.c: some improvements.
 
 	* test/ruby/test_rational2.rb: new.
 
@@ -580,7 +3647,7 @@ Thu Mar 20 00:21:12 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 Wed Mar 19 23:52:41 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
-	* io.c (rb_io_putc, rb_io_puts): ouput directly if the reciever is
+	* io.c (rb_io_putc, rb_io_puts): output directly if the receiver is
 	  rb_stdout to get rid of infinite recursion.  [ruby-dev:34059]
 
 Wed Mar 19 22:27:41 2008  Tadayoshi Funaba  <tadf@dotrb.org>
@@ -797,7 +3864,7 @@ Thu Mar 13 14:14:19 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 	* trunk/configure.in (AC_CHECK_HEADERS): stdint.h is not needed to
 	  check.
 
-	* trunk/configure.in (rb_cv_type_uint32_t): unqouted.  [ruby-dev:34030]
+	* trunk/configure.in (rb_cv_type_uint32_t): unquoted.  [ruby-dev:34030]
 
 	* trunk/string.c (hash): use inttypes.h instead of stdint.h.
 
@@ -950,7 +4017,7 @@ Thu Mar  6 17:26:53 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 Thu Mar  6 15:44:20 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
 
 	* sprintf.c (rb_str_format): casting double to long is undefined
-	  if the interger part of double is out of the range of long.
+	  if the integer part of double is out of the range of long.
 
 Thu Mar  6 15:11:40 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
@@ -2015,7 +5082,7 @@ Thu Feb 14 00:02:19 2008  Yusuke Endoh  <mame@tsg.ne.jp>
 	  [ruby-dev:33763]
 
 	* test/ruby/test_proc.rb: add tests to achieve over 70% test coverage
-	  of time.c.
+	  of proc.c.
 
 	* test/ruby/test_method.rb: ditto.
 
@@ -4582,7 +7649,7 @@ Thu Jan  3 21:56:07 2008  Tanaka Akira  <akr@fsij.org>
 
 Thu Jan  3 20:24:48 2008  Koichi Sasada  <ko1@atdot.net>
 
-	* eval_jump.c (rb_f_catch): Restore cfp if catched thrown object.
+	* eval_jump.c (rb_f_catch): Restore cfp if caught thrown object.
 
 Thu Jan  3 19:45:57 2008  Koichi Sasada  <ko1@atdot.net>
 
@@ -20119,7 +23186,7 @@ Tue Jul 18 10:53:37 2006  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 Mon Jul 18 00:43:05 2006  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* util.c (ruby_strtod): stop at dot not followed by digits.
-	  fixed: [ruby-dev:29035]
+	  fixed: [ruby-dev:29036]
 
 Tue Jul 18 00:01:27 2006  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 

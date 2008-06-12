@@ -238,7 +238,7 @@ rb_compile_bug(const char *file, int line, const char *fmt, ...)
     abort();
 }
 
-static struct types {
+static const struct types {
     int type;
     const char *name;
 } builtin_types[] = {
@@ -256,6 +256,8 @@ static struct types {
     {T_STRUCT,	"Struct"},
     {T_BIGNUM,	"Bignum"},
     {T_FILE,	"File"},
+    {T_RATIONAL,"Rational"},
+    {T_COMPLEX, "Complex"},
     {T_TRUE,	"true"},
     {T_FALSE,	"false"},
     {T_SYMBOL,	"Symbol"},	/* :symbol */
@@ -263,20 +265,21 @@ static struct types {
     {T_MATCH,	"MatchData"},	/* data of $~ */
     {T_NODE,	"Node"},	/* internal use: syntax tree node */
     {T_UNDEF,	"undef"},	/* internal use: #undef; should not happen */
-    {-1,	0}
 };
 
 void
 rb_check_type(VALUE x, int t)
 {
-    struct types *type = builtin_types;
+    const struct types *type = builtin_types;
+    const struct types *const typeend = builtin_types +
+	sizeof(builtin_types) / sizeof(builtin_types[0]);
 
     if (x == Qundef) {
 	rb_bug("undef leaked to the Ruby space");
     }
 
     if (TYPE(x) != t) {
-	while (type->type >= 0) {
+	while (type < typeend) {
 	    if (type->type == t) {
 		const char *etype;
 
@@ -332,7 +335,7 @@ VALUE rb_eLoadError;
 
 VALUE rb_eSystemCallError;
 VALUE rb_mErrno;
-static VALUE eNOERROR;
+static VALUE rb_eNOERROR;
 
 VALUE
 rb_exc_new(VALUE etype, const char *ptr, long len)
@@ -493,9 +496,9 @@ exc_inspect(VALUE exc)
 static VALUE
 exc_backtrace(VALUE exc)
 {
-    static ID bt;
+    ID bt;
 
-    if (!bt) bt = rb_intern("bt");
+    CONST_ID(bt, "bt");
     return rb_attr_get(exc, bt);
 }
 
@@ -503,7 +506,7 @@ VALUE
 rb_check_backtrace(VALUE bt)
 {
     long i;
-    static const char *err = "backtrace must be Array of String";
+    static const char err[] = "backtrace must be Array of String";
 
     if (!NIL_P(bt)) {
 	int t = TYPE(bt);
@@ -549,11 +552,12 @@ exc_set_backtrace(VALUE exc, VALUE bt)
 static VALUE
 exc_equal(VALUE exc, VALUE obj)
 {
-    ID id_mesg = rb_intern("mesg");
+    ID id_mesg;
 
     if (exc == obj) return Qtrue;
     if (rb_obj_class(exc) != rb_obj_class(obj))
-	return Qfalse;
+	return rb_equal(obj, exc);
+    CONST_ID(id_mesg, "mesg");
     if (!rb_equal(rb_attr_get(exc, id_mesg), rb_attr_get(obj, id_mesg)))
 	return Qfalse;
     if (!rb_equal(exc_backtrace(exc), exc_backtrace(obj)))
@@ -960,18 +964,18 @@ static VALUE
 syserr_eqq(VALUE self, VALUE exc)
 {
     VALUE num, e;
+    ID en;
 
-    if (!rb_obj_is_kind_of(exc, rb_eSystemCallError)) return Qfalse;
-    if (self == rb_eSystemCallError) return Qtrue;
+    CONST_ID(en, "errno");
+
+    if (!rb_obj_is_kind_of(exc, rb_eSystemCallError)) {
+	if (!rb_respond_to(exc, en)) return Qfalse;
+    }
+    else if (self == rb_eSystemCallError) return Qtrue;
 
     num = rb_attr_get(exc, rb_intern("errno"));
     if (NIL_P(num)) {
-	VALUE klass = CLASS_OF(exc);
-
-	while (TYPE(klass) == T_ICLASS || FL_TEST(klass, FL_SINGLETON)) {
-	    klass = (VALUE)RCLASS_SUPER(klass);
-	}
-	num = rb_const_get(klass, rb_intern("Errno"));
+	num = rb_funcall(exc, en, 0, 0);
     }
     e = rb_const_get(self, rb_intern("Errno"));
     if (FIXNUM_P(num) ? num == e : rb_equal(num, e))
@@ -988,7 +992,7 @@ syserr_eqq(VALUE self, VALUE exc)
 static VALUE
 errno_missing(VALUE self, VALUE id)
 {
-    return eNOERROR;
+    return rb_eNOERROR;
 }
 
 /*
@@ -1533,7 +1537,7 @@ Init_syserr(void)
 #ifdef EDQUOT
     set_syserr(EDQUOT, "EDQUOT");
 #endif
-    eNOERROR = set_syserr(0, "NOERROR");
+    rb_eNOERROR = set_syserr(0, "NOERROR");
 }
 
 static void

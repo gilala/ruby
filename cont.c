@@ -158,8 +158,7 @@ cont_new(VALUE klass)
     volatile VALUE contval;
     rb_thread_t *th = GET_THREAD();
 
-    contval = Data_Make_Struct(klass, rb_context_t,
-			       cont_mark, cont_free, cont);
+    contval = Data_Make_Struct(klass, rb_context_t, cont_mark, cont_free, cont);
 
     cont->self = contval;
     cont->alive = Qtrue;
@@ -323,7 +322,7 @@ cont_restore_0(rb_context_t *cont, VALUE *addr_in_prev_frame)
 #else
 	if (addr_in_prev_frame > &space[0]) {
 	    /* Stack grows downward */
-	    if (addr_in_prev_frame > cont->saved_thread.machine_stack_size) {
+	    if (addr_in_prev_frame > cont->machine_stack_src) {
 		cont_restore_0(cont, &space[0]);
 	    }
 	}

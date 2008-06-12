@@ -1,18 +1,18 @@
 /**********************************************************************
 
-  ruby.h -
+  ruby/ruby.h -
 
   $Author$
   created at: Thu Jun 10 14:26:32 JST 1993
 
-  Copyright (C) 1993-2007 Yukihiro Matsumoto
+  Copyright (C) 1993-2008 Yukihiro Matsumoto
   Copyright (C) 2000  Network Applied Communication Laboratory, Inc.
   Copyright (C) 2000  Information-technology Promotion Agency, Japan
 
 **********************************************************************/
 
-#ifndef RUBY_H
-#define RUBY_H 1
+#ifndef RUBY_RUBY_H
+#define RUBY_RUBY_H 1
 
 #if defined(__cplusplus)
 extern "C" {
@@ -21,9 +21,11 @@ extern "C" {
 #endif
 #endif
 
+#ifndef RUBY_LIB
 #include "ruby/config.h"
 #ifdef RUBY_EXTCONF_H
 #include RUBY_EXTCONF_H
+#endif
 #endif
 
 #define NORETURN_STYLE_NEW 1
@@ -85,12 +87,24 @@ typedef unsigned long VALUE;
 typedef unsigned long ID;
 # define SIGNED_VALUE long
 # define SIZEOF_VALUE SIZEOF_LONG
+# define PRIdVALUE "ld"
+# define PRIiVALUE "li"
+# define PRIoVALUE "lo"
+# define PRIuVALUE "lu"
+# define PRIxVALUE "lx"
+# define PRIXVALUE "lX"
 #elif SIZEOF_LONG_LONG == SIZEOF_VOIDP
 typedef unsigned LONG_LONG VALUE;
 typedef unsigned LONG_LONG ID;
 # define SIGNED_VALUE LONG_LONG
 # define LONG_LONG_VALUE 1
 # define SIZEOF_VALUE SIZEOF_LONG_LONG
+# define PRIdVALUE "lld"
+# define PRIiVALUE "lli"
+# define PRIoVALUE "llo"
+# define PRIuVALUE "llu"
+# define PRIxVALUE "llx"
+# define PRIXVALUE "llX"
 #else
 # error ---->> ruby requires sizeof(void*) == sizeof(long) to be compiled. <<----
 #endif
@@ -171,6 +185,14 @@ VALUE rb_ull2inum(unsigned LONG_LONG);
 # define OFFT2NUM(v) INT2NUM(v)
 #endif
 
+#if SIZEOF_SIZE_T > SIZEOF_LONG && defined(HAVE_LONG_LONG)
+# define SIZET2NUM(v) ULL2NUM(v)
+#elif SIZEOF_SIZE_T == SIZEOF_LONG
+# define SIZET2NUM(v) ULONG2NUM(v)
+#else
+# define SIZET2NUM(v) UINT2NUM(v)
+#endif
+
 #ifndef PIDT2NUM
 #define PIDT2NUM(v) LONG2NUM(v)
 #endif
@@ -193,7 +215,7 @@ VALUE rb_ull2inum(unsigned LONG_LONG);
 #define FIX2LONG(x) RSHIFT((SIGNED_VALUE)x,1)
 #define FIX2ULONG(x) ((((VALUE)(x))>>1)&LONG_MAX)
 #define FIXNUM_P(f) (((SIGNED_VALUE)(f))&FIXNUM_FLAG)
-#define POSFIXABLE(f) ((f) <= FIXNUM_MAX)
+#define POSFIXABLE(f) ((f) < FIXNUM_MAX+1)
 #define NEGFIXABLE(f) ((f) >= FIXNUM_MIN)
 #define FIXABLE(f) (POSFIXABLE(f) && NEGFIXABLE(f))
 
@@ -231,65 +253,61 @@ enum ruby_special_consts {
 
 enum ruby_value_type {
     RUBY_T_NONE   = 0x00,
-#define T_NONE   RUBY_T_NONE
 
-    RUBY_T_NIL    = 0x01,
-#define T_NIL    RUBY_T_NIL
-    RUBY_T_OBJECT = 0x02,
-#define T_OBJECT RUBY_T_OBJECT
-    RUBY_T_CLASS  = 0x03,
-#define T_CLASS  RUBY_T_CLASS
-    RUBY_T_ICLASS = 0x04,
-#define T_ICLASS RUBY_T_ICLASS
-    RUBY_T_MODULE = 0x05,
-#define T_MODULE RUBY_T_MODULE
-    RUBY_T_FLOAT  = 0x06,
-#define T_FLOAT  RUBY_T_FLOAT
-    RUBY_T_STRING = 0x07,
-#define T_STRING RUBY_T_STRING
-    RUBY_T_REGEXP = 0x08,
-#define T_REGEXP RUBY_T_REGEXP
-    RUBY_T_ARRAY  = 0x09,
-#define T_ARRAY  RUBY_T_ARRAY
-    RUBY_T_FIXNUM = 0x0a,
-#define T_FIXNUM RUBY_T_FIXNUM
-    RUBY_T_HASH   = 0x0b,
-#define T_HASH   RUBY_T_HASH
-    RUBY_T_STRUCT = 0x0c,
-#define T_STRUCT RUBY_T_STRUCT
-    RUBY_T_BIGNUM = 0x0d,
-#define T_BIGNUM RUBY_T_BIGNUM
-    RUBY_T_FILE   = 0x0e,
-#define T_FILE   RUBY_T_FILE
+    RUBY_T_OBJECT = 0x01,
+    RUBY_T_CLASS  = 0x02,
+    RUBY_T_MODULE = 0x03,
+    RUBY_T_FLOAT  = 0x04,
+    RUBY_T_STRING = 0x05,
+    RUBY_T_REGEXP = 0x06,
+    RUBY_T_ARRAY  = 0x07,
+    RUBY_T_HASH   = 0x08,
+    RUBY_T_STRUCT = 0x09,
+    RUBY_T_BIGNUM = 0x0a,
+    RUBY_T_FILE   = 0x0b,
+    RUBY_T_DATA   = 0x0c,
+    RUBY_T_MATCH  = 0x0d,
+    RUBY_T_COMPLEX  = 0x0e,
+    RUBY_T_RATIONAL = 0x0f,
 
-    RUBY_T_TRUE   = 0x10,
-#define T_TRUE   RUBY_T_TRUE
-    RUBY_T_FALSE  = 0x11,
-#define T_FALSE  RUBY_T_FALSE
-    RUBY_T_DATA   = 0x12,
-#define T_DATA   RUBY_T_DATA
-    RUBY_T_MATCH  = 0x13,
-#define T_MATCH  RUBY_T_MATCH
+    RUBY_T_NIL    = 0x11,
+    RUBY_T_TRUE   = 0x12,
+    RUBY_T_FALSE  = 0x13,
     RUBY_T_SYMBOL = 0x14,
-#define T_SYMBOL RUBY_T_SYMBOL
+    RUBY_T_FIXNUM = 0x15,
 
-    RUBY_T_RATIONAL = 0x15,
-#define T_RATIONAL RUBY_T_RATIONAL
-    RUBY_T_COMPLEX = 0x16,
-#define T_COMPLEX RUBY_T_COMPLEX
-
-    RUBY_T_VALUES = 0x1a,
-#define T_VALUES RUBY_T_VALUES
-    RUBY_T_BLOCK  = 0x1b,
-#define T_BLOCK  RUBY_T_BLOCK
-    RUBY_T_UNDEF  = 0x1c,
-#define T_UNDEF  RUBY_T_UNDEF
-    RUBY_T_NODE   = 0x1f,
-#define T_NODE   RUBY_T_NODE
+    RUBY_T_UNDEF  = 0x1b,
+    RUBY_T_NODE   = 0x1c,
+    RUBY_T_ICLASS = 0x1d,
 
     RUBY_T_MASK   = 0x1f,
-#define T_MASK   RUBY_T_MASK
 };
+
+#define T_NONE   RUBY_T_NONE
+#define T_NIL    RUBY_T_NIL
+#define T_OBJECT RUBY_T_OBJECT
+#define T_CLASS  RUBY_T_CLASS
+#define T_ICLASS RUBY_T_ICLASS
+#define T_MODULE RUBY_T_MODULE
+#define T_FLOAT  RUBY_T_FLOAT
+#define T_STRING RUBY_T_STRING
+#define T_REGEXP RUBY_T_REGEXP
+#define T_ARRAY  RUBY_T_ARRAY
+#define T_HASH   RUBY_T_HASH
+#define T_STRUCT RUBY_T_STRUCT
+#define T_BIGNUM RUBY_T_BIGNUM
+#define T_FILE   RUBY_T_FILE
+#define T_FIXNUM RUBY_T_FIXNUM
+#define T_TRUE   RUBY_T_TRUE
+#define T_FALSE  RUBY_T_FALSE
+#define T_DATA   RUBY_T_DATA
+#define T_MATCH  RUBY_T_MATCH
+#define T_SYMBOL RUBY_T_SYMBOL
+#define T_RATIONAL RUBY_T_RATIONAL
+#define T_COMPLEX RUBY_T_COMPLEX
+#define T_UNDEF  RUBY_T_UNDEF
+#define T_NODE   RUBY_T_NODE
+#define T_MASK   RUBY_T_MASK
 
 #define BUILTIN_TYPE(x) (((struct RBasic*)(x))->flags & T_MASK)
 
@@ -366,6 +384,12 @@ unsigned LONG_LONG rb_num2ull(VALUE);
 # define NUM2OFFT(x) NUM2LONG(x)
 #endif
 
+#if defined(HAVE_LONG_LONG) && SIZEOF_SIZE_T > SIZEOF_LONG
+# define NUM2SIZET(x) ((size_t)NUM2ULL(x))
+#else
+# define NUM2SIZET(x) NUM2ULONG(x)
+#endif
+
 double rb_num2dbl(VALUE);
 #define NUM2DBL(x) rb_num2dbl((VALUE)(x))
 
@@ -425,13 +449,6 @@ struct RObject {
     ((RBASIC(o)->flags & ROBJECT_EMBED) ? \
      RCLASS_IV_INDEX_TBL(rb_obj_class(o)) : \
      ROBJECT(o)->as.heap.iv_index_tbl)
-
-struct RValues {
-    struct RBasic basic;
-    VALUE v1;
-    VALUE v2;
-    VALUE v3;
-};
 
 typedef struct {
     VALUE super;
@@ -620,6 +637,7 @@ struct RBignum {
      (long)((RBASIC(b)->flags >> RBIGNUM_EMBED_LEN_SHIFT) & \
             (RBIGNUM_EMBED_LEN_MASK >> RBIGNUM_EMBED_LEN_SHIFT)) : \
      RBIGNUM(b)->as.heap.len)
+/* LSB:RBIGNUM_DIGITS(b)[0], MSB:RBIGNUM_DIGITS(b)[RBIGNUM_LEN(b)-1] */
 #define RBIGNUM_DIGITS(b) \
     ((RBASIC(b)->flags & RBIGNUM_EMBED_FLAG) ? \
      RBIGNUM(b)->as.ary : \
@@ -641,7 +659,6 @@ struct RBignum {
 #define RFILE(obj)   (R_CAST(RFile)(obj))
 #define RRATIONAL(obj) (R_CAST(RRational)(obj))
 #define RCOMPLEX(obj) (R_CAST(RComplex)(obj))
-#define RVALUES(obj) (R_CAST(RValues)(obj))
 
 #define FL_SINGLETON FL_USER0
 #define FL_MARK      (((VALUE)1)<<5)
@@ -747,22 +764,26 @@ const char *rb_id2name(ID);
 ID rb_to_id(VALUE);
 VALUE rb_id2str(ID);
 
+#define CONST_ID_CACHE(result, str)			\
+    {							\
+	static ID rb_intern_id_cache;			\
+	if (!rb_intern_id_cache)			\
+	    rb_intern_id_cache = rb_intern2(str, strlen(str));	\
+	result rb_intern_id_cache;			\
+    }
+#define CONST_ID(var, str) \
+    do CONST_ID_CACHE(var =, str) while (0)
 #ifdef __GNUC__
 /* __builtin_constant_p and statement expression is available
  * since gcc-2.7.2.3 at least. */
 #define rb_intern(str) \
     (__builtin_constant_p(str) ? \
-        ({ \
-            static ID rb_intern_id_cache; \
-            if (!rb_intern_id_cache) \
-                rb_intern_id_cache = rb_intern(str); \
-            rb_intern_id_cache; \
-        }) : \
+        (CONST_ID_CACHE(/**/, str)) : \
         rb_intern(str))
 #endif
 
-char *rb_class2name(VALUE);
-char *rb_obj_classname(VALUE);
+const char *rb_class2name(VALUE);
+const char *rb_obj_classname(VALUE);
 
 void rb_p(VALUE);
 
@@ -782,7 +803,10 @@ VALUE rb_iv_set(VALUE, const char*, VALUE);
 
 VALUE rb_equal(VALUE,VALUE);
 
-RUBY_EXTERN VALUE ruby_verbose, ruby_debug;
+VALUE *rb_ruby_verbose_ptr(void);
+VALUE *rb_ruby_debug_ptr(void);
+#define ruby_verbose (*rb_ruby_verbose_ptr())
+#define ruby_debug   (*rb_ruby_debug_ptr())
 
 PRINTF_ARGS(NORETURN(void rb_raise(VALUE, const char*, ...)), 2, 3);
 PRINTF_ARGS(NORETURN(void rb_fatal(const char*, ...)), 1, 2);
@@ -805,7 +829,7 @@ typedef VALUE rb_block_call_func(VALUE, VALUE, int, VALUE*);
 VALUE rb_each(VALUE);
 VALUE rb_yield(VALUE);
 VALUE rb_yield_values(int n, ...);
-VALUE rb_yield_values2(int n, VALUE *argv);
+VALUE rb_yield_values2(int n, const VALUE *argv);
 VALUE rb_yield_splat(VALUE);
 int rb_block_given_p(void);
 void rb_need_block(void);
@@ -823,15 +847,13 @@ VALUE rb_require(const char*);
 
 #ifdef __ia64
 void ruby_init_stack(VALUE*, void*);
-#define RUBY_INIT_STACK \
-    VALUE variable_in_this_stack_frame; \
-    ruby_init_stack(&variable_in_this_stack_frame, rb_ia64_bsp());
+#define ruby_init_stack(addr) ruby_init_stack(addr, rb_ia64_bsp())
 #else
 void ruby_init_stack(VALUE*);
+#endif
 #define RUBY_INIT_STACK \
     VALUE variable_in_this_stack_frame; \
     ruby_init_stack(&variable_in_this_stack_frame);
-#endif
 void ruby_init(void);
 void *ruby_options(int, char**);
 int ruby_run_node(void *);
@@ -856,6 +878,7 @@ RUBY_EXTERN VALUE rb_cCont;
 RUBY_EXTERN VALUE rb_cDir;
 RUBY_EXTERN VALUE rb_cData;
 RUBY_EXTERN VALUE rb_cFalseClass;
+RUBY_EXTERN VALUE rb_cEnumerator;
 RUBY_EXTERN VALUE rb_cFile;
 RUBY_EXTERN VALUE rb_cFixnum;
 RUBY_EXTERN VALUE rb_cFloat;
@@ -1052,4 +1075,4 @@ unsigned long ruby_strtoul(const char *str, char **endptr, int base);
 #endif
 }  /* extern "C" { */
 #endif
-#endif /* RUBY_H */
+#endif /* RUBY_RUBY_H */

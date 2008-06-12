@@ -51,16 +51,7 @@ class TestNumeric < Test::Unit::TestCase
   end
 
   def test_quo
-    DummyNumeric.class_eval do
-      def /(x); :div; end
-    end
-
-    assert_equal(:div, DummyNumeric.new.quo(0))
-
-  ensure
-    DummyNumeric.class_eval do
-      remove_method :/
-    end
+    assert_raise(ArgumentError) {DummyNumeric.new.quo(1)}
   end
 
   def test_divmod
@@ -69,9 +60,9 @@ class TestNumeric < Test::Unit::TestCase
       def %(x); :mod; end
     end
 
-    assert_equal(42, DummyNumeric.new.div(0))
-    assert_equal(:mod, DummyNumeric.new.modulo(0))
-    assert_equal([42, :mod], DummyNumeric.new.divmod(0))
+    assert_equal(42, DummyNumeric.new.div(1))
+    assert_equal(:mod, DummyNumeric.new.modulo(1))
+    assert_equal([42, :mod], DummyNumeric.new.divmod(1))
 
     assert_kind_of(Integer, 11.divmod(3.5).first, '[ruby-dev:34006]')
 
@@ -210,9 +201,9 @@ class TestNumeric < Test::Unit::TestCase
 
   def test_num2long
     assert_raise(TypeError) { 1 & nil }
-    assert_equal(1, 1 & 1.0)
-    assert_equal(0, 1 & 2147483648.0)
-    assert_equal(0, 1 & 9223372036854777856.0)
+    assert_raise(TypeError) { 1 & 1.0 }
+    assert_raise(TypeError) { 1 & 2147483648.0 }
+    assert_raise(TypeError) { 1 & 9223372036854777856.0 }
     o = Object.new
     def o.to_int; 1; end
     assert_equal(1, 1 & o)

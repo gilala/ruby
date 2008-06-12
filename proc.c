@@ -50,7 +50,6 @@ proc_mark(void *ptr)
 	proc = ptr;
 	RUBY_MARK_UNLESS_NULL(proc->envval);
 	RUBY_MARK_UNLESS_NULL(proc->blockprocval);
-	RUBY_MARK_UNLESS_NULL((VALUE)proc->special_cref_stack);
 	RUBY_MARK_UNLESS_NULL(proc->block.proc);
 	RUBY_MARK_UNLESS_NULL(proc->block.self);
 	if (proc->block.iseq && RUBY_VM_IFUNC_P(proc->block.iseq)) {
@@ -93,8 +92,7 @@ proc_dup(VALUE self)
     dst->block = src->block;
     dst->block.proc = procval;
     dst->envval = src->envval;
-    dst->safe_level = dst->safe_level;
-    dst->special_cref_stack = src->special_cref_stack;
+    dst->safe_level = src->safe_level;
     dst->is_lambda = src->is_lambda;
 
     return procval;
@@ -241,7 +239,6 @@ binding_mark(void *ptr)
     if (ptr) {
 	bind = ptr;
 	RUBY_MARK_UNLESS_NULL(bind->env);
-	RUBY_MARK_UNLESS_NULL((VALUE)bind->cref_stack);
     }
     RUBY_MARK_LEAVE("binding");
 }
@@ -251,8 +248,7 @@ binding_alloc(VALUE klass)
 {
     VALUE obj;
     rb_binding_t *bind;
-    obj = Data_Make_Struct(klass, rb_binding_t,
-			   binding_mark, binding_free, bind);
+    obj = Data_Make_Struct(klass, rb_binding_t, binding_mark, binding_free, bind);
     return obj;
 }
 
@@ -264,7 +260,6 @@ binding_dup(VALUE self)
     GetBindingPtr(self, src);
     GetBindingPtr(bindval, dst);
     dst->env = src->env;
-    dst->cref_stack = src->cref_stack;
     return bindval;
 }
 
@@ -280,13 +275,16 @@ VALUE
 rb_binding_new(void)
 {
     rb_thread_t *th = GET_THREAD();
-    rb_control_frame_t *cfp = vm_get_ruby_level_cfp(th, th->cfp);
+    rb_control_frame_t *cfp = vm_get_ruby_level_caller_cfp(th, th->cfp);
     VALUE bindval = binding_alloc(rb_cBinding);
     rb_binding_t *bind;
 
+    if (cfp == 0) {
+	rb_raise(rb_eRuntimeError, "Can't create Binding Object on top of Fiber.");
+    }
+
     GetBindingPtr(bindval, bind);
     bind->env = vm_make_env_object(th, cfp);
-    bind->cref_stack = ruby_cref();
     return bindval;
 }
 
@@ -496,7 +494,7 @@ proc_call(int argc, VALUE *argv, VALUE procval)
     rb_block_t *blockptr = 0;
     GetProcPtr(procval, proc);
 
-    if (BUILTIN_TYPE(proc->block.iseq) != T_NODE &&
+    if (BUILTIN_TYPE(proc->block.iseq) == T_NODE ||
 	proc->block.iseq->arg_block != -1) {
 
 	if (rb_block_given_p()) {
@@ -519,6 +517,20 @@ rb_proc_call(VALUE self, VALUE args)
     GetProcPtr(self, proc);
     return vm_invoke_proc(GET_THREAD(), proc, proc->block.self,
 			  RARRAY_LEN(args), RARRAY_PTR(args), 0);
+}
+
+VALUE
+rb_proc_call_with_block(VALUE self, int argc, VALUE *argv, VALUE pass_procval)
+{
+    rb_proc_t *proc, *pass_proc = 0;
+    GetProcPtr(self, proc);
+
+    if (!NIL_P(pass_procval)) {
+	GetProcPtr(pass_procval, pass_proc);
+    }
+
+    return vm_invoke_proc(GET_THREAD(), proc, proc->block.self,
+			  argc, argv, &pass_proc->block);
 }
 
 /*
@@ -666,7 +678,7 @@ proc_to_s(VALUE self)
 {
     VALUE str = 0;
     rb_proc_t *proc;
-    char *cname = rb_obj_classname(self);
+    const char *cname = rb_obj_classname(self);
     rb_iseq_t *iseq;
     const char *is_lambda;
     
@@ -874,8 +886,7 @@ method_unbind(VALUE obj)
 
     Data_Get_Struct(obj, struct METHOD, orig);
     method =
-	Data_Make_Struct(rb_cUnboundMethod, struct METHOD, bm_mark, free,
-			 data);
+	Data_Make_Struct(rb_cUnboundMethod, struct METHOD, bm_mark, -1, data);
     data->oclass = orig->oclass;
     data->recv = Qundef;
     data->id = orig->id;
@@ -905,7 +916,7 @@ method_receiver(VALUE obj)
 
 /*
  *  call-seq:
- *     meth.name    => string
+ *     meth.name    => symbol
  *  
  *  Returns the name of the method.
  */
@@ -916,7 +927,7 @@ method_name(VALUE obj)
     struct METHOD *data;
 
     Data_Get_Struct(obj, struct METHOD, data);
-    return rb_str_dup(rb_id2str(data->id));
+    return ID2SYM(data->id);
 }
 
 /*
@@ -1140,8 +1151,7 @@ method_clone(VALUE self)
     struct METHOD *orig, *data;
 
     Data_Get_Struct(self, struct METHOD, orig);
-    clone =
-	Data_Make_Struct(CLASS_OF(self), struct METHOD, bm_mark, free, data);
+    clone = Data_Make_Struct(CLASS_OF(self), struct METHOD, bm_mark, -1, data);
     CLONESETUP(clone, self);
     *data = *orig;
 
@@ -1181,10 +1191,13 @@ rb_method_call(int argc, VALUE *argv, VALUE method)
 	}
     }
     if ((state = EXEC_TAG()) == 0) {
-	PASS_PASSED_BLOCK();
-	result = vm_call0(GET_THREAD(),
-			  data->oclass, data->recv, data->id, data->oid,
-			  argc, argv, data->body, 0);
+	rb_thread_t *th = GET_THREAD();
+	VALUE rb_vm_call(rb_thread_t * th, VALUE klass, VALUE recv, VALUE id, ID oid,
+			 int argc, const VALUE *argv, const NODE *body, int nosuper);
+
+	PASS_PASSED_BLOCK_TH(th);
+	result = rb_vm_call(th, data->oclass, data->recv, data->id, data->oid,
+			    argc, argv, data->body, 0);
     }
     POP_TAG();
     if (safe >= 0)
@@ -1302,7 +1315,7 @@ umethod_bind(VALUE method, VALUE recv)
 	}
     }
 
-    method = Data_Make_Struct(rb_cMethod, struct METHOD, bm_mark, free, bound);
+    method = Data_Make_Struct(rb_cMethod, struct METHOD, bm_mark, -1, bound);
     *bound = *data;
     bound->recv = recv;
     bound->rclass = CLASS_OF(recv);
@@ -1420,7 +1433,7 @@ method_inspect(VALUE method)
     struct METHOD *data;
     VALUE str;
     const char *s;
-    char *sharp = "#";
+    const char *sharp = "#";
 
     Data_Get_Struct(method, struct METHOD, data);
     str = rb_str_buf_new2("#<");
@@ -1587,11 +1600,10 @@ proc_binding(VALUE self)
     }
 
     bind->env = proc->envval;
-    bind->cref_stack = proc->special_cref_stack;
     return bindval;
 }
 
-static VALUE curry(VALUE dummy, VALUE args, int argc, VALUE *argv);
+static VALUE curry(VALUE dummy, VALUE args, int argc, VALUE *argv, VALUE passed_proc);
 
 static VALUE
 make_curry_proc(VALUE proc, VALUE passed, VALUE arity)
@@ -1607,7 +1619,7 @@ make_curry_proc(VALUE proc, VALUE passed, VALUE arity)
 }
 
 static VALUE
-curry(VALUE dummy, VALUE args, int argc, VALUE *argv)
+curry(VALUE dummy, VALUE args, int argc, VALUE *argv, VALUE passed_proc)
 {
     VALUE proc, passed, arity;
     proc = RARRAY_PTR(args)[0];
@@ -1616,12 +1628,17 @@ curry(VALUE dummy, VALUE args, int argc, VALUE *argv)
 
     passed = rb_ary_plus(passed, rb_ary_new4(argc, argv));
     rb_ary_freeze(passed);
+
     if(RARRAY_LEN(passed) < FIX2INT(arity)) {
+	if (!NIL_P(passed_proc)) {
+	    rb_warn("given block not used");
+	}
 	arity = make_curry_proc(proc, passed, arity);
 	return arity;
     }
-    arity = rb_proc_call(proc, passed);
-    return arity;
+    else {
+	return rb_proc_call_with_block(proc, RARRAY_LEN(passed), RARRAY_PTR(passed), passed_proc);
+    }
 }
 
  /*

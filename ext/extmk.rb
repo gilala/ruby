@@ -348,9 +348,9 @@ $ruby << " -I'$(topdir)'"
 unless CROSS_COMPILING
   $ruby << " -I'$(top_srcdir)/lib'"
   $ruby << " -I'$(extout)/$(arch)' -I'$(extout)/common'" if $extout
-  $ruby << " -I'$(top_srcdir)/ext' -rpurelib.rb"
+  $ruby << " -I./- -I'$(top_srcdir)/ext' -rpurelib.rb"
   ENV["RUBYLIB"] = "-"
-  ENV["RUBYOPT"] = "-rpurelib.rb"
+  ENV["RUBYOPT"] = "-r#{File.expand_path('ext/purelib.rb', $top_srcdir)}"
 end
 $config_h = '$(arch_hdrdir)/ruby/config.h'
 $mflags << "ruby=#$ruby"
@@ -399,13 +399,19 @@ if $extension
 else
   withes, withouts = %w[--with --without].collect {|w|
     if not (w = %w[-extensions -ext].collect {|o|arg_config(w+o)}).any?
-      proc {false}
+      nil
     elsif (w = w.grep(String)).empty?
       proc {true}
     else
       proc {|c1| w.collect {|o| o.split(/,/)}.flatten.any?(&c1)}
     end
   }
+  if withes
+    withouts ||= proc {true}
+  else
+    withes = proc {false}
+    withouts ||= withes
+  end
   cond = proc {|ext, *|
     cond1 = proc {|n| File.fnmatch(n, ext)}
     withes.call(cond1) or !withouts.call(cond1)

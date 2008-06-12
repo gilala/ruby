@@ -18,6 +18,8 @@
 void
 Init_id(void)
 {
+#undef rb_intern
+
     /* Symbols */
     symIFUNC = ID2SYM(rb_intern("<IFUNC>"));
     symCFUNC = ID2SYM(rb_intern("<CFUNC>"));
@@ -63,4 +65,7 @@ Init_id(void)
 
     idSend = rb_intern("send");
     id__send__ = rb_intern("__send__");
+
+    idRespond_to = rb_intern("respond_to?");
+    idInitialize = rb_intern("initialize");
 }

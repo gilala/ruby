@@ -163,7 +163,7 @@ class TestBignum < Test::Unit::TestCase
 
   def test_to_s2
     assert_raise(ArgumentError) { T31P.to_s(37) }
-    assert_equal(32768, (10**32768-1).to_s.size)
+    assert_equal("9" * 32768, (10**32768-1).to_s)
     assert_raise(RangeError) { Process.wait(1, T64P) }
     assert_equal("0", T_ZERO.to_s)
     assert_equal("1", T_ONE.to_s)
@@ -236,6 +236,7 @@ class TestBignum < Test::Unit::TestCase
   def test_div
     assert_equal(T32.to_f, T32 / 1.0)
     assert_raise(TypeError) { T32 / "foo" }
+    assert_equal(0x20000000, 0x40000001.div(2.0), "[ruby-dev:34553]")
   end
 
   def test_idiv
@@ -262,14 +263,14 @@ class TestBignum < Test::Unit::TestCase
     assert_equal(T32.to_f, T32.quo(1.0))
     assert_equal(T32.to_f, T32.quo(T_ONE))
 
-    assert_raise(ArgumentError) { T32.quo("foo") }
+    assert_raise(TypeError) { T32.quo("foo") }
 
     assert_equal(1024**1024, (1024**1024).quo(1))
     assert_equal(1024**1024, (1024**1024).quo(1.0))
     assert_equal(1024**1024*2, (1024**1024*2).quo(1))
     inf = 1 / 0.0; nan = inf / inf
 
-    assert_raise(FloatDomainError) { (1024**1024*2).quo(nan) }
+    assert((1024**1024*2).quo(nan).nan?)
   end
 
   def test_pow

@@ -1,6 +1,5 @@
 require 'test/unit'
 require 'tempfile'
-require 'require_relative'
 require_relative 'ut_eof'
 
 class TestFile < Test::Unit::TestCase
@@ -116,4 +115,7 @@ class TestFile < Test::Unit::TestCase
     }
   end
 
+  def test_uninitialized
+    assert_raise(TypeError) { File::Stat.allocate.readable? }
+  end
 end

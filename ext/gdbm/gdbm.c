@@ -110,7 +110,7 @@ free_dbm(struct dbmdata *dbmp)
 {
     if (dbmp) {
         if (dbmp->di_dbm) gdbm_close(dbmp->di_dbm);
-        free(dbmp);
+        xfree(dbmp);
     }
 }
 
@@ -801,6 +801,8 @@ fgdbm_each_value(VALUE obj)
     GDBM_FILE dbm;
     VALUE keystr;
 
+    RETURN_ENUMERATOR(obj, 0, 0);
+
     GetDBM2(obj, dbmp, dbm);
     for (keystr = rb_gdbm_firstkey(dbm); RTEST(keystr);
          keystr = rb_gdbm_nextkey(dbm, keystr)) {
@@ -825,6 +827,8 @@ fgdbm_each_key(VALUE obj)
     GDBM_FILE dbm;
     VALUE keystr;
 
+    RETURN_ENUMERATOR(obj, 0, 0);
+
     GetDBM2(obj, dbmp, dbm);
     for (keystr = rb_gdbm_firstkey(dbm); RTEST(keystr);
          keystr = rb_gdbm_nextkey(dbm, keystr)) {
@@ -848,6 +852,8 @@ fgdbm_each_pair(VALUE obj)
     GDBM_FILE dbm;
     struct dbmdata *dbmp;
     VALUE keystr;
+
+    RETURN_ENUMERATOR(obj, 0, 0);
 
     GetDBM2(obj, dbmp, dbm);
     for (keystr = rb_gdbm_firstkey(dbm); RTEST(keystr);

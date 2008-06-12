@@ -126,7 +126,7 @@ module REXML
       end
 
       def wrap(string, width)
-        # Recursivly wrap string at width.
+        # Recursively wrap string at width.
         return string if string.length <= width
         place = string.rindex(/\s/, width) # Position in string with last ' ' before cutoff
         place = string.index(/\s/) if place.nil? # Otherwise first space

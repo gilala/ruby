@@ -253,12 +253,12 @@ strdup_with_null(OnigEncoding enc, UChar* s, UChar* end)
 #define PUNFETCH     p = pfetch_prev
 #define PINC       do { \
   pfetch_prev = p; \
-  p += ONIGENC_MBC_ENC_LEN(enc, p, end); \
+  p += enclen(enc, p, end); \
 } while (0)
 #define PFETCH(c)  do { \
-  c = ONIGENC_MBC_TO_CODE(enc, p, end); \
+  c = ((enc->max_enc_len == 1) ? *p : ONIGENC_MBC_TO_CODE(enc, p, end)); \
   pfetch_prev = p; \
-  p += ONIGENC_MBC_ENC_LEN(enc, p, end); \
+  p += enclen(enc, p, end); \
 } while (0)
 
 #define PPEEK        (p < end ? ONIGENC_MBC_TO_CODE(enc, p, end) : PEND_VALUE)
@@ -825,6 +825,7 @@ onig_name_to_group_numbers(regex_t* reg, const UChar* name,
 
   switch (e->back_num) {
   case 0:
+    *nums = 0;
     break;
   case 1:
     *nums = &(e->back_ref1);

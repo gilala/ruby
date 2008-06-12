@@ -67,12 +67,48 @@ class IMAPTest < Test::Unit::TestCase
   end
 
   def test_starttls
+    imap = nil
     if defined?(OpenSSL)
       starttls_test do |port|
         imap = Net::IMAP.new("localhost", :port => port)
         imap.starttls(:ca_file => CA_FILE)
         imap
       end
+    end
+  ensure
+    if imap && !imap.disconnected?
+      imap.disconnect
+    end
+  end
+
+  def test_unexpected_eof
+    server = TCPServer.new(0)
+    port = server.addr[1]
+    Thread.start do
+      begin
+        sock = server.accept
+        begin
+          sock.print("* OK test server\r\n")
+          sock.gets
+#          sock.print("* BYE terminating connection\r\n")
+#          sock.print("RUBY0001 OK LOGOUT completed\r\n")
+        ensure
+          sock.close
+        end
+      rescue
+      end
+    end
+    begin
+      begin
+        imap = Net::IMAP.new("localhost", :port => port)
+        assert_raise(EOFError) do
+          imap.logout
+        end
+      ensure
+        imap.disconnect if imap
+      end
+    ensure
+      server.close
     end
   end
 
@@ -105,9 +141,12 @@ class IMAPTest < Test::Unit::TestCase
       end
     end
     begin
-      imap = yield(port)
-      imap.logout
-      imap.disconnect
+      begin
+        imap = yield(port)
+        imap.logout
+      ensure
+        imap.disconnect if imap
+      end
     ensure
       ssl_server.close
     end
@@ -143,9 +182,12 @@ class IMAPTest < Test::Unit::TestCase
       end
     end
     begin
-      imap = yield(port)
-      imap.logout
-      imap.disconnect
+      begin
+        imap = yield(port)
+        imap.logout
+      ensure
+        imap.disconnect if imap
+      end
     ensure
       server.close
     end

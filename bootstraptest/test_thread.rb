@@ -1,3 +1,5 @@
+# Thread and Fiber
+
 assert_equal %q{ok}, %q{
   Thread.new{
   }.join
@@ -213,3 +215,90 @@ assert_equal 'true', %{
     true
   end
 }
+
+assert_finish 3, %{
+  th = Thread.new {sleep 2}
+  th.join(1)
+  th.join
+}
+
+assert_finish 3, %{
+  require 'timeout'
+  th = Thread.new {sleep 2}
+  begin
+    Timeout.timeout(1) {th.join}
+  rescue Timeout::Error
+  end
+  th.join
+}
+
+assert_normal_exit %q{
+  STDERR.reopen(STDOUT)
+  exec "/"
+}
+
+assert_normal_exit %q{
+  (0..10).map {
+    Thread.new {
+     10000.times {
+        Object.new.to_s
+      }
+    }
+  }.each {|t|
+    t.join
+  }
+}
+
+assert_equal 'ok', %q{
+  def m
+    t = Thread.new { while true do // =~ "" end }
+    sleep 0.1
+    10.times {
+      if /((ab)*(ab)*)*(b)/ =~ "ab"*7
+        return :ng if !$4
+        return :ng if $~.size != 5
+      end
+    }
+    :ok
+  ensure
+    Thread.kill t
+  end
+  m
+}, '[ruby-dev:34492]'
+
+assert_normal_exit %q{
+  at_exit { Fiber.new{}.resume }
+}
+
+assert_normal_exit %q{
+  g = enum_for(:local_variables)
+  loop { g.next }
+}, '[ruby-dev:34128]'
+
+assert_normal_exit %q{
+  g = enum_for(:block_given?)
+  loop { g.next }
+}, '[ruby-dev:34128]'
+
+assert_normal_exit %q{
+  g = enum_for(:binding)
+  loop { g.next }
+}, '[ruby-dev:34128]'
+
+assert_normal_exit %q{
+  g = "abc".enum_for(:scan, /./)
+  loop { g.next }
+}, '[ruby-dev:34128]'
+
+assert_normal_exit %q{
+  g = Module.enum_for(:new)
+  loop { g.next }
+}, '[ruby-dev:34128]'
+
+assert_normal_exit %q{
+  Fiber.new(&Object.method(:class_eval)).resume("foo")
+}, '[ruby-dev:34128]'
+
+assert_normal_exit %q{
+  Thread.new("foo", &Object.method(:class_eval)).join
+}, '[ruby-dev:34128]'

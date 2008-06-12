@@ -398,7 +398,7 @@ zlib_mem_alloc(voidpf opaque, uInt items, uInt size)
 static void
 zlib_mem_free(voidpf opaque, voidpf address)
 {
-    free(address);
+    xfree(address);
 }
 
 static void
@@ -793,7 +793,7 @@ zstream_free(struct zstream *z)
     if (ZSTREAM_IS_READY(z)) {
 	zstream_finalize(z);
     }
-    free(z);
+    xfree(z);
 }
 
 static VALUE
@@ -1116,14 +1116,19 @@ rb_deflate_initialize(int argc, VALUE *argv, VALUE obj)
 static VALUE
 rb_deflate_init_copy(VALUE self, VALUE orig)
 {
-    struct zstream *z1 = get_zstream(self);
-    struct zstream *z2 = get_zstream(orig);
+    struct zstream *z1, *z2;
     int err;
+
+    Data_Get_Struct(self, struct zstream, z1);
+    z2 = get_zstream(orig);
 
     err = deflateCopy(&z1->stream, &z2->stream);
     if (err != Z_OK) {
 	raise_zlib_error(err, 0);
     }
+    z1->input = NIL_P(z2->input) ? Qnil : rb_str_dup(z2->input);
+    z1->buf   = NIL_P(z2->buf)   ? Qnil : rb_str_dup(z2->buf);
+    z1->buf_filled = z2->buf_filled;
     z1->flags = z2->flags;
 
     return self;
@@ -1674,7 +1679,7 @@ gzfile_free(struct gzfile *gz)
 	}
 	zstream_finalize(z);
     }
-    free(gz);
+    xfree(gz);
 }
 
 static VALUE
@@ -2402,7 +2407,7 @@ rb_gzfile_set_mtime(VALUE obj, VALUE mtime)
 	rb_raise(cGzError, "header is already written");
     }
 
-    if (FIXNUM_P(time)) {
+    if (FIXNUM_P(mtime)) {
 	gz->mtime = FIX2INT(mtime);
     }
     else {
@@ -2934,6 +2939,9 @@ static VALUE
 rb_gzreader_each_byte(VALUE obj)
 {
     VALUE c;
+
+    RETURN_ENUMERATOR(obj, 0, 0);
+
     while (!NIL_P(c = rb_gzreader_getc(obj))) {
 	rb_yield(c);
     }
@@ -3013,6 +3021,8 @@ gzreader_gets(int argc, VALUE *argv, VALUE obj)
     if (NIL_P(rs)) {
 	dst = gzfile_read_all(gz);
 	if (RSTRING_LEN(dst) != 0) gz->lineno++;
+	else
+	    return Qnil;
 	return dst;
     }
 
@@ -3102,6 +3112,9 @@ static VALUE
 rb_gzreader_each(int argc, VALUE *argv, VALUE obj)
 {
     VALUE str;
+
+    RETURN_ENUMERATOR(obj, 0, 0);
+
     while (!NIL_P(str = gzreader_gets(argc, argv, obj))) {
 	rb_yield(str);
     }
@@ -3259,7 +3272,7 @@ void Init_zlib()
     rb_define_singleton_method(cDeflate, "deflate", rb_deflate_s_deflate, -1);
     rb_define_alloc_func(cDeflate, rb_deflate_s_allocate);
     rb_define_method(cDeflate, "initialize", rb_deflate_initialize, -1);
-    rb_define_method(cDeflate, "initialize_copy", rb_deflate_init_copy, 0);
+    rb_define_method(cDeflate, "initialize_copy", rb_deflate_init_copy, 1);
     rb_define_method(cDeflate, "deflate", rb_deflate_deflate, -1);
     rb_define_method(cDeflate, "<<", rb_deflate_addstr, 1);
     rb_define_method(cDeflate, "flush", rb_deflate_flush, -1);
@@ -3361,11 +3374,13 @@ void Init_zlib()
     rb_define_method(cGzipReader, "getc", rb_gzreader_getc, 0);
     rb_define_method(cGzipReader, "readchar", rb_gzreader_readchar, 0);
     rb_define_method(cGzipReader, "each_byte", rb_gzreader_each_byte, 0);
+    rb_define_method(cGzipReader, "bytes", rb_gzreader_each_byte, 0);
     rb_define_method(cGzipReader, "ungetc", rb_gzreader_ungetc, 1);
     rb_define_method(cGzipReader, "gets", rb_gzreader_gets, -1);
     rb_define_method(cGzipReader, "readline", rb_gzreader_readline, -1);
     rb_define_method(cGzipReader, "each", rb_gzreader_each, -1);
     rb_define_method(cGzipReader, "each_line", rb_gzreader_each, -1);
+    rb_define_method(cGzipReader, "lines", rb_gzreader_each, -1);
     rb_define_method(cGzipReader, "readlines", rb_gzreader_readlines, -1);
 
     rb_define_const(mZlib, "OS_CODE", INT2FIX(OS_CODE));

@@ -115,7 +115,9 @@ native_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
 #define native_cleanup_pop  pthread_cleanup_pop
 #define native_thread_yield() sched_yield()
 
+#ifndef __CYGWIN__
 static void add_signal_thread_list(rb_thread_t *th);
+#endif
 static void remove_signal_thread_list(rb_thread_t *th);
 
 static rb_thread_lock_t signal_thread_list_lock;
@@ -147,6 +149,7 @@ Init_native_thread(void)
 
     pthread_key_create(&ruby_native_thread_key, NULL);
     th->thread_id = pthread_self();
+    native_cond_initialize(&th->native_thread_data.sleep_cond);
     ruby_thread_set_native(th);
     native_mutex_initialize(&signal_thread_list_lock);
     posix_signal(SIGVTALRM, null_func);
@@ -244,7 +247,7 @@ register_cached_thread_and_wait(void)
 	    }
 	}
 
-	free(entry);
+	free(entry); /* ok */
 	pthread_cond_destroy(&cond);
     }
     pthread_mutex_unlock(&thread_cache_lock);
@@ -355,11 +358,11 @@ native_thread_apply_priority(rb_thread_t *th)
     max = sched_get_priority_max(policy);
     min = sched_get_priority_min(policy);
 
-    if (min < priority) {
-	priority = max;
-    }
-    else if (max > priority) {
+    if (min > priority) {
 	priority = min;
+    }
+    else if (max < priority) {
+	priority = max;
     }
 
     sp.sched_priority = priority;
@@ -421,8 +424,8 @@ native_sleep(rb_thread_t *th, struct timeval *tv)
     GVL_UNLOCK_BEGIN();
     {
 	pthread_mutex_lock(&th->interrupt_lock);
-	th->unblock_function = ubf_pthread_cond_signal;
-	th->unblock_function_arg = th;
+	th->unblock.func = ubf_pthread_cond_signal;
+	th->unblock.arg = th;
 
 	if (RUBY_VM_INTERRUPTED(th)) {
 	    /* interrupted.  return immediate */
@@ -430,9 +433,11 @@ native_sleep(rb_thread_t *th, struct timeval *tv)
 	}
 	else {
 	    if (tv == 0 || ts.tv_sec < tvn.tv_sec /* overflow */ ) {
+		int r;
 		thread_debug("native_sleep: pthread_cond_wait start\n");
-		pthread_cond_wait(&th->native_thread_data.sleep_cond,
+		r = pthread_cond_wait(&th->native_thread_data.sleep_cond,
 				  &th->interrupt_lock);
+                if (r) rb_bug("pthread_cond_wait: %d", r);
 		thread_debug("native_sleep: pthread_cond_wait end\n");
 	    }
 	    else {
@@ -441,11 +446,13 @@ native_sleep(rb_thread_t *th, struct timeval *tv)
 			     (unsigned long)ts.tv_sec, ts.tv_nsec);
 		r = pthread_cond_timedwait(&th->native_thread_data.sleep_cond,
 					   &th->interrupt_lock, &ts);
+		if (r && r != ETIMEDOUT) rb_bug("pthread_cond_timedwait: %d", r);
+
 		thread_debug("native_sleep: pthread_cond_timedwait end (%d)\n", r);
 	    }
 	}
-	th->unblock_function = 0;
-	th->unblock_function_arg = 0;
+	th->unblock.func = 0;
+	th->unblock.arg = 0;
 
 	pthread_mutex_unlock(&th->interrupt_lock);
 	th->status = prev_status;
@@ -462,9 +469,11 @@ struct signal_thread_list {
     struct signal_thread_list *next;
 };
 
+#ifndef __CYGWIN__
 static struct signal_thread_list signal_thread_list_anchor = {
     0, 0, 0,
 };
+#endif
 
 #define FGLOCK(lock, body) do { \
     native_mutex_lock(lock); \
@@ -489,6 +498,7 @@ print_signal_list(char *str)
 }
 #endif
 
+#ifndef __CYGWIN__
 static void
 add_signal_thread_list(rb_thread_t *th)
 {
@@ -514,6 +524,7 @@ add_signal_thread_list(rb_thread_t *th)
 	});
     }
 }
+#endif
 
 static void
 remove_signal_thread_list(rb_thread_t *th)
@@ -530,7 +541,7 @@ remove_signal_thread_list(rb_thread_t *th)
 	    }
 	    th->native_thread_data.signal_thread_list = 0;
 	    list->th = 0;
-	    free(list);
+	    free(list); /* ok */
 	});
     }
     else {

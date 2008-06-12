@@ -12,6 +12,7 @@
 #include "ruby/ruby.h"
 #include <sys/types.h>
 #include <ctype.h>
+#include <errno.h>
 
 #define SIZE16 2
 #define SIZE32 4
@@ -66,8 +67,8 @@ TOKEN_PASTE(swap,x)(xtype z)		\
 	t[sizeof(xtype)-i-1] = s[i];	\
     }					\
     r = *(xtype *)t;			\
-    free(t);				\
-    free(zp);				\
+    xfree(t);				\
+    xfree(zp);				\
     return r;				\
 }
 
@@ -474,7 +475,7 @@ pack_pack(VALUE ary, VALUE fmt)
 	    continue;
 	}
         if (*p == '_' || *p == '!') {
-	    const char *natstr = "sSiIlL";
+	    static const char natstr[] = "sSiIlL";
 
 	    if (strchr(natstr, type)) {
 #ifdef NATINT_PACK
@@ -491,7 +492,11 @@ pack_pack(VALUE ary, VALUE fmt)
 	    p++;
 	}
 	else if (ISDIGIT(*p)) {
+	    errno = 0;
 	    len = STRTOUL(p, (char**)&p, 10);
+	    if (errno) {
+		rb_raise(rb_eRangeError, "pack length too big");
+	    }
 	}
 	else {
 	    len = 1;
@@ -1330,7 +1335,7 @@ pack_unpack(VALUE str, VALUE fmt)
 	}
 	star = 0;
 	if (*p == '_' || *p == '!') {
-	    const char *natstr = "sSiIlL";
+	    static const char natstr[] = "sSiIlL";
 
 	    if (strchr(natstr, type)) {
 #ifdef NATINT_PACK
@@ -1350,7 +1355,11 @@ pack_unpack(VALUE str, VALUE fmt)
 	    p++;
 	}
 	else if (ISDIGIT(*p)) {
+	    errno = 0;
 	    len = STRTOUL(p, (char**)&p, 10);
+	    if (errno) {
+		rb_raise(rb_eRangeError, "pack length too big");
+	    }
 	}
 	else {
 	    len = (type != '@');
@@ -1871,8 +1880,8 @@ pack_unpack(VALUE str, VALUE fmt)
 
 	  case 'P':
 	    if (sizeof(char *) <= send - s) {
+		VALUE tmp = Qnil;
 		char *t;
-		VALUE tmp;
 
 		memcpy(&t, s, sizeof(char *));
 		s += sizeof(char *);
@@ -1902,9 +1911,6 @@ pack_unpack(VALUE str, VALUE fmt)
 			rb_raise(rb_eArgError, "non associated pointer");
 		    }
 		}
-		else {
-		    tmp = Qnil;
-		}
 		UNPACK_PUSH(tmp);
 	    }
 	    break;
@@ -1916,7 +1922,7 @@ pack_unpack(VALUE str, VALUE fmt)
 		if (send - s < sizeof(char *))
 		    break;
 		else {
-		    VALUE tmp;
+		    VALUE tmp = Qnil;
 		    char *t;
 
 		    memcpy(&t, s, sizeof(char *));
@@ -1940,9 +1946,6 @@ pack_unpack(VALUE str, VALUE fmt)
 			if (p == pend) {
 			    rb_raise(rb_eArgError, "non associated pointer");
 			}
-		    }
-		    else {
-			tmp = Qnil;
 		    }
 		    UNPACK_PUSH(tmp);
 		}

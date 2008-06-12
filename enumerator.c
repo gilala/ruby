@@ -21,25 +21,15 @@
  * A class which provides a method `each' to be used as an Enumerable
  * object.
  */
-static VALUE rb_cEnumerator;
-static VALUE sym_each, sym_call;
+VALUE rb_cEnumerator;
+static VALUE sym_each;
 
 VALUE rb_eStopIteration;
 
-static VALUE
-proc_call(VALUE proc, VALUE args)
-{
-    if (TYPE(args) != T_ARRAY) {
-	args = rb_ary_new3(1, args);
-    }
-    return rb_proc_call(proc, args);
-}
-
 struct enumerator {
-    VALUE method;
-    VALUE proc;
+    VALUE obj;
+    ID    meth;
     VALUE args;
-    rb_block_call_func *iter;
     VALUE fib;
     VALUE dst;
     VALUE no_next;
@@ -49,8 +39,7 @@ static void
 enumerator_mark(void *p)
 {
     struct enumerator *ptr = p;
-    rb_gc_mark(ptr->method);
-    rb_gc_mark(ptr->proc);
+    rb_gc_mark(ptr->obj);
     rb_gc_mark(ptr->args);
     rb_gc_mark(ptr->fib);
     rb_gc_mark(ptr->dst);
@@ -64,20 +53,13 @@ enumerator_ptr(VALUE obj)
     Data_Get_Struct(obj, struct enumerator, ptr);
     if (RDATA(obj)->dmark != enumerator_mark) {
 	rb_raise(rb_eTypeError,
-		 "wrong argument type %s (expected Enumerable::Enumerator)",
-		 rb_obj_classname(obj));
+		 "wrong argument type %s (expected %s)",
+		 rb_obj_classname(obj), rb_class2name(rb_cEnumerator));
     }
-    if (!ptr) {
+    if (!ptr || ptr->obj == Qundef) {
 	rb_raise(rb_eArgError, "uninitialized enumerator");
     }
     return ptr;
-}
-
-static VALUE
-enumerator_iter_i(VALUE i, VALUE enum_obj, int argc, VALUE *argv)
-{
-    struct enumerator *e = (struct enumerator *)enum_obj;
-    return rb_yield(proc_call(e->proc, i));
 }
 
 /*
@@ -131,8 +113,10 @@ each_slice_i(VALUE val, VALUE *memo)
 /*
  *  call-seq:
  *    e.each_slice(n) {...}
+ *    e.each_slice(n)
  *
- *  Iterates the given block for each slice of <n> elements.
+ *  Iterates the given block for each slice of <n> elements.  If no
+ *  block is given, returns an enumerator.
  *
  *  e.g.:
  *      (1..10).each_slice(3) {|a| p a}
@@ -182,9 +166,10 @@ each_cons_i(VALUE val, VALUE *memo)
 /*
  *  call-seq:
  *    each_cons(n) {...}
+ *    each_cons(n)
  *
  *  Iterates the given block for each array of consecutive <n>
- *  elements.
+ *  elements.  If no block is given, returns an enumerator.a
  *
  *  e.g.:
  *      (1..10).each_cons(3) {|a| p a}
@@ -219,8 +204,12 @@ static VALUE
 enumerator_allocate(VALUE klass)
 {
     struct enumerator *ptr;
-    return Data_Make_Struct(klass, struct enumerator,
-			    enumerator_mark, -1, ptr);
+    VALUE enum_obj;
+
+    enum_obj = Data_Make_Struct(klass, struct enumerator, enumerator_mark, -1, ptr);
+    ptr->obj = Qundef;
+
+    return enum_obj;
 }
 
 static VALUE
@@ -232,16 +221,16 @@ enumerator_each_i(VALUE v, VALUE enum_obj, int argc, VALUE *argv)
 static VALUE
 enumerator_init(VALUE enum_obj, VALUE obj, VALUE meth, int argc, VALUE *argv)
 {
-    struct enumerator *ptr = enumerator_ptr(enum_obj);
+    struct enumerator *ptr;
 
-    ptr->method = rb_obj_method(obj, meth);
-    if (rb_block_given_p()) {
-	ptr->proc = rb_block_proc();
-	ptr->iter = enumerator_iter_i;
+    Data_Get_Struct(enum_obj, struct enumerator, ptr);
+
+    if (!ptr) {
+	rb_raise(rb_eArgError, "unallocated enumerator");
     }
-    else {
-	ptr->iter = enumerator_each_i;
-    }
+
+    ptr->obj  = obj;
+    ptr->meth = rb_to_id(meth);
     if (argc) ptr->args = rb_ary_new4(argc, argv);
     ptr->fib = 0;
     ptr->dst = Qnil;
@@ -258,12 +247,7 @@ enumerator_init(VALUE enum_obj, VALUE obj, VALUE meth, int argc, VALUE *argv)
  *  used as an Enumerable object using the given object's given
  *  method with the given arguments.
  *
- *  e.g.:
- *      str = "xyz"
- *
- *      enum = Enumerable::Enumerator.new(str, :each_byte)
- *      a = enum.map {|b| '%02x' % b } #=> ["78", "79", "7a"]
- *
+ *  Use of this method is discouraged.  Use Kernel#enum_for() instead.
  */
 static VALUE
 enumerator_initialize(int argc, VALUE *argv, VALUE obj)
@@ -291,11 +275,15 @@ enumerator_init_copy(VALUE obj, VALUE orig)
 	/* Fibers cannot be copied */
 	rb_raise(rb_eTypeError, "can't copy execution context");
     }
-    ptr1 = enumerator_ptr(obj);
 
-    ptr1->method = ptr0->method;
-    ptr1->proc = ptr0->proc;
-    ptr1->iter = ptr0->iter;
+    Data_Get_Struct(obj, struct enumerator, ptr1);
+
+    if (!ptr1) {
+	rb_raise(rb_eArgError, "unallocated enumerator");
+    }
+
+    ptr1->obj  = ptr0->obj;
+    ptr1->meth = ptr0->meth;
     ptr1->args = ptr0->args;
     ptr1->fib  = 0;
 
@@ -313,7 +301,7 @@ rb_enumeratorize(VALUE obj, VALUE meth, int argc, VALUE *argv)
  *    enum.each {...}
  *
  *  Iterates the given block using the object and the method specified
- *  in the first place.
+ *  in the first place.  If no block is given, returns self.
  *
  */
 static VALUE
@@ -329,7 +317,8 @@ enumerator_each(VALUE obj)
 	argc = RARRAY_LEN(e->args);
 	argv = RARRAY_PTR(e->args);
     }
-    return rb_block_call(e->method, SYM2ID(sym_call), argc, argv, e->iter, (VALUE)e);
+    return rb_block_call(e->obj, e->meth, argc, argv,
+			 enumerator_each_i, (VALUE)e);
 }
 
 static VALUE
@@ -343,26 +332,64 @@ enumerator_with_index_i(VALUE val, VALUE *memo)
 /*
  *  call-seq:
  *    e.with_index {|(*args), idx| ... }
+ *    e.with_index
  *
- *  Iterates the given block for each elements with an index, which
- *  start from 0.
+ *  Iterates the given block for each element with an index, which
+ *  start from 0.  If no block is given, returns an enumerator.
  *
  */
 static VALUE
 enumerator_with_index(VALUE obj)
 {
-    struct enumerator *e = enumerator_ptr(obj);
+    struct enumerator *e;
     VALUE memo = 0;
     int argc = 0;
     VALUE *argv = 0;
 
     RETURN_ENUMERATOR(obj, 0, 0);
+    e = enumerator_ptr(obj);
     if (e->args) {
 	argc = RARRAY_LEN(e->args);
 	argv = RARRAY_PTR(e->args);
     }
-    return rb_block_call(e->method, SYM2ID(sym_call), argc, argv,
+    return rb_block_call(e->obj, e->meth, argc, argv,
 			 enumerator_with_index_i, (VALUE)&memo);
+}
+
+static VALUE
+enumerator_with_memo_i(VALUE val, VALUE memo)
+{
+    return rb_yield_values(2, val, memo);
+}
+
+/*
+ *  call-seq:
+ *    e.with_memo(obj) {|(*args), memo_obj| ... }
+ *    e.with_memo(obj)
+ *
+ *  Iterates the given block for each element with an arbitrary
+ *  object given, and returns the memo object.
+ *
+ *  If no block is given, returns an enumerator.
+ *
+ */
+static VALUE
+enumerator_with_memo(VALUE obj, VALUE memo)
+{
+    struct enumerator *e;
+    int argc = 0;
+    VALUE *argv = 0;
+
+    RETURN_ENUMERATOR(obj, 0, 0);
+    e = enumerator_ptr(obj);
+    if (e->args) {
+	argc = RARRAY_LEN(e->args);
+	argv = RARRAY_PTR(e->args);
+    }
+    rb_block_call(e->obj, e->meth, argc, argv,
+		  enumerator_with_memo_i, memo);
+
+    return memo;
 }
 
 static VALUE
@@ -460,14 +487,15 @@ Init_Enumerator(void)
     rb_define_method(rb_cEnumerator, "initialize", enumerator_initialize, -1);
     rb_define_method(rb_cEnumerator, "initialize_copy", enumerator_init_copy, 1);
     rb_define_method(rb_cEnumerator, "each", enumerator_each, 0);
+    rb_define_method(rb_cEnumerator, "each_with_index", enumerator_with_index, 0);
     rb_define_method(rb_cEnumerator, "with_index", enumerator_with_index, 0);
+    rb_define_method(rb_cEnumerator, "with_memo", enumerator_with_memo, 1);
     rb_define_method(rb_cEnumerator, "next", enumerator_next, 0);
     rb_define_method(rb_cEnumerator, "rewind", enumerator_rewind, 0);
 
     rb_eStopIteration   = rb_define_class("StopIteration", rb_eIndexError);
 
-    sym_each		= ID2SYM(rb_intern("each"));
-    sym_call		= ID2SYM(rb_intern("call"));
+    sym_each	 	= ID2SYM(rb_intern("each"));
 
     rb_provide("enumerator.so");	/* for backward compatibility */
 }

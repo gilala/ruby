@@ -166,7 +166,7 @@ static void
 strscan_free(struct strscanner *p)
 {
     onig_region_free(&(p->regs), 0);
-    free(p);
+    ruby_xfree(p);
 }
 
 static VALUE
@@ -403,7 +403,9 @@ strscan_set_pos(VALUE self, VALUE v)
 static VALUE
 strscan_do_scan(VALUE self, VALUE regex, int succptr, int getstr, int headonly)
 {
+    regex_t *rb_reg_prepare_re(VALUE re, VALUE str);
     struct strscanner *p;
+    regex_t *re;
     int ret;
 
     Check_Type(regex, T_REGEXP);
@@ -413,13 +415,14 @@ strscan_do_scan(VALUE self, VALUE regex, int succptr, int getstr, int headonly)
     if (S_RESTLEN(p) < 0) {
         return Qnil;
     }
+    re = rb_reg_prepare_re(regex, p->str);
     if (headonly) {
-        ret = onig_match(RREGEXP(regex)->ptr, (UChar* )CURPTR(p),
+        ret = onig_match(re, (UChar* )CURPTR(p),
                          (UChar* )(CURPTR(p) + S_RESTLEN(p)),
                          (UChar* )CURPTR(p), &(p->regs), ONIG_OPTION_NONE);
     }
     else {
-        ret = onig_search(RREGEXP(regex)->ptr,
+        ret = onig_search(re,
                           (UChar* )CURPTR(p), (UChar* )(CURPTR(p) + S_RESTLEN(p)),
                           (UChar* )CURPTR(p), (UChar* )(CURPTR(p) + S_RESTLEN(p)),
                           &(p->regs), ONIG_OPTION_NONE);
@@ -527,11 +530,11 @@ strscan_check(VALUE self, VALUE re)
 }
 
 /*
- * call-seq: scan_full(pattern, return_string_p, advance_pointer_p)
+ * call-seq: scan_full(pattern, advance_pointer_p, return_string_p)
  *
  * Tests whether the given +pattern+ is matched from the current scan pointer.
- * Returns the matched string if +return_string_p+ is true.
  * Advances the scan pointer if +advance_pointer_p+ is true.
+ * Returns the matched string if +return_string_p+ is true.
  * The match register is affected.
  *
  * "full" means "#scan with full parameters".
@@ -570,7 +573,7 @@ strscan_scan_until(VALUE self, VALUE re)
  *   s = StringScanner.new('test string')
  *   s.exist? /s/            # -> 3
  *   s.scan /test/           # -> "test"
- *   s.exist? /s/            # -> 6
+ *   s.exist? /s/            # -> 2
  *   s.exist? /e/            # -> nil
  */
 static VALUE
@@ -621,12 +624,12 @@ strscan_check_until(VALUE self, VALUE re)
 }
 
 /*
- * call-seq: search_full(pattern, return_string_p, advance_pointer_p)
+ * call-seq: search_full(pattern, advance_pointer_p, return_string_p)
  *
  * Scans the string _until_ the +pattern+ is matched.
+ * Advances the scan pointer if +advance_pointer_p+, otherwise not.
  * Returns the matched string if +return_string_p+ is true, otherwise
  * returns the number of bytes advanced.
- * Advances the scan pointer if +advance_pointer_p+, otherwise not.
  * This method does affect the match register.
  */
 static VALUE

@@ -877,6 +877,9 @@ class TestM17N < Test::Unit::TestCase
     }
 
     assert_equal(e("\xA1\xA1"), a("a").tr(a("a"), e("\xA1\xA1")))
+
+    assert_equal("X\u3042\u3044X", "A\u3042\u3044\u3046".tr("^\u3042\u3044", "X"))
+    assert_equal("\u3042\u3046" * 100, ("\u3042\u3044" * 100).tr("\u3044", "\u3046"))
   end
 
   def test_tr_s
@@ -894,6 +897,10 @@ class TestM17N < Test::Unit::TestCase
     assert_equal(1, e("\xa1\xa2").delete("z").length)
     s = e("\xa3\xb0\xa3\xb1\xa3\xb2\xa3\xb3\xa3\xb4")
     assert_raise(ArgumentError){s.delete(a("\xa3\xb2"))}
+
+    a = "\u3042\u3044\u3046\u3042\u3044\u3046"
+    a.delete!("\u3042\u3044", "^\u3044")
+    assert_equal("\u3044\u3046\u3044\u3046", a)
   end
 
   def test_include?
@@ -962,6 +969,12 @@ class TestM17N < Test::Unit::TestCase
 
   def test_reverse
     assert_equal(u("\xf0jihgfedcba"), u("abcdefghij\xf0").reverse)
+  end
+
+  def test_reverse_bang
+    s = u("abcdefghij\xf0")
+    s.reverse!
+    assert_equal(u("\xf0jihgfedcba"), s)
   end
 
   def test_plus
@@ -1041,8 +1054,8 @@ class TestM17N < Test::Unit::TestCase
      mu = method(u("\xc2\xa1"))
      assert_not_equal(me.name, mu.name)
      assert_not_equal(me.inspect, mu.inspect)
-     assert_equal(e("\xc2\xa1"), me.name)
-     assert_equal(u("\xc2\xa1"), mu.name)
+     assert_equal(e("\xc2\xa1"), me.name.to_s)
+     assert_equal(u("\xc2\xa1"), mu.name.to_s)
   end
 
   def test_symbol
@@ -1197,8 +1210,36 @@ class TestM17N < Test::Unit::TestCase
     assert_equal(true, (s.dup << s).valid_encoding?)
     assert_equal(true, "".center(2, s).valid_encoding?)
 
-     s = "\xa1\xa1\x8f".force_encoding("euc-jp")
-     assert_equal(false, s.valid_encoding?)
-     assert_equal(true, s.reverse.valid_encoding?)
-   end
+    s = "\xa1\xa1\x8f".force_encoding("euc-jp")
+    assert_equal(false, s.valid_encoding?)
+    assert_equal(true, s.reverse.valid_encoding?)
+  end
+
+  def test_getbyte
+    assert_equal(0x82, u("\xE3\x81\x82\xE3\x81\x84").getbyte(2))
+    assert_equal(0x82, u("\xE3\x81\x82\xE3\x81\x84").getbyte(-4))
+    assert_nil(u("\xE3\x81\x82\xE3\x81\x84").getbyte(100))
+  end
+
+  def test_setbyte
+    s = u("\xE3\x81\x82\xE3\x81\x84")
+    s.setbyte(2, 0x84)
+    assert_equal(u("\xE3\x81\x84\xE3\x81\x84"), s)
+
+    s = u("\xE3\x81\x82\xE3\x81\x84")
+    assert_raise(IndexError) { s.setbyte(100, 0) }
+
+    s = u("\xE3\x81\x82\xE3\x81\x84")
+    s.setbyte(-4, 0x84)
+    assert_equal(u("\xE3\x81\x84\xE3\x81\x84"), s)
+  end
+
+  def test_compatible
+    assert_equal(nil, Encoding.compatible?("",0), "moved from btest/knownbug")
+  end
+
+  def test_force_encoding
+    assert(("".center(1, "\x80".force_encoding("utf-8")); true),
+           "moved from btest/knownbug, [ruby-dev:33807]")
+  end
 end

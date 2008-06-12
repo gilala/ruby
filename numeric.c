@@ -249,15 +249,28 @@ num_uminus(VALUE num)
 /*
  *  call-seq:
  *     num.quo(numeric)    =>   result
- *     num.fdiv(numeric)   =>   result
  *
- *  Equivalent to <code>Numeric#/</code>, but overridden in subclasses.
+ *  Returns most exact division (rational for integers, float for floats).
  */
 
 static VALUE
 num_quo(VALUE x, VALUE y)
 {
-    return rb_funcall(x, '/', 1, y);
+    return rb_funcall(rb_rational_raw1(x), '/', 1, y);
+}
+
+
+/*
+ *  call-seq:
+ *     num.fdiv(numeric)    =>   float
+ *
+ *  Returns float division.
+ */
+
+static VALUE
+num_fdiv(VALUE x, VALUE y)
+{
+    return rb_funcall(rb_Float(x), '/', 1, y);
 }
 
 
@@ -275,6 +288,7 @@ static VALUE num_floor(VALUE num);
 static VALUE
 num_div(VALUE x, VALUE y)
 {
+    if (rb_equal(INT2FIX(0), y)) rb_num_zerodiv();
     return num_floor(rb_funcall(x, '/', 1, y));
 }
 
@@ -1560,22 +1574,14 @@ check_int(SIGNED_VALUE num)
     else {
 	return;
     }
-#ifdef LONG_LONG_VALUE
-    rb_raise(rb_eRangeError, "integer %lld too %s to convert to `int'", num, s);
-#else
-    rb_raise(rb_eRangeError, "integer %ld too %s to convert to `int'", num, s);
-#endif
+    rb_raise(rb_eRangeError, "integer %"PRIdVALUE " too %s to convert to `int'", num, s);
 }
 
 static void
 check_uint(VALUE num)
 {
     if (num > UINT_MAX) {
-#ifdef LONG_LONG_VALUE
-	rb_raise(rb_eRangeError, "integer %llu too big to convert to `unsigned int'", num);
-#else
-	rb_raise(rb_eRangeError, "integer %lu too big to convert to `unsigned int'", num);
-#endif
+	rb_raise(rb_eRangeError, "integer %"PRIuVALUE " too big to convert to `unsigned int'", num);
     }
 }
 
@@ -1645,7 +1651,7 @@ rb_num2fix(VALUE val)
 
     v = rb_num2long(val);
     if (!FIXABLE(v))
-	rb_raise(rb_eRangeError, "integer %ld out of range of fixnum", v);
+	rb_raise(rb_eRangeError, "integer %"PRIdVALUE " out of range of fixnum", v);
     return LONG2FIX(v);
 }
 
@@ -1873,7 +1879,7 @@ int_chr(int argc, VALUE *argv, VALUE num)
       case 0:
 	if (i < 0 || 0xff < i) {
 	  out_of_range:
-	    rb_raise(rb_eRangeError, "%ld out of char range", i);
+	    rb_raise(rb_eRangeError, "%"PRIdVALUE " out of char range", i);
 	}
 	c = i;
 	if (i < 0x80) {
@@ -2215,22 +2221,15 @@ fixdivmod(long x, long y, long *divp, long *modp)
 
 /*
  *  call-seq:
- *     fix.quo(numeric)    => float
  *     fix.fdiv(numeric)   => float
  *
  *  Returns the floating point result of dividing <i>fix</i> by
  *  <i>numeric</i>.
  *
- *     654321.quo(13731)      #=> 47.6528293642124
- *     654321.quo(13731.24)   #=> 47.6519964693647
+ *     654321.fdiv(13731)      #=> 47.6528293642124
+ *     654321.fdiv(13731.24)   #=> 47.6519964693647
  *
  */
-
-static VALUE
-fix_quo(VALUE x, VALUE y)
-{
-    return rb_funcall(rb_rational_raw1(x), '/', 1, y);
-}
 
 static VALUE
 fix_fdiv(VALUE x, VALUE y)
@@ -2249,7 +2248,7 @@ fix_fdiv(VALUE x, VALUE y)
 }
 
 static VALUE
-fix_divide(VALUE x, VALUE y, int flo)
+fix_divide(VALUE x, VALUE y, ID op)
 {
     if (FIXNUM_P(y)) {
 	long div;
@@ -2262,15 +2261,21 @@ fix_divide(VALUE x, VALUE y, int flo)
 	x = rb_int2big(FIX2LONG(x));
 	return rb_big_div(x, y);
       case T_FLOAT:
-	if (flo) {
-	    return DOUBLE2NUM((double)FIX2LONG(x) / RFLOAT_VALUE(y));
-	}
-	else {
-	    long div = (double)FIX2LONG(x) / RFLOAT_VALUE(y);
-	    return LONG2NUM(div);
+	{
+	    double div;
+
+	    if (op == '/') {
+		div = (double)FIX2LONG(x) / RFLOAT_VALUE(y);
+		return DOUBLE2NUM(div);
+	    }
+	    else {
+		if (RFLOAT_VALUE(y) == 0) rb_num_zerodiv();
+		div = (double)FIX2LONG(x) / RFLOAT_VALUE(y);
+		return rb_dbl2big(floor(div));
+	    }
 	}
       default:
-	return rb_num_coerce_bin(x, y, flo ? '/' : rb_intern("div"));
+	return rb_num_coerce_bin(x, y, op);
     }
 }
 
@@ -2286,7 +2291,7 @@ fix_divide(VALUE x, VALUE y, int flo)
 static VALUE
 fix_div(VALUE x, VALUE y)
 {
-    return fix_divide(x, y, Qtrue);
+    return fix_divide(x, y, '/');
 }
 
 /*
@@ -2299,7 +2304,7 @@ fix_div(VALUE x, VALUE y)
 static VALUE
 fix_idiv(VALUE x, VALUE y)
 {
-    return fix_divide(x, y, Qfalse);
+    return fix_divide(x, y, rb_intern("div"));
 }
 
 /*
@@ -2642,9 +2647,12 @@ fix_rev(VALUE num)
 }
 
 static VALUE
-fix_coerce(VALUE x)
+bit_coerce(VALUE x)
 {
     while (!FIXNUM_P(x) && TYPE(x) != T_BIGNUM) {
+	if (TYPE(x) == T_FLOAT) {
+	    rb_raise(rb_eTypeError, "can't convert Float into Integer");
+	}
 	x = rb_to_int(x);
     }
     return x;
@@ -2662,7 +2670,7 @@ fix_and(VALUE x, VALUE y)
 {
     long val;
 
-    if (!FIXNUM_P(y = fix_coerce(y))) {
+    if (!FIXNUM_P(y = bit_coerce(y))) {
 	return rb_big_and(y, x);
     }
     val = FIX2LONG(x) & FIX2LONG(y);
@@ -2681,7 +2689,7 @@ fix_or(VALUE x, VALUE y)
 {
     long val;
 
-    if (!FIXNUM_P(y = fix_coerce(y))) {
+    if (!FIXNUM_P(y = bit_coerce(y))) {
 	return rb_big_or(y, x);
     }
     val = FIX2LONG(x) | FIX2LONG(y);
@@ -2700,7 +2708,7 @@ fix_xor(VALUE x, VALUE y)
 {
     long val;
 
-    if (!FIXNUM_P(y = fix_coerce(y))) {
+    if (!FIXNUM_P(y = bit_coerce(y))) {
 	return rb_big_xor(y, x);
     }
     val = FIX2LONG(x) ^ FIX2LONG(y);
@@ -2797,7 +2805,8 @@ fix_aref(VALUE fix, VALUE idx)
     long val = FIX2LONG(fix);
     long i;
 
-    if (!FIXNUM_P(idx = fix_coerce(idx))) {
+    idx = rb_to_int(idx);
+    if (!FIXNUM_P(idx)) {
 	idx = rb_big_norm(idx);
 	if (!FIXNUM_P(idx)) {
 	    if (!RBIGNUM_SIGN(idx) || val >= 0)
@@ -2856,52 +2865,6 @@ fix_abs(VALUE fix)
     return LONG2NUM(i);
 }
 
-/*
- *  call-seq:
- *     fix.id2name -> string or nil
- *
- *  Returns the name of the object whose symbol id is <i>fix</i>. If
- *  there is no symbol in the symbol table with this value, returns
- *  <code>nil</code>. <code>id2name</code> has nothing to do with the
- *  <code>Object.id</code> method. See also <code>Fixnum#to_sym</code>,
- *  <code>String#intern</code>, and class <code>Symbol</code>.
- *
- *     symbol = :@inst_var    #=> :@inst_var
- *     id     = symbol.to_i   #=> 9818
- *     id.id2name             #=> "@inst_var"
- */
-
-static VALUE
-fix_id2name(VALUE fix)
-{
-    VALUE name = rb_id2str(FIX2UINT(fix));
-    if (name) return rb_str_dup(name);
-    return Qnil;
-}
-
-
-/*
- *  call-seq:
- *     fix.to_sym -> aSymbol
- *
- *  Returns the symbol whose integer value is <i>fix</i>. See also
- *  <code>Fixnum#id2name</code>.
- *
- *     fred = :fred.to_i
- *     fred.id2name   #=> "fred"
- *     fred.to_sym    #=> :fred
- */
-
-static VALUE
-fix_to_sym(VALUE fix)
-{
-    ID id = FIX2UINT(fix);
-
-    if (rb_id2name(id)) {
-	return ID2SYM(id);
-    }
-    return Qnil;
-}
 
 
 /*
@@ -3129,6 +3092,8 @@ fix_even_p(VALUE num)
 void
 Init_Numeric(void)
 {
+#undef rb_intern
+
 #if defined(__FreeBSD__) && __FreeBSD__ < 4
     /* allow divide by zero -- Inf */
     fpsetmask(fpgetmask() & ~(FP_X_DZ|FP_X_INV|FP_X_OFL));
@@ -3157,7 +3122,7 @@ Init_Numeric(void)
     rb_define_method(rb_cNumeric, "<=>", num_cmp, 1);
     rb_define_method(rb_cNumeric, "eql?", num_eql, 1);
     rb_define_method(rb_cNumeric, "quo", num_quo, 1);
-    rb_define_method(rb_cNumeric, "fdiv", num_quo, 1);
+    rb_define_method(rb_cNumeric, "fdiv", num_fdiv, 1);
     rb_define_method(rb_cNumeric, "div", num_div, 1);
     rb_define_method(rb_cNumeric, "divmod", num_divmod, 1);
     rb_define_method(rb_cNumeric, "modulo", num_modulo, 1);
@@ -3211,9 +3176,6 @@ Init_Numeric(void)
 
     rb_define_method(rb_cFixnum, "to_s", fix_to_s, -1);
 
-    rb_define_method(rb_cFixnum, "id2name", fix_id2name, 0);
-    rb_define_method(rb_cFixnum, "to_sym", fix_to_sym, 0);
-
     rb_define_method(rb_cFixnum, "-@", fix_uminus, 0);
     rb_define_method(rb_cFixnum, "+", fix_plus, 1);
     rb_define_method(rb_cFixnum, "-", fix_minus, 1);
@@ -3223,7 +3185,6 @@ Init_Numeric(void)
     rb_define_method(rb_cFixnum, "%", fix_mod, 1);
     rb_define_method(rb_cFixnum, "modulo", fix_mod, 1);
     rb_define_method(rb_cFixnum, "divmod", fix_divmod, 1);
-    rb_define_method(rb_cFixnum, "quo", fix_quo, 1);
     rb_define_method(rb_cFixnum, "fdiv", fix_fdiv, 1);
     rb_define_method(rb_cFixnum, "**", fix_pow, 1);
 

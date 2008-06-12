@@ -298,7 +298,7 @@ rb_obj_init_copy(VALUE obj, VALUE orig)
 VALUE
 rb_any_to_s(VALUE obj)
 {
-    char *cname = rb_obj_classname(obj);
+    const char *cname = rb_obj_classname(obj);
     VALUE str;
 
     str = rb_sprintf("#<%s:%p>", cname, (void*)obj);
@@ -387,9 +387,8 @@ rb_obj_inspect(VALUE obj)
 
         if (has_ivar) {
             VALUE str;
-            char *c;
+            const char *c = rb_obj_classname(obj);
 
-            c = rb_obj_classname(obj);
             str = rb_sprintf("-<%s:%p", c, (void*)obj);
             return rb_exec_recursive(inspect_obj, obj, str);
         }
@@ -1362,8 +1361,21 @@ rb_class_initialize(int argc, VALUE *argv, VALUE klass)
  *  call-seq:
  *     class.allocate()   =>   obj
  *  
- *  Allocates space for a new object of <i>class</i>'s class. The
- *  returned object must be an instance of <i>class</i>.
+ *  Allocates space for a new object of <i>class</i>'s class and does not
+ *  call initialize on the new instance. The returned object must be an
+ *  instance of <i>class</i>.
+ *  
+ *      klass = Class.new do
+ *        def initialize(*args)
+ *          @initialized = true
+ *        end
+ *      
+ *        def initialized?
+ *          @initialized || false
+ *        end
+ *      end
+ *      
+ *      klass.allocate.initialized? #=> false
  *     
  */
 
@@ -1892,7 +1904,7 @@ convert_type(VALUE val, const char *tname, const char *method, int raise)
     ID m;
 
     m = rb_intern(method);
-    if (!rb_respond_to(val, m)) {
+    if (!rb_obj_respond_to(val, m, Qtrue)) {
 	if (raise) {
 	    rb_raise(rb_eTypeError, "can't convert %s into %s",
 		     NIL_P(val) ? "nil" :
@@ -1916,7 +1928,7 @@ rb_convert_type(VALUE val, int type, const char *tname, const char *method)
     if (TYPE(val) == type) return val;
     v = convert_type(val, tname, method, Qtrue);
     if (TYPE(v) != type) {
-	char *cname = rb_obj_classname(val);
+	const char *cname = rb_obj_classname(val);
 	rb_raise(rb_eTypeError, "can't convert %s to %s (%s#%s gives %s)",
 		 cname, tname, cname, method, rb_obj_classname(v));
     }
@@ -1933,7 +1945,7 @@ rb_check_convert_type(VALUE val, int type, const char *tname, const char *method
     v = convert_type(val, tname, method, Qfalse);
     if (NIL_P(v)) return Qnil;
     if (TYPE(v) != type) {
-	char *cname = rb_obj_classname(val);
+	const char *cname = rb_obj_classname(val);
 	rb_raise(rb_eTypeError, "can't convert %s to %s (%s#%s gives %s)",
 		 cname, tname, cname, method, rb_obj_classname(v));
     }
@@ -1949,7 +1961,7 @@ rb_to_integer(VALUE val, const char *method)
     if (FIXNUM_P(val)) return val;
     v = convert_type(val, "Integer", method, Qtrue);
     if (!rb_obj_is_kind_of(v, rb_cInteger)) {
-	char *cname = rb_obj_classname(val);
+	const char *cname = rb_obj_classname(val);
 	rb_raise(rb_eTypeError, "can't convert %s to Integer (%s#%s gives %s)",
 		 cname, cname, method, rb_obj_classname(v));
     }
@@ -2048,7 +2060,7 @@ rb_cstr_to_dbl(const char *p, int badcheck)
     d = strtod(p, &end);
     if (errno == ERANGE) {
 	OutOfRange();
-	rb_warn("Float %.*s%s out of range", w, p, ellipsis);
+	rb_warning("Float %.*s%s out of range", w, p, ellipsis);
 	errno = 0;
     }
     if (p == end) {
@@ -2086,7 +2098,7 @@ rb_cstr_to_dbl(const char *p, int badcheck)
 	d = strtod(p, &end);
 	if (errno == ERANGE) {
 	    OutOfRange();
-	    rb_warn("Float %.*s%s out of range", w, p, ellipsis);
+	    rb_warning("Float %.*s%s out of range", w, p, ellipsis);
 	    errno = 0;
 	}
 	if (badcheck) {
@@ -2148,13 +2160,7 @@ rb_Float(VALUE val)
 	break;
 
       default:
-      {
-	  VALUE f = rb_convert_type(val, T_FLOAT, "Float", "to_f");
-	  if (isnan(RFLOAT_VALUE(f))) {
-	      rb_raise(rb_eArgError, "invalid value for Float()");
-	  }
-	  return f;
-      }
+	return rb_convert_type(val, T_FLOAT, "Float", "to_f");
     }
 }
 
@@ -2359,6 +2365,8 @@ boot_defclass(const char *name, VALUE super)
 void
 Init_Object(void)
 {
+#undef rb_intern
+
     VALUE metaclass;
 
     rb_cBasicObject = boot_defclass("BasicObject", 0);

@@ -296,7 +296,6 @@ static VALUE
 range_step(int argc, VALUE *argv, VALUE range)
 {
     VALUE b, e, step, tmp;
-    long unit;
 
     RETURN_ENUMERATOR(range, argc, argv);
 
@@ -304,28 +303,23 @@ range_step(int argc, VALUE *argv, VALUE range)
     e = RANGE_END(range);
     if (argc == 0) {
 	step = INT2FIX(1);
-	unit = 1;
     }
     else {
 	rb_scan_args(argc, argv, "01", &step);
-	if (FIXNUM_P(step)) {
-	    unit = NUM2LONG(step);
+	if (!rb_obj_is_kind_of(step, rb_cNumeric)) {
+	    step = rb_to_int(step);
 	}
-	else {
-	    VALUE tmp = rb_to_int(step);
-	    unit = rb_cmpint(tmp, step, INT2FIX(0));
+	if (rb_funcall(step, '<', 1, INT2FIX(0))) {
+	    rb_raise(rb_eArgError, "step can't be negative");
 	}
-    }
-    if (unit < 0) {
-	rb_raise(rb_eArgError, "step can't be negative");
-    }
-    if (unit == 0) {
-	rb_raise(rb_eArgError, "step can't be 0");
+	else if (!rb_funcall(step, '>', 1, INT2FIX(0))) {
+	    rb_raise(rb_eArgError, "step can't be 0");
+	}
     }
 
     if (FIXNUM_P(b) && FIXNUM_P(e) && FIXNUM_P(step)) { /* fixnums are special */
 	long end = FIX2LONG(e);
-	long i;
+	long i, unit = FIX2LONG(step);
 
 	if (!EXCL(range))
 	    end += 1;
@@ -421,7 +415,7 @@ range_each(VALUE range)
 	if (!EXCL(range))
 	    lim += 1;
 	for (i = FIX2LONG(beg); i < lim; i++) {
-	    rb_yield(LONG2NUM(i));
+	    rb_yield(LONG2FIX(i));
 	}
     }
     else if (TYPE(beg) == T_STRING) {
@@ -902,6 +896,8 @@ range_alloc(VALUE klass)
 void
 Init_Range(void)
 {
+#undef rb_intern
+
     id_cmp = rb_intern("<=>");
     id_succ = rb_intern("succ");
     id_beg = rb_intern("begin");

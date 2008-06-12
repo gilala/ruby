@@ -2,9 +2,15 @@
 #ifndef RUBY_EVAL_INTERN_H
 #define RUBY_EVAL_INTERN_H
 
-#define PASS_PASSED_BLOCK() \
-  (GET_THREAD()->passed_block = \
-   GC_GUARDED_PTR_REF((rb_block_t *)GET_THREAD()->cfp->lfp[0]))
+#define PASS_PASSED_BLOCK_TH(th) do { \
+    (th)->passed_block = GC_GUARDED_PTR_REF((rb_block_t *)(th)->cfp->lfp[0]); \
+    (th)->cfp->flag |= VM_FRAME_FLAG_PASSED; \
+} while (0)
+
+#define PASS_PASSED_BLOCK() do { \
+    rb_thread_t * const __th__ = GET_THREAD(); \
+    PASS_PASSED_BLOCK_TH(__th__); \
+} while (0)
 
 #include "ruby/ruby.h"
 #include "ruby/node.h"
@@ -151,15 +157,26 @@ int _setjmp(), _longjmp();
 
 #define JUMP_TAG(st) TH_JUMP_TAG(GET_THREAD(), st)
 
-#define TAG_RETURN	0x1
-#define TAG_BREAK	0x2
-#define TAG_NEXT	0x3
-#define TAG_RETRY	0x4
-#define TAG_REDO	0x5
-#define TAG_RAISE	0x6
-#define TAG_THROW	0x7
-#define TAG_FATAL	0x8
-#define TAG_MASK	0xf
+enum ruby_tag_type {
+    RUBY_TAG_RETURN	= 0x1,
+    RUBY_TAG_BREAK	= 0x2,
+    RUBY_TAG_NEXT	= 0x3,
+    RUBY_TAG_RETRY	= 0x4,
+    RUBY_TAG_REDO	= 0x5,
+    RUBY_TAG_RAISE	= 0x6,
+    RUBY_TAG_THROW	= 0x7,
+    RUBY_TAG_FATAL	= 0x8,
+    RUBY_TAG_MASK	= 0xf
+};
+#define TAG_RETURN	RUBY_TAG_RETURN
+#define TAG_BREAK	RUBY_TAG_BREAK
+#define TAG_NEXT	RUBY_TAG_NEXT
+#define TAG_RETRY	RUBY_TAG_RETRY
+#define TAG_REDO	RUBY_TAG_REDO
+#define TAG_RAISE	RUBY_TAG_RAISE
+#define TAG_THROW	RUBY_TAG_THROW
+#define TAG_FATAL	RUBY_TAG_FATAL
+#define TAG_MASK	RUBY_TAG_MASK
 
 #define NEW_THROW_OBJECT(val, pt, st) \
   ((VALUE)NEW_NODE(NODE_LIT, (val), (pt), (st)))
@@ -172,16 +189,9 @@ int _setjmp(), _longjmp();
 #define GET_THROWOBJ_CATCH_POINT(obj) ((VALUE*)RNODE((obj))->u2.value)
 #define GET_THROWOBJ_STATE(obj)       ((int)RNODE((obj))->u3.value)
 
-#define SCOPE_TEST(f) \
-  (ruby_cref()->nd_visi & (f))
-
-#define SCOPE_CHECK(f) \
-  (ruby_cref()->nd_visi == (f))
-
-#define SCOPE_SET(f)  \
-{ \
-  ruby_cref()->nd_visi = (f); \
-}
+#define SCOPE_TEST(f)  (vm_cref()->nd_visi & (f))
+#define SCOPE_CHECK(f) (vm_cref()->nd_visi == (f))
+#define SCOPE_SET(f)   (vm_cref()->nd_visi = (f))
 
 #define CHECK_STACK_OVERFLOW(cfp, margin) do \
   if (((VALUE *)(cfp)->sp) + (margin) + sizeof(rb_control_frame_t) >= ((VALUE *)cfp)) { \
@@ -194,8 +204,8 @@ void rb_thread_wait_other_threads(void);
 
 enum {
     RAISED_EXCEPTION = 1,
-    RAISED_STACKOVERFLOW,
-    RAISED_NOMEMORY,
+    RAISED_STACKOVERFLOW = 2,
+    RAISED_NOMEMORY = 4,
 };
 int rb_thread_set_raised(rb_thread_t *th);
 int rb_thread_reset_raised(rb_thread_t *th);
@@ -209,44 +219,17 @@ VALUE rb_make_exception(int argc, VALUE *argv);
 
 NORETURN(void rb_fiber_start(void));
 
-NORETURN(void rb_raise_jump(VALUE));
 NORETURN(void rb_print_undef(VALUE, ID, int));
-NORETURN(void vm_localjump_error(const char *, VALUE, int));
+NORETURN(void vm_localjump_error(const char *,VALUE, int));
 NORETURN(void vm_jump_tag_but_local_jump(int, VALUE));
 
-NODE *vm_get_cref(rb_thread_t *th, rb_iseq_t *iseq, rb_control_frame_t *cfp);
-NODE *vm_cref_push(rb_thread_t *th, VALUE, int);
-NODE *vm_set_special_cref(rb_thread_t *th, VALUE *lfp, NODE * cref_stack);
 VALUE vm_make_jump_tag_but_local_jump(int state, VALUE val);
-
-static rb_control_frame_t *
-vm_get_ruby_level_cfp(rb_thread_t *th, rb_control_frame_t *cfp)
-{
-    while (!RUBY_VM_CONTROL_FRAME_STACK_OVERFLOW_P(th, cfp)) {
-	if (RUBY_VM_NORMAL_ISEQ_P(cfp->iseq)) {
-	    return cfp;
-	}
-	cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
-    }
-    return 0;
-}
-
-static inline NODE *
-ruby_cref()
-{
-    rb_thread_t *th = GET_THREAD();
-    rb_control_frame_t *cfp = vm_get_ruby_level_cfp(th, th->cfp);
-    return vm_get_cref(th, cfp->iseq, cfp);
-}
-
-VALUE vm_get_cbase(rb_thread_t *th);
+NODE *vm_cref(void);
+rb_control_frame_t *vm_get_ruby_level_caller_cfp(rb_thread_t *th, rb_control_frame_t *cfp);
 VALUE rb_obj_is_proc(VALUE);
-void rb_vm_check_redefinition_opt_method(NODE *node);
-VALUE rb_vm_call_cfunc(VALUE recv, VALUE (*func)(VALUE), VALUE arg, rb_block_t *blockptr, VALUE filename);
+VALUE rb_vm_call_cfunc(VALUE recv, VALUE (*func)(VALUE), VALUE arg, const rb_block_t *blockptr, VALUE filename);
 void rb_thread_terminate_all(void);
-void rb_vm_set_eval_stack(rb_thread_t *, VALUE iseq);
 VALUE rb_vm_top_self();
-
-#define ruby_cbase() vm_get_cbase(GET_THREAD())
+VALUE rb_vm_cbase(void);
 
 #endif /* RUBY_EVAL_INTERN_H */

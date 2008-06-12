@@ -66,14 +66,6 @@ char *strchr(char*,char);
 #define lstat stat
 #endif
 
-#ifndef CASEFOLD_FILESYSTEM
-# if defined DOSISH || defined __VMS
-#   define CASEFOLD_FILESYSTEM 1
-# else
-#   define CASEFOLD_FILESYSTEM 0
-# endif
-#endif
-
 #define FNM_NOESCAPE	0x01
 #define FNM_PATHNAME	0x02
 #define FNM_DOTMATCH	0x04
@@ -357,9 +349,9 @@ free_dir(struct dir_data *dir)
 {
     if (dir) {
 	if (dir->dir) closedir(dir->dir);
-	if (dir->path) free(dir->path);
+	if (dir->path) xfree(dir->path);
     }
-    free(dir);
+    xfree(dir);
 }
 
 static VALUE dir_close(VALUE);
@@ -390,7 +382,7 @@ dir_initialize(VALUE dir, VALUE dirname)
     FilePathValue(dirname);
     Data_Get_Struct(dir, struct dir_data, dp);
     if (dp->dir) closedir(dp->dir);
-    if (dp->path) free(dp->path);
+    if (dp->path) xfree(dp->path);
     dp->dir = NULL;
     dp->path = NULL;
     dp->dir = opendir(RSTRING_PTR(dirname));
@@ -466,7 +458,7 @@ dir_inspect(VALUE dir)
 
     Data_Get_Struct(dir, struct dir_data, dirp);
     if (dirp->path) {
-	char *c = rb_obj_classname(dir);
+	const char *c = rb_obj_classname(dir);
 	int len = strlen(c) + strlen(dirp->path) + 4;
 	VALUE s = rb_str_new(0, len);
 	snprintf(RSTRING_PTR(s), len+1, "#<%s:%s>", c, dirp->path);
@@ -788,7 +780,7 @@ dir_s_chdir(int argc, VALUE *argv, VALUE obj)
 	struct chdir_data args;
 	char *cwd = my_getcwd();
 
-	args.old_path = rb_tainted_str_new2(cwd); free(cwd);
+	args.old_path = rb_tainted_str_new2(cwd); xfree(cwd);
 	args.new_path = path;
 	args.done = Qfalse;
 	return rb_ensure(chdir_yield, (VALUE)&args, chdir_restore, (VALUE)&args);
@@ -819,7 +811,7 @@ dir_s_getwd(VALUE dir)
     path = my_getcwd();
     cwd = rb_tainted_str_new2(path);
 
-    free(path);
+    xfree(path);
     return cwd;
 }
 
@@ -925,6 +917,7 @@ sys_warning_1(const char* mesg)
 
 #define GLOB_ALLOC(type) (type *)malloc(sizeof(type))
 #define GLOB_ALLOC_N(type, n) (type *)malloc(sizeof(type) * (n))
+#define GLOB_FREE(ptr) free(ptr)
 #define GLOB_JUMP_TAG(status) ((status == -1) ? rb_memerror() : rb_jump_tag(status))
 
 /*
@@ -1089,7 +1082,7 @@ glob_make_pattern(const char *p, int flags)
 	    const char *m = find_dirsep(p, flags);
 	    char *buf = GLOB_ALLOC_N(char, m-p+1);
 	    if (!buf) {
-		free(tmp);
+		GLOB_FREE(tmp);
 		goto error;
 	    }
 	    memcpy(buf, p, m-p);
@@ -1131,8 +1124,8 @@ glob_free_pattern(struct glob_pattern *list)
 	struct glob_pattern *tmp = list;
 	list = list->next;
 	if (tmp->str)
-	    free(tmp->str);
-	free(tmp);
+	    GLOB_FREE(tmp->str);
+	GLOB_FREE(tmp);
     }
 }
 
@@ -1254,7 +1247,7 @@ glob_helper(
 	    char *tmp = join_path(path, dirsep, "");
 	    if (!tmp) return -1;
 	    status = glob_call_func(func, tmp, arg);
-	    free(tmp);
+	    GLOB_FREE(tmp);
 	    if (status) return status;
 	}
     }
@@ -1306,8 +1299,8 @@ glob_helper(
 	    }
 
 	    status = glob_helper(buf, 1, YES, new_isdir, new_beg, new_end, flags, func, arg);
-	    free(buf);
-	    free(new_beg);
+	    GLOB_FREE(buf);
+	    GLOB_FREE(new_beg);
 	    if (status) break;
 	}
 
@@ -1335,7 +1328,7 @@ glob_helper(
 
 		new_beg = new_end = GLOB_ALLOC_N(struct glob_pattern *, end - beg);
 		if (!new_beg) {
-		    free(name);
+		    GLOB_FREE(name);
 		    status = -1;
 		    break;
 		}
@@ -1348,20 +1341,20 @@ glob_helper(
 		}
 
 		buf = join_path(path, dirsep, name);
-		free(name);
+		GLOB_FREE(name);
 		if (!buf) {
-		    free(new_beg);
+		    GLOB_FREE(new_beg);
 		    status = -1;
 		    break;
 		}
 		status = glob_helper(buf, 1, UNKNOWN, UNKNOWN, new_beg, new_end, flags, func, arg);
-		free(buf);
-		free(new_beg);
+		GLOB_FREE(buf);
+		GLOB_FREE(new_beg);
 		if (status) break;
 	    }
 	}
 
-	free(copy_beg);
+	GLOB_FREE(copy_beg);
     }
 
     return status;
@@ -1392,12 +1385,12 @@ ruby_glob0(const char *path, int flags, ruby_glob_func *func, VALUE arg)
 
     list = glob_make_pattern(root, flags);
     if (!list) {
-	free(buf);
+	GLOB_FREE(buf);
 	return -1;
     }
     status = glob_helper(buf, 0, UNKNOWN, UNKNOWN, &list, &list + 1, flags, func, arg);
     glob_free_pattern(list);
-    free(buf);
+    GLOB_FREE(buf);
 
     return status;
 }
@@ -1494,7 +1487,7 @@ ruby_brace_expand(const char *str, int flags, ruby_glob_func *func, VALUE arg)
 	    status = ruby_brace_expand(buf, flags, func, arg);
 	    if (status) break;
 	}
-	free(buf);
+	GLOB_FREE(buf);
     }
     else if (!lbrace && !rbrace) {
 	status = (*func)(s, arg);

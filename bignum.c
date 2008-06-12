@@ -44,7 +44,7 @@ static int
 bigzero_p(VALUE x)
 {
     long i;
-    for (i = 0; i < RBIGNUM_LEN(x); ++i) {
+    for (i = RBIGNUM_LEN(x) - 1; 0 <= i; i--) {
 	if (BDIGITS(x)[i]) return 0;
     }
     return 1;
@@ -93,7 +93,7 @@ rb_big_realloc(VALUE big, long len)
 	    RBIGNUM_SET_LEN(big, len);
 	    if (ds) {
 		MEMCPY(RBIGNUM(big)->as.ary, ds, BDIGIT, len);
-		free(ds);
+		xfree(ds);
 	    }
 	}
 	else {
@@ -1219,7 +1219,7 @@ rb_big2dbl(VALUE x)
     double d = big2dbl(x);
 
     if (isinf(d)) {
-	rb_warn("Bignum out of Float range");
+	rb_warning("Bignum out of Float range");
 	d = HUGE_VAL;
     }
     return d;
@@ -1815,7 +1815,15 @@ rb_big_divide(VALUE x, VALUE y, ID op)
 	break;
 
       case T_FLOAT:
-	return DOUBLE2NUM(rb_big2dbl(x) / RFLOAT_VALUE(y));
+	{
+	    double div = rb_big2dbl(x) / RFLOAT_VALUE(y);
+	    if (op == '/') {
+		return DOUBLE2NUM(div);
+	    }
+	    else {
+		return rb_dbl2big(div);
+	    }
+	}
 
       default:
 	return rb_num_coerce_bin(x, y, op);
@@ -1967,22 +1975,15 @@ static VALUE big_shift(VALUE x, int n)
 
 /*
  *  call-seq:
- *     big.quo(numeric) -> float
- *     big.fdiv(numeric) -> float
+  *     big.fdiv(numeric) -> float
  *
  *  Returns the floating point result of dividing <i>big</i> by
  *  <i>numeric</i>.
  *
- *     -1234567890987654321.quo(13731)      #=> -89910996357705.5
- *     -1234567890987654321.quo(13731.24)   #=> -89909424858035.7
+ *     -1234567890987654321.fdiv(13731)      #=> -89910996357705.5
+ *     -1234567890987654321.fdiv(13731.24)   #=> -89909424858035.7
  *
  */
-
-static VALUE
-rb_big_quo(VALUE x, VALUE y)
-{
-    return rb_funcall(rb_rational_raw1(x), '/', 1, rb_Rational1(y));
-}
 
 static VALUE
 rb_big_fdiv(VALUE x, VALUE y)
@@ -2013,6 +2014,7 @@ rb_big_fdiv(VALUE x, VALUE y)
 	    return DOUBLE2NUM(ldexp(big2dbl(z), ex - ey));
 	  }
 	  case T_FLOAT:
+	    if (isnan(RFLOAT_VALUE(y))) return y;
 	    y = dbl2big(ldexp(frexp(RFLOAT_VALUE(y), &ey), DBL_MANT_DIG));
 	    ey -= DBL_MANT_DIG;
 	    goto bignum;
@@ -2150,6 +2152,18 @@ rb_big_pow(VALUE x, VALUE y)
     return DOUBLE2NUM(pow(rb_big2dbl(x), d));
 }
 
+static VALUE
+bit_coerce(VALUE x)
+{
+    while (!FIXNUM_P(x) && TYPE(x) != T_BIGNUM) {
+	if (TYPE(x) == T_FLOAT) {
+	    rb_raise(rb_eTypeError, "can't convert Float into Integer");
+	}
+	x = rb_to_int(x);
+    }
+    return x;
+}
+
 /*
  * call-seq:
  *     big & numeric   =>  integer
@@ -2166,7 +2180,7 @@ rb_big_and(VALUE xx, VALUE yy)
     char sign;
 
     x = xx;
-    y = rb_to_int(yy);
+    y = bit_coerce(yy);
     if (FIXNUM_P(y)) {
 	y = rb_int2big(FIX2LONG(y));
     }
@@ -2221,7 +2235,7 @@ rb_big_or(VALUE xx, VALUE yy)
     char sign;
 
     x = xx;
-    y = rb_to_int(yy);
+    y = bit_coerce(yy);
     if (FIXNUM_P(y)) {
 	y = rb_int2big(FIX2LONG(y));
     }
@@ -2279,7 +2293,7 @@ rb_big_xor(VALUE xx, VALUE yy)
     char sign;
 
     x = xx;
-    y = rb_to_int(yy);
+    y = bit_coerce(yy);
     if (FIXNUM_P(y)) {
 	y = rb_int2big(FIX2LONG(y));
     }
@@ -2680,7 +2694,6 @@ Init_Bignum(void)
     rb_define_method(rb_cBignum, "divmod", rb_big_divmod, 1);
     rb_define_method(rb_cBignum, "modulo", rb_big_modulo, 1);
     rb_define_method(rb_cBignum, "remainder", rb_big_remainder, 1);
-    rb_define_method(rb_cBignum, "quo", rb_big_quo, 1);
     rb_define_method(rb_cBignum, "fdiv", rb_big_fdiv, 1);
     rb_define_method(rb_cBignum, "**", rb_big_pow, 1);
     rb_define_method(rb_cBignum, "&", rb_big_and, 1);

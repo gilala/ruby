@@ -12,6 +12,7 @@
 #include "ruby/ruby.h"
 #include <sys/types.h>
 #include <time.h>
+#include <errno.h>
 #include "ruby/encoding.h"
 
 #ifdef HAVE_UNISTD_H
@@ -38,7 +39,7 @@ struct time_object {
 static void
 time_free(void *tobj)
 {
-    if (tobj) free(tobj);
+    if (tobj) xfree(tobj);
 }
 
 static VALUE
@@ -216,18 +217,24 @@ time_timespec(VALUE num, int interval)
 	break;
 
       default:
-        ary = rb_check_array_type(rb_funcall(num, id_divmod, 1, INT2FIX(1)));
-        if (NIL_P(ary)) {
+        if (rb_respond_to(num, id_divmod)) {
+            ary = rb_check_array_type(rb_funcall(num, id_divmod, 1, INT2FIX(1)));
+            if (NIL_P(ary)) {
+                goto typeerror;
+            }
+            i = rb_ary_entry(ary, 0);
+            f = rb_ary_entry(ary, 1);
+            t.tv_sec = NUM2LONG(i);
+            if (interval && t.tv_sec < 0)
+                rb_raise(rb_eArgError, "%s must be positive", tstr);
+            f = rb_funcall(f, id_mul, 1, INT2FIX(1000000000));
+            t.tv_nsec = NUM2LONG(f);
+        }
+        else {
+typeerror:
             rb_raise(rb_eTypeError, "can't convert %s into %s",
                      rb_obj_classname(num), tstr);
         }
-        i = rb_ary_entry(ary, 0);
-        f = rb_ary_entry(ary, 1);
-        t.tv_sec = NUM2LONG(i);
-	if (interval && t.tv_sec < 0)
-	    rb_raise(rb_eArgError, "%s must be positive", tstr);
-        f = rb_funcall(f, id_mul, 1, INT2FIX(1000000000));
-        t.tv_nsec = NUM2LONG(f);
 	break;
     }
     return t;
@@ -326,7 +333,7 @@ time_s_at(int argc, VALUE *argv, VALUE klass)
     return t;
 }
 
-static const char *months[] = {
+static const char months[][4] = {
     "jan", "feb", "mar", "apr", "may", "jun",
     "jul", "aug", "sep", "oct", "nov", "dec",
 };
@@ -349,7 +356,7 @@ obj2nsec(VALUE obj, long *nsec)
     if (TYPE(obj) == T_STRING) {
 	obj = rb_str_to_inum(obj, 10, Qfalse);
         *nsec = 0;
-        return NUM2LONG(obj) * 1000;
+        return NUM2LONG(obj);
     }
 
     ts = time_timespec(obj, 1);
@@ -822,7 +829,10 @@ static time_t
 make_time_t(struct tm *tptr, int utc_p)
 {
     time_t t;
-    struct tm *tmp, buf;
+#ifdef NEGATIVE_TIME_T
+    struct tm *tmp;
+#endif
+    struct tm buf;
     buf = *tptr;
     if (utc_p) {
 #if defined(HAVE_TIMEGM)
@@ -2003,8 +2013,9 @@ rb_strftime(char **buf, const char *format, struct tm *time)
     if (flen == 0) {
 	return 0;
     }
+    errno = 0;
     len = strftime(*buf, SMALLBUF, format, time);
-    if (len != 0 || **buf == '\0') return len;
+    if (len != 0 || (**buf == '\0' && errno != ERANGE)) return len;
     for (size=1024; ; size*=2) {
 	*buf = xmalloc(size);
 	(*buf)[0] = '\0';
@@ -2017,7 +2028,7 @@ rb_strftime(char **buf, const char *format, struct tm *time)
 	 * format string, it's not failing for lack of room.
 	 */
 	if (len > 0 || size >= 1024 * flen) return len;
-	free(*buf);
+	xfree(*buf);
     }
     /* not reached */
 }
@@ -2097,7 +2108,7 @@ time_strftime(VALUE time, VALUE format)
 	    rb_str_cat(str, buf, len);
 	    p += strlen(p);
 	    if (buf != buffer) {
-		free(buf);
+		xfree(buf);
 		buf = buffer;
 	    }
 	    for (fmt = p; p < pe && !*p; ++p);
@@ -2109,7 +2120,7 @@ time_strftime(VALUE time, VALUE format)
 	len = rb_strftime(&buf, RSTRING_PTR(format), &tobj->tm);
     }
     str = rb_str_new(buf, len);
-    if (buf != buffer) free(buf);
+    if (buf != buffer) xfree(buf);
     rb_enc_copy(str, format);
     return str;
 }
@@ -2327,6 +2338,8 @@ time_load(VALUE klass, VALUE str)
 void
 Init_Time(void)
 {
+#undef rb_intern
+
     id_divmod = rb_intern("divmod");
     id_mul = rb_intern("*");
     id_submicro = rb_intern("submicro");

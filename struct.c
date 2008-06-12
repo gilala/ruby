@@ -127,7 +127,7 @@ static VALUE rb_struct_ref9(VALUE obj) {return RSTRUCT_PTR(obj)[9];}
 
 #define N_REF_FUNC (sizeof(ref_func) / sizeof(ref_func[0]))
 
-static VALUE (*ref_func[])(VALUE) = {
+static VALUE (*const ref_func[])(VALUE) = {
     rb_struct_ref0,
     rb_struct_ref1,
     rb_struct_ref2,
@@ -181,7 +181,9 @@ make_struct(VALUE name, VALUE members, VALUE klass)
 	rb_class_inherited(klass, nstr);
     }
     else {
-	id = SYM2ID(rb_str_intern(name));
+	/* old style: should we warn? */
+	name = rb_str_to_str(name);
+	id = rb_to_id(name);
 	if (!rb_is_const_id(id)) {
 	    rb_name_error(id, "identifier %s needs to be constant", StringValuePtr(name));
 	}
@@ -221,7 +223,7 @@ rb_struct_alloc_noinit(VALUE klass)
 }
 
 VALUE
-rb_struct_define_without_accessor(char *class_name, VALUE super, rb_alloc_func_t alloc, ...)
+rb_struct_define_without_accessor(const char *class_name, VALUE super, rb_alloc_func_t alloc, ...)
 {
     VALUE klass;
     va_list ar;
@@ -322,13 +324,13 @@ rb_struct_s_def(int argc, VALUE *argv, VALUE klass)
     ID id;
 
     rb_scan_args(argc, argv, "1*", &name, &rest);
-    for (i=0; i<RARRAY_LEN(rest); i++) {
-	id = rb_to_id(RARRAY_PTR(rest)[i]);
-	RARRAY_PTR(rest)[i] = ID2SYM(id);
-    }
     if (!NIL_P(name) && SYMBOL_P(name)) {
 	rb_ary_unshift(rest, name);
 	name = Qnil;
+    }
+    for (i=0; i<RARRAY_LEN(rest); i++) {
+	id = rb_to_id(RARRAY_PTR(rest)[i]);
+	RARRAY_PTR(rest)[i] = ID2SYM(id);
     }
     st = make_struct(name, rest, klass);
     if (rb_block_given_p()) {
@@ -477,7 +479,7 @@ rb_struct_each_pair(VALUE s)
 static VALUE
 inspect_struct(VALUE s, VALUE dummy, int recur)
 {
-    char *cname = rb_class2name(rb_obj_class(s));
+    const char *cname = rb_class2name(rb_obj_class(s));
     VALUE str, members;
     long i;
 

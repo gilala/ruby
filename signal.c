@@ -36,7 +36,7 @@
 # endif
 #endif
 
-static struct signals {
+static const struct signals {
     const char *signm;
     int  signo;
 } siglist [] = {
@@ -178,7 +178,7 @@ static struct signals {
 static int
 signm2signo(const char *nm)
 {
-    struct signals *sigs;
+    const struct signals *sigs;
 
     for (sigs = siglist; sigs->signm; sigs++)
 	if (strcmp(sigs->signm, nm) == 0)
@@ -189,7 +189,7 @@ signm2signo(const char *nm)
 static const char*
 signo2signm(int no)
 {
-    struct signals *sigs;
+    const struct signals *sigs;
 
     for (sigs = siglist; sigs->signm; sigs++)
 	if (sigs->signo == no)
@@ -222,6 +222,7 @@ esignal_init(int argc, VALUE *argv, VALUE self)
     if (argc > 0) {
 	sig = rb_check_to_integer(argv[0], "to_int");
 	if (!NIL_P(sig)) argnum = 2;
+	else sig = argv[0];
     }
     if (argc < 1 || argnum < argc) {
 	rb_raise(rb_eArgError, "wrong number of arguments (%d for %d)",
@@ -252,14 +253,25 @@ esignal_init(int argc, VALUE *argv, VALUE self)
 	if (!signo) {
 	    rb_raise(rb_eArgError, "unsupported name `SIG%s'", signm);
 	}
-	if (SYMBOL_P(sig)) {
-	    sig = rb_str_new2(signm);
-	}
+	sig = rb_sprintf("SIG%s", signm);
     }
     rb_call_super(1, &sig);
     rb_iv_set(self, "signo", INT2NUM(signo));
 
     return self;
+}
+
+/*
+ * call-seq:
+ *    signal_exception.signo   =>  num
+ *
+ *  Returns a signal number.
+ */
+
+static VALUE
+esignal_signo(VALUE self)
+{
+    return rb_iv_get(self, "signo");
 }
 
 static VALUE
@@ -381,7 +393,9 @@ static struct {
     VALUE cmd;
 } trap_list[NSIG];
 static rb_atomic_t trap_pending_list[NSIG];
+#if 0
 static char rb_trap_accept_nativethreads[NSIG];
+#endif
 rb_atomic_t rb_trap_pending;
 rb_atomic_t rb_trap_immediate;
 int rb_prohibit_interrupt = 1;
@@ -417,7 +431,9 @@ ruby_signal(int signum, sighandler_t handler)
 {
     struct sigaction sigact, old;
 
+#if 0
     rb_trap_accept_nativethreads[signum] = 0;
+#endif
 
     sigemptyset(&sigact.sa_mask);
 #ifdef SA_SIGINFO
@@ -443,8 +459,8 @@ posix_signal(int signum, sighandler_t handler)
 }
 
 #else /* !POSIX_SIGNAL */
-#define ruby_signal(sig,handler) (rb_trap_accept_nativethreads[sig] = 0, signal((sig),(handler)))
-#ifdef HAVE_NATIVETHREAD
+#define ruby_signal(sig,handler) (/* rb_trap_accept_nativethreads[sig] = 0,*/ signal((sig),(handler)))
+#if 0 /* def HAVE_NATIVETHREAD */
 static sighandler_t
 ruby_nativethread_signal(int signum, sighandler_t handler)
 {
@@ -469,12 +485,13 @@ sighandler(int sig)
 #endif
 }
 
+#if USE_TRAP_MASK
 # ifdef HAVE_SIGPROCMASK
 static sigset_t trap_last_mask;
 # else
 static int trap_last_mask;
 # endif
-
+#endif
 
 #if HAVE_PTHREAD_H
 #include <pthread.h>
@@ -932,13 +949,13 @@ sig_trap(int argc, VALUE *argv)
  * Returns a list of signal names mapped to the corresponding
  * underlying signal numbers.
  *
- * Signal.list   #=> {"ABRT"=>6, "ALRM"=>14, "BUS"=>7, "CHLD"=>17, "CLD"=>17, "CONT"=>18, "FPE"=>8, "HUP"=>1, "ILL"=>4, "INT"=>2, "IO"=>29, "IOT"=>6, "KILL"=>9, "PIPE"=>13, "POLL"=>29, "PROF"=>27, "PWR"=>30, "QUIT"=>3, "SEGV"=>11, "STOP"=>19, "SYS"=>31, "TERM"=>15, "TRAP"=>5, "TSTP"=>20, "TTIN"=>21, "TTOU"=>22, "URG"=>23, "USR1"=>10, "USR2"=>12, "VTALRM"=>26, "WINCH"=>28, "XCPU"=>24, "XFSZ"=>25}
+ *   Signal.list   #=> {"EXIT"=>0, "HUP"=>1, "INT"=>2, "QUIT"=>3, "ILL"=>4, "TRAP"=>5, "IOT"=>6, "ABRT"=>6, "FPE"=>8, "KILL"=>9, "BUS"=>7, "SEGV"=>11, "SYS"=>31, "PIPE"=>13, "ALRM"=>14, "TERM"=>15, "URG"=>23, "STOP"=>19, "TSTP"=>20, "CONT"=>18, "CHLD"=>17, "CLD"=>17, "TTIN"=>21, "TTOU"=>22, "IO"=>29, "XCPU"=>24, "XFSZ"=>25, "VTALRM"=>26, "PROF"=>27, "WINCH"=>28, "USR1"=>10, "USR2"=>12, "PWR"=>30, "POLL"=>29}
  */
 static VALUE
 sig_list(void)
 {
     VALUE h = rb_hash_new();
-    struct signals *sigs;
+    const struct signals *sigs;
 
     for (sigs = siglist; sigs->signm; sigs++) {
 	rb_hash_aset(h, rb_str_new2(sigs->signm), INT2FIX(sigs->signo));
@@ -957,6 +974,7 @@ install_sighandler(int signum, sighandler_t handler)
     }
 }
 
+#if defined(SIGCLD) || defined(SIGCHLD)
 static void
 init_sigchld(int sig)
 {
@@ -997,6 +1015,7 @@ init_sigchld(int sig)
     trap_last_mask = mask;
 #endif
 }
+#endif
 
 void
 ruby_sig_finalize()
@@ -1062,7 +1081,7 @@ Init_signal(void)
     rb_define_module_function(mSignal, "list", sig_list, 0);
 
     rb_define_method(rb_eSignal, "initialize", esignal_init, -1);
-    rb_attr(rb_eSignal, rb_intern("signo"), 1, 0, 0);
+    rb_define_method(rb_eSignal, "signo", esignal_signo, 0);
     rb_alias(rb_eSignal, rb_intern("signm"), rb_intern("message"));
     rb_define_method(rb_eInterrupt, "initialize", interrupt_init, -1);
 

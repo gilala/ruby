@@ -15,14 +15,27 @@
 
 VALUE rb_mMath;
 
-#define Need_Float(x) (x) = rb_Float(x)
+static VALUE
+to_flo(VALUE x)
+{
+    if (!rb_obj_is_kind_of(x, rb_cNumeric)) {
+	rb_raise(rb_eTypeError, "can't convert %s into Float",
+		 NIL_P(x) ? "nil" :
+		 x == Qtrue ? "true" :
+		 x == Qfalse ? "false" :
+		 rb_obj_classname(x));
+    }
+    return rb_convert_type(x, T_FLOAT, "Float", "to_f");
+}
+
+#define Need_Float(x) (x) = to_flo(x)
 #define Need_Float2(x,y) do {\
     Need_Float(x);\
     Need_Float(y);\
 } while (0)
 
 static void
-domain_check(double x, char *msg)
+domain_check(double x, const char *msg)
 {
     while(1) {
 	if (errno) {
@@ -465,7 +478,7 @@ math_ldexp(VALUE obj, VALUE x, VALUE n)
  *     Math.hypot(3, 4)   #=> 5.0
  */
 
-static VALUE
+VALUE
 math_hypot(VALUE obj, VALUE x, VALUE y)
 {
     Need_Float2(x, y);
