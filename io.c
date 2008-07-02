@@ -14,6 +14,7 @@
 #include "ruby/ruby.h"
 #include "ruby/io.h"
 #include "ruby/signal.h"
+#include "ruby/win32.h"
 #include "vm_core.h"
 #include <ctype.h>
 #include <errno.h>
@@ -688,6 +689,11 @@ static long
 io_fwrite(VALUE str, rb_io_t *fptr)
 {
     long len, n, r, l, offset = 0;
+
+#ifdef _WIN32
+    len = rb_w32_write_console(str, fptr->fd);
+    if (len >= 0) return len;
+#endif
 
     /*
      * If an external encoding was specified and it differs from

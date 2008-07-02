@@ -192,6 +192,7 @@ rb_enc_dummy_p(rb_encoding *enc)
     return ENC_DUMMY_P(ENC_FROM_ENCODING(enc));
 }
 
+int rb_transcode_convertible(const char* from_encoding, const char* to_encoding);
 VALUE rb_str_transcode(VALUE str, VALUE to);
 
 #endif /* RUBY_ENCODING_H */

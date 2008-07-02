@@ -119,6 +119,14 @@ transcode_dispatch(const char* from_encoding, const char* to_encoding)
     return (rb_transcoder *)val;
 }
 
+/*
+ * experimental.
+ */
+int
+rb_transcode_convertible(const char* from_encoding, const char* to_encoding)
+{
+    return transcode_dispatch(from_encoding, to_encoding) ? TRUE : FALSE;
+}
 
 /*
  *  Transcoding engine logic

@@ -12,6 +12,7 @@
 
 #include "ruby/ruby.h"
 #include "ruby/signal.h"
+#include "ruby/encoding.h"
 #include "dln.h"
 #include <fcntl.h>
 #include <process.h>
@@ -3931,6 +3932,28 @@ rb_w32_write(int fd, const void *buf, size_t size)
     }
     else
 	return rb_w32_send(fd, buf, size, 0);
+}
+
+long
+rb_w32_write_console(VALUE str, int fd)
+{
+    static int disable;
+    HANDLE handle;
+    DWORD dwMode, reslen;
+
+    if (disable) return -1L;
+    handle = (HANDLE)_osfhnd(fd);
+    if (!GetConsoleMode(handle, &dwMode) ||
+	!rb_transcode_convertible(rb_enc_name(rb_enc_get(str)), "UTF-16LE"))
+	return -1L;
+
+    str = rb_str_transcode(str, rb_str_new2("UTF-16LE"));
+    if (!WriteConsoleW(handle, (LPWSTR)RSTRING_PTR(str), RSTRING_LEN(str)/2, &reslen, NULL)) {
+	if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+	    disable = TRUE;
+	return -1L;
+    }
+    return (long)reslen;
 }
 
 static int
