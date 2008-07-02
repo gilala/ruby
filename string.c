@@ -25,6 +25,10 @@
 #include <unistd.h>
 #endif
 
+#undef rb_str_new2
+#undef rb_tainted_str_new2
+#undef rb_usascii_str_new2
+
 VALUE rb_cString;
 VALUE rb_cSymbol;
 
@@ -953,7 +957,7 @@ rb_str_times(VALUE str, VALUE times)
 static VALUE
 rb_str_format_m(VALUE str, VALUE arg)
 {
-    VALUE tmp = rb_check_array_type(arg);
+    volatile VALUE tmp = rb_check_array_type(arg);
 
     if (!NIL_P(tmp)) {
 	return rb_str_format(RARRAY_LEN(tmp), RARRAY_PTR(tmp), str);
@@ -2093,19 +2097,17 @@ rb_str_index(VALUE str, VALUE sub, long offset)
 /*
  *  call-seq:
  *     str.index(substring [, offset])   => fixnum or nil
- *     str.index(fixnum [, offset])      => fixnum or nil
  *     str.index(regexp [, offset])      => fixnum or nil
  *  
- *  Returns the index of the first occurrence of the given <i>substring</i>,
- *  character (<i>fixnum</i>), or pattern (<i>regexp</i>) in <i>str</i>. Returns
- *  <code>nil</code> if not found. If the second parameter is present, it
- *  specifies the position in the string to begin the search.
+ *  Returns the index of the first occurrence of the given <i>substring</i> or
+ *  pattern (<i>regexp</i>) in <i>str</i>. Returns <code>nil</code> if not
+ *  found. If the second parameter is present, it specifies the position in the
+ *  string to begin the search.
  *     
  *     "hello".index('e')             #=> 1
  *     "hello".index('lo')            #=> 3
  *     "hello".index('a')             #=> nil
  *     "hello".index(?e)              #=> 1
- *     "hello".index(101)             #=> 1
  *     "hello".index(/[aeiou]/, -3)   #=> 4
  */
 
@@ -2202,20 +2204,18 @@ rb_str_rindex(VALUE str, VALUE sub, long pos)
 /*
  *  call-seq:
  *     str.rindex(substring [, fixnum])   => fixnum or nil
- *     str.rindex(fixnum [, fixnum])   => fixnum or nil
  *     str.rindex(regexp [, fixnum])   => fixnum or nil
  *  
- *  Returns the index of the last occurrence of the given <i>substring</i>,
- *  character (<i>fixnum</i>), or pattern (<i>regexp</i>) in <i>str</i>. Returns
- *  <code>nil</code> if not found. If the second parameter is present, it
- *  specifies the position in the string to end the search---characters beyond
- *  this point will not be considered.
+ *  Returns the index of the last occurrence of the given <i>substring</i> or
+ *  pattern (<i>regexp</i>) in <i>str</i>. Returns <code>nil</code> if not
+ *  found. If the second parameter is present, it specifies the position in the
+ *  string to end the search---characters beyond this point will not be
+ *  considered.
  *     
  *     "hello".rindex('e')             #=> 1
  *     "hello".rindex('l')             #=> 3
  *     "hello".rindex('a')             #=> nil
  *     "hello".rindex(?e)              #=> 1
- *     "hello".rindex(101)             #=> 1
  *     "hello".rindex(/[aeiou]/, -2)   #=> 1
  */
 
@@ -2247,7 +2247,7 @@ rb_str_rindex_m(int argc, VALUE *argv, VALUE str)
     switch (TYPE(sub)) {
       case T_REGEXP:
 	/* enc = rb_get_check(str, sub); */
-	if (RREGEXP(sub)->len) {
+	if (!RREGEXP(sub)->ptr || RREGEXP_SRC_LEN(sub)) {
 	    pos = rb_reg_adjust_startpos(sub, str, pos, 1);
 	    pos = rb_reg_search(sub, str, pos, 1);
 	    pos = rb_str_sublen(str, pos);
@@ -3596,7 +3596,6 @@ rb_str_reverse_bang(VALUE str)
 /*
  *  call-seq:
  *     str.include? other_str   => true or false
- *     str.include? fixnum      => true or false
  *  
  *  Returns <code>true</code> if <i>str</i> contains the given string or
  *  character.

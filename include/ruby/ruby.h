@@ -235,7 +235,7 @@ enum ruby_special_consts {
     RUBY_IMMEDIATE_MASK = 0x03,
     RUBY_FIXNUM_FLAG    = 0x01,
     RUBY_SYMBOL_FLAG    = 0x0e,
-    RUBY_SPECIAL_SHIFT  = 8,
+    RUBY_SPECIAL_SHIFT  = 8
 };
 
 #define Qfalse ((VALUE)RUBY_Qfalse)
@@ -280,7 +280,7 @@ enum ruby_value_type {
     RUBY_T_NODE   = 0x1c,
     RUBY_T_ICLASS = 0x1d,
 
-    RUBY_T_MASK   = 0x1f,
+    RUBY_T_MASK   = 0x1f
 };
 
 #define T_NONE   RUBY_T_NONE
@@ -522,9 +522,12 @@ struct RArray {
 struct RRegexp {
     struct RBasic basic;
     struct re_pattern_buffer *ptr;
-    long len;
-    char *str;
+    VALUE src;
+    unsigned long usecnt;
 };
+#define RREGEXP_SRC(r) RREGEXP(r)->src
+#define RREGEXP_SRC_PTR(r) RSTRING_PTR(RREGEXP(r)->src)
+#define RREGEXP_SRC_LEN(r) RSTRING_LEN(RREGEXP(r)->src)
 
 struct RHash {
     struct RBasic basic;
@@ -778,7 +781,7 @@ VALUE rb_id2str(ID);
  * since gcc-2.7.2.3 at least. */
 #define rb_intern(str) \
     (__builtin_constant_p(str) ? \
-        (CONST_ID_CACHE(/**/, str)) : \
+        __extension__ (CONST_ID_CACHE(/**/, str)) : \
         rb_intern(str))
 #endif
 
@@ -904,9 +907,6 @@ RUBY_EXTERN VALUE rb_cThread;
 RUBY_EXTERN VALUE rb_cTime;
 RUBY_EXTERN VALUE rb_cTrueClass;
 RUBY_EXTERN VALUE rb_cUnboundMethod;
-RUBY_EXTERN VALUE rb_cISeq;
-RUBY_EXTERN VALUE rb_cVM;
-RUBY_EXTERN VALUE rb_cEnv;
 
 RUBY_EXTERN VALUE rb_eException;
 RUBY_EXTERN VALUE rb_eStandardError;
@@ -1001,18 +1001,19 @@ void ruby_sysinit(int *, char ***);
 #define HAVE_NATIVETHREAD
 int ruby_native_thread_p(void);
 
-#define RUBY_EVENT_NONE     0x00
-#define RUBY_EVENT_LINE     0x01
-#define RUBY_EVENT_CLASS    0x02
-#define RUBY_EVENT_END      0x04
-#define RUBY_EVENT_CALL     0x08
-#define RUBY_EVENT_RETURN   0x10
-#define RUBY_EVENT_C_CALL   0x20
-#define RUBY_EVENT_C_RETURN 0x40
-#define RUBY_EVENT_RAISE    0x80
-#define RUBY_EVENT_ALL      0xff
-#define RUBY_EVENT_VM      0x100
-#define RUBY_EVENT_SWITCH  0x200
+#define RUBY_EVENT_NONE      0x0000
+#define RUBY_EVENT_LINE      0x0001
+#define RUBY_EVENT_CLASS     0x0002
+#define RUBY_EVENT_END       0x0004
+#define RUBY_EVENT_CALL      0x0008
+#define RUBY_EVENT_RETURN    0x0010
+#define RUBY_EVENT_C_CALL    0x0020
+#define RUBY_EVENT_C_RETURN  0x0040
+#define RUBY_EVENT_RAISE     0x0080
+#define RUBY_EVENT_ALL       0xffff
+#define RUBY_EVENT_VM       0x10000
+#define RUBY_EVENT_SWITCH   0x20000
+#define RUBY_EVENT_COVERAGE 0x40000
 
 typedef unsigned int rb_event_flag_t;
 typedef void (*rb_event_hook_func_t)(rb_event_flag_t, VALUE data, VALUE, ID, VALUE klass);

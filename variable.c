@@ -245,7 +245,7 @@ rb_path2class(const char *path)
 	}
 	if (!rb_const_defined(c, id)) {
 	  undefined_class:
-	    rb_raise(rb_eArgError, "undefined class/module %.*s", p-path, path);
+	    rb_raise(rb_eArgError, "undefined class/module %.*s", (int)(p-path), path);
 	}
 	c = rb_const_get_at(c, id);
 	switch (TYPE(c)) {
@@ -594,6 +594,7 @@ rb_f_untrace_var(int argc, VALUE *argv)
     struct trace_var *trace;
     st_data_t data;
 
+    rb_secure(4);
     rb_scan_args(argc, argv, "11", &var, &cmd);
     id = rb_to_id(var);
     if (!st_lookup(rb_global_tbl, id, &data)) {

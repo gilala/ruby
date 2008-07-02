@@ -21,9 +21,10 @@
 #define BUFSIZE 0x100
 #define PROCDEBUG 0
 
-VALUE rb_cVM;
+VALUE rb_cRubyVM;
 VALUE rb_cThread;
 VALUE rb_cEnv;
+VALUE rb_mRubyVMFrozenCore;
 
 VALUE ruby_vm_global_state_version = 1;
 rb_thread_t *ruby_current_thread = 0;
@@ -95,7 +96,7 @@ vm_set_eval_stack(rb_thread_t * th, VALUE iseqval, const NODE *cref)
     }
 }
 
-static rb_control_frame_t *
+rb_control_frame_t *
 vm_get_ruby_level_next_cfp(rb_thread_t *th, rb_control_frame_t *cfp)
 {
     while (!RUBY_VM_CONTROL_FRAME_STACK_OVERFLOW_P(th, cfp)) {
@@ -1072,6 +1073,7 @@ vm_eval_body(rb_thread_t *th)
 	err = th->errinfo;
 
 	if (state == TAG_RAISE) {
+	    if (OBJ_FROZEN(err)) rb_exc_raise(err);
 	    rb_ivar_set(err, idThrowState, INT2FIX(state));
 	}
 
@@ -1627,6 +1629,68 @@ rb_thread_alloc(VALUE klass)
     return self;
 }
 
+static VALUE
+m_core_set_method_alias(VALUE self, VALUE cbase, VALUE sym1, VALUE sym2)
+{
+    rb_alias(cbase, SYM2ID(sym1), SYM2ID(sym2));
+    return Qnil;
+}
+
+static VALUE
+m_core_set_variable_alias(VALUE self, VALUE sym1, VALUE sym2)
+{
+    rb_alias_variable(SYM2ID(sym1), SYM2ID(sym2));
+    return Qnil;
+}
+
+static VALUE
+m_core_undef_method(VALUE self, VALUE cbase, VALUE sym)
+{
+    rb_undef(cbase, SYM2ID(sym));
+    INC_VM_STATE_VERSION();
+    return Qnil;
+}
+
+static VALUE
+m_core_define_method(VALUE self, VALUE cbase, VALUE sym, VALUE iseqval)
+{
+    rb_iseq_t *iseq;
+    GetISeqPtr(iseqval, iseq);
+    vm_define_method(GET_THREAD(), cbase, SYM2ID(sym), iseq, 0, vm_cref());
+    return Qnil;
+}
+
+static VALUE
+m_core_define_singleton_method(VALUE self, VALUE cbase, VALUE sym, VALUE iseqval)
+{
+    rb_iseq_t *iseq;
+    GetISeqPtr(iseqval, iseq);
+    vm_define_method(GET_THREAD(), cbase, SYM2ID(sym), iseq, 1, vm_cref());
+    return Qnil;
+}
+
+static VALUE
+m_core_set_postexe(VALUE self, VALUE iseqval)
+{
+    rb_iseq_t *blockiseq;
+    rb_block_t *blockptr;
+    rb_thread_t *th = GET_THREAD();
+    rb_control_frame_t *cfp = vm_get_ruby_level_next_cfp(th, th->cfp);
+    VALUE proc;
+    extern void rb_call_end_proc(VALUE data);
+
+    GetISeqPtr(iseqval, blockiseq);
+
+    blockptr = RUBY_VM_GET_BLOCK_PTR_IN_CFP(cfp);
+    blockptr->iseq = blockiseq;
+    blockptr->proc = 0;
+
+    proc = vm_make_proc(th, cfp, blockptr);
+    rb_set_end_proc(rb_call_end_proc, proc);
+
+    return Qnil;
+}
+
 VALUE insns_name_array(void);
 extern VALUE *rb_gc_stack_start;
 extern size_t rb_gc_stack_maxsize;
@@ -1673,11 +1737,21 @@ Init_VM(void)
     VALUE opts;
 
     /* ::VM */
-    rb_cVM = rb_define_class("VM", rb_cObject);
-    rb_undef_alloc_func(rb_cVM);
+    rb_cRubyVM = rb_define_class("RubyVM", rb_cObject);
+    rb_undef_alloc_func(rb_cRubyVM);
 
-    /* Env */
-    rb_cEnv = rb_define_class_under(rb_cVM, "Env", rb_cObject);
+    /* ::VM::FrozenCore */
+    rb_mRubyVMFrozenCore = rb_define_module_under(rb_cRubyVM, "FrozenCore");
+    rb_define_singleton_method(rb_mRubyVMFrozenCore, "core_set_method_alias", m_core_set_method_alias, 3);
+    rb_define_singleton_method(rb_mRubyVMFrozenCore, "core_set_variable_alias", m_core_set_variable_alias, 2);
+    rb_define_singleton_method(rb_mRubyVMFrozenCore, "core_undef_method", m_core_undef_method, 2);
+    rb_define_singleton_method(rb_mRubyVMFrozenCore, "core_define_method", m_core_define_method, 3);
+    rb_define_singleton_method(rb_mRubyVMFrozenCore, "core_define_singleton_method", m_core_define_singleton_method, 3);
+    rb_define_singleton_method(rb_mRubyVMFrozenCore, "core_set_postexe", m_core_set_postexe, 1);
+    rb_obj_freeze(rb_mRubyVMFrozenCore);
+
+    /* ::VM::Env */
+    rb_cEnv = rb_define_class_under(rb_cRubyVM, "Env", rb_cObject);
     rb_undef_alloc_func(rb_cEnv);
 
     /* ::Thread */
@@ -1685,10 +1759,10 @@ Init_VM(void)
     rb_undef_alloc_func(rb_cThread);
 
     /* ::VM::USAGE_ANALYSIS_* */
-    rb_define_const(rb_cVM, "USAGE_ANALYSIS_INSN", rb_hash_new());
-    rb_define_const(rb_cVM, "USAGE_ANALYSIS_REGS", rb_hash_new());
-    rb_define_const(rb_cVM, "USAGE_ANALYSIS_INSN_BIGRAM", rb_hash_new());
-    rb_define_const(rb_cVM, "OPTS", opts = rb_ary_new());
+    rb_define_const(rb_cRubyVM, "USAGE_ANALYSIS_INSN", rb_hash_new());
+    rb_define_const(rb_cRubyVM, "USAGE_ANALYSIS_REGS", rb_hash_new());
+    rb_define_const(rb_cRubyVM, "USAGE_ANALYSIS_INSN_BIGRAM", rb_hash_new());
+    rb_define_const(rb_cRubyVM, "OPTS", opts = rb_ary_new());
 
 #if   OPT_DIRECT_THREADED_CODE
     rb_ary_push(opts, rb_str_new2("direct threaded code"));
@@ -1719,12 +1793,12 @@ Init_VM(void)
 #endif
 
     /* ::VM::InsnNameArray */
-    rb_define_const(rb_cVM, "INSTRUCTION_NAMES", insns_name_array());
+    rb_define_const(rb_cRubyVM, "INSTRUCTION_NAMES", insns_name_array());
 
     /* debug functions ::VM::SDR(), ::VM::NSDR() */
 #if VMDEBUG
-    rb_define_singleton_method(rb_cVM, "SDR", sdr, 0);
-    rb_define_singleton_method(rb_cVM, "NSDR", nsdr, 0);
+    rb_define_singleton_method(rb_cRubyVM, "SDR", sdr, 0);
+    rb_define_singleton_method(rb_cRubyVM, "NSDR", nsdr, 0);
 #else
     (void)sdr;
     (void)nsdr;
@@ -1740,7 +1814,7 @@ Init_VM(void)
 	rb_iseq_t *iseq;
 
 	/* create vm object */
-	vm->self = Data_Wrap_Struct(rb_cVM, rb_vm_mark, vm_free, vm);
+	vm->self = Data_Wrap_Struct(rb_cRubyVM, rb_vm_mark, vm_free, vm);
 
 	/* create main thread */
 	th_self = th->self = Data_Wrap_Struct(rb_cThread, rb_thread_mark, thread_free, th);

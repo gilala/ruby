@@ -70,7 +70,7 @@ enum lex_state_e {
     EXPR_FNAME,			/* ignore newline, no reserved words. */
     EXPR_DOT,			/* right after `.' or `::', no reserved words. */
     EXPR_CLASS,			/* immediate after `class', no here document. */
-    EXPR_VALUE,			/* alike EXPR_BEG but label is disallowed. */
+    EXPR_VALUE			/* alike EXPR_BEG but label is disallowed. */
 };
 
 # ifdef HAVE_LONG_LONG
@@ -249,6 +249,7 @@ struct parser_params {
     NODE *parser_eval_tree_begin;
     NODE *parser_eval_tree;
     VALUE debug_lines;
+    VALUE coverage;
     int nerr;
 #else
     /* Ripper only */
@@ -322,6 +323,7 @@ static int parser_yyerror(struct parser_params*, const char*);
 #define ruby_eval_tree		(parser->parser_eval_tree)
 #define ruby_eval_tree_begin	(parser->parser_eval_tree_begin)
 #define ruby_debug_lines	(parser->debug_lines)
+#define ruby_coverage		(parser->coverage)
 #endif
 
 static int yylex(void*, void*);
@@ -2613,6 +2615,22 @@ primary		: literal
 			$$ = dispatch1(defined, $5);
 		    %*/
 		    }
+		| keyword_not '(' expr rparen
+		    {
+		    /*%%%*/
+			$$ = call_uni_op(cond($3), '!');
+		    /*%
+			$$ = dispatch2(unary, ripper_intern("not"), $3);
+		    %*/
+		    }
+		| keyword_not '(' rparen
+		    {
+		    /*%%%*/
+			$$ = call_uni_op(cond(NEW_NIL()), '!');
+		    /*%
+			$$ = dispatch2(unary, ripper_intern("not"), Qnil);
+		    %*/
+		    }
 		| operation brace_block
 		    {
 		    /*%%%*/
@@ -4652,6 +4670,32 @@ debug_lines(const char *f)
 }
 
 static VALUE
+coverage(const char *f, int n)
+{
+    if (rb_const_defined_at(rb_cObject, rb_intern("COVERAGE__"))) {
+	VALUE hash = rb_const_get_at(rb_cObject, rb_intern("COVERAGE__"));
+	if (TYPE(hash) == T_HASH) {
+	    VALUE fname = rb_str_new2(f);
+	    VALUE lines = rb_ary_new2(n);
+	    int i;
+	    for (i = 0; i < n; i++) RARRAY_PTR(lines)[i] = Qnil;
+	    RARRAY(lines)->len = n;
+	    rb_hash_aset(hash, fname, lines);
+	    return lines;
+	}
+    }
+    return 0;
+}
+
+static int
+e_option_supplied(struct parser_params *parser)
+{
+    if (strcmp(ruby_sourcefile, "-e") == 0)
+	return Qtrue;
+    return Qfalse;
+}
+
+static VALUE
 yycompile0(VALUE arg, int tracing)
 {
     int n;
@@ -4667,11 +4711,19 @@ yycompile0(VALUE arg, int tracing)
 		rb_ary_push(ruby_debug_lines, str);
 	    } while (--n);
 	}
+
+	if (!e_option_supplied(parser)) {
+	    ruby_coverage = coverage(ruby_sourcefile, ruby_sourceline);
+	}
     }
 
     parser_prepare(parser);
     n = yyparse((void*)parser);
+    if (ruby_coverage) {
+	rb_ary_freeze(ruby_coverage);
+    }
     ruby_debug_lines = 0;
+    ruby_coverage = 0;
     compile_for_eval = 0;
 
     lex_strterm = 0;
@@ -4733,6 +4785,9 @@ lex_getline(struct parser_params *parser)
 #ifndef RIPPER
     if (ruby_debug_lines && !NIL_P(line)) {
 	rb_ary_push(ruby_debug_lines, line);
+    }
+    if (ruby_coverage && !NIL_P(line)) {
+	rb_ary_push(ruby_coverage, Qnil);
     }
 #endif
     return line;
@@ -4827,7 +4882,7 @@ enum string_type {
     str_sword  = (STR_FUNC_QWORDS),
     str_dword  = (STR_FUNC_QWORDS|STR_FUNC_EXPAND),
     str_ssym   = (STR_FUNC_SYMBOL),
-    str_dsym   = (STR_FUNC_SYMBOL|STR_FUNC_EXPAND),
+    str_dsym   = (STR_FUNC_SYMBOL|STR_FUNC_EXPAND)
 };
 
 static VALUE
@@ -8108,14 +8163,6 @@ assign_in_cond(struct parser_params *parser, NODE *node)
 	break;
     }
     return 1;
-}
-
-static int
-e_option_supplied(struct parser_params *parser)
-{
-    if (strcmp(ruby_sourcefile, "-e") == 0)
-	return Qtrue;
-    return Qfalse;
 }
 
 static void

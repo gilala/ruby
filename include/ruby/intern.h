@@ -329,6 +329,7 @@ void ruby_set_stack_size(size_t);
 NORETURN(void rb_memerror(void));
 int ruby_stack_check(void);
 int ruby_stack_length(VALUE**);
+int rb_during_gc(void);
 void rb_gc_mark_locations(VALUE*, VALUE*);
 void rb_mark_tbl(struct st_table*);
 void rb_mark_set(struct st_table*);
@@ -535,6 +536,26 @@ VALUE rb_str_buf_new2(const char*);
 VALUE rb_str_tmp_new(long);
 VALUE rb_usascii_str_new(const char*, long);
 VALUE rb_usascii_str_new2(const char*);
+#if defined __GNUC__
+#define rb_str_new2(str) __extension__ (	\
+{						\
+    (__builtin_constant_p(str)) ?	       \
+	rb_str_new(str, strlen(str)) :		\
+	rb_str_new2(str);			\
+})
+#define rb_tainted_str_new2(str) __extension__ ( \
+{					       \
+    (__builtin_constant_p(str)) ?	       \
+	rb_tainted_str_new(str, strlen(str)) : \
+	rb_tainted_str_new2(str);	       \
+})
+#define rb_usascii_str_new2(str) __extension__ ( \
+{					       \
+    (__builtin_constant_p(str)) ?	       \
+	rb_usascii_str_new(str, strlen(str)) : \
+	rb_usascii_str_new2(str);	       \
+})
+#endif
 void rb_str_free(VALUE);
 void rb_str_shared_replace(VALUE, VALUE);
 VALUE rb_str_buf_append(VALUE, VALUE);

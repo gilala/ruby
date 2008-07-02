@@ -357,7 +357,7 @@ BSD__sbprintf(register FILE *fp, const char *fmt, va_list ap)
  * use the given digits.
  */
 static char *
-BSD__uqtoa(register u_quad_t val, char *endp, int base, int octzero, char *xdigs)
+BSD__uqtoa(register u_quad_t val, char *endp, int base, int octzero, const char *xdigs)
 {
 	register char *cp = endp;
 	register long sval;
@@ -564,9 +564,9 @@ BSD_vfprintf(FILE *fp, const char *fmt0, va_list ap)
 	 * below longer.
 	 */
 #define	PADSIZE	16		/* pad chunk size */
-	static char blanks[PADSIZE] =
+	static const char blanks[PADSIZE] =
 	 {' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '};
-	static char zeroes[PADSIZE] =
+	static const char zeroes[PADSIZE] =
 	 {'0','0','0','0','0','0','0','0','0','0','0','0','0','0','0','0'};
 
 	/*

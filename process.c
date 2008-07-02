@@ -179,11 +179,7 @@ static VALUE
 get_ppid(void)
 {
     rb_secure(2);
-#ifdef _WIN32
-    return INT2FIX(0);
-#else
     return PIDT2NUM(getppid());
-#endif
 }
 
 
@@ -1265,7 +1261,7 @@ enum {
     EXEC_OPTION_DUP2,
     EXEC_OPTION_CLOSE,
     EXEC_OPTION_OPEN,
-    EXEC_OPTION_CLOSE_OTHERS,
+    EXEC_OPTION_CLOSE_OTHERS
 };
 
 static VALUE
@@ -2056,12 +2052,13 @@ run_exec_rlimit(VALUE ary, VALUE save)
         int rtype = NUM2INT(RARRAY_PTR(elt)[0]);
         struct rlimit rlim;
         if (!NIL_P(save)) {
+            VALUE tmp, newary;
             if (getrlimit(rtype, &rlim) == -1)
                 return -1;
-            VALUE tmp = hide_obj(rb_ary_new3(3, RARRAY_PTR(elt)[0],
-                                             RLIM2NUM(rlim.rlim_cur),
-                                             RLIM2NUM(rlim.rlim_max)));
-            VALUE newary = rb_ary_entry(save, EXEC_OPTION_RLIMIT);
+            tmp = hide_obj(rb_ary_new3(3, RARRAY_PTR(elt)[0],
+                                       RLIM2NUM(rlim.rlim_cur),
+                                       RLIM2NUM(rlim.rlim_max)));
+            newary = rb_ary_entry(save, EXEC_OPTION_RLIMIT);
             if (NIL_P(newary)) {
                 newary = hide_obj(rb_ary_new());
                 rb_ary_store(save, EXEC_OPTION_RLIMIT, newary);
@@ -2416,7 +2413,7 @@ rb_fork(int *status, int (*chfunc)(void*), void *charg, VALUE fds)
 static VALUE
 rb_f_fork(VALUE obj)
 {
-#if defined(HAVE_FORK) && !(defined(__NetBSD__) && __NetBSD_Version__ < 400000000)
+#if defined(HAVE_FORK) && !defined(CANNOT_FORK_WITH_PTHREAD)
     rb_pid_t pid;
 
     rb_secure(2);
@@ -5156,12 +5153,12 @@ Init_process(void)
     rb_define_module_function(rb_mProcess, "setrlimit", proc_setrlimit, -1);
 #ifdef RLIM2NUM
     {
-        VALUE inf = RLIM2NUM(RLIM_INFINITY), v;
-        rb_define_const(rb_mProcess, "RLIM_INFINITY", inf);
+        VALUE inf = RLIM2NUM(RLIM_INFINITY);
 #ifdef RLIM_SAVED_MAX
-        v = RLIM_INFINITY == RLIM_SAVED_MAX ? inf : RLIM2NUM(RLIM_SAVED_MAX);
+	VALUE v = RLIM_INFINITY == RLIM_SAVED_MAX ? inf : RLIM2NUM(RLIM_SAVED_MAX);
         rb_define_const(rb_mProcess, "RLIM_SAVED_MAX", v);
 #endif
+        rb_define_const(rb_mProcess, "RLIM_INFINITY", inf);
 #ifdef RLIM_SAVED_CUR
         v = RLIM_INFINITY == RLIM_SAVED_CUR ? inf : RLIM2NUM(RLIM_SAVED_CUR);
         rb_define_const(rb_mProcess, "RLIM_SAVED_CUR", v);

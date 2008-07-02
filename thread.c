@@ -68,8 +68,8 @@ static void rb_check_deadlock(rb_vm_t *vm);
 void rb_signal_exec(rb_thread_t *th, int sig);
 void rb_disable_interrupt(void);
 
-static VALUE eKillSignal = INT2FIX(0);
-static VALUE eTerminateSignal = INT2FIX(1);
+static const VALUE eKillSignal = INT2FIX(0);
+static const VALUE eTerminateSignal = INT2FIX(1);
 static volatile int system_working = 1;
 
 inline static void
@@ -2100,6 +2100,31 @@ rb_thread_start_timer_thread(void)
 }
 
 static int
+clear_coverage_i(st_data_t key, st_data_t val, st_data_t dummy)
+{
+    int i;
+    VALUE lines = (VALUE)val;
+
+    for (i = 0; i < RARRAY_LEN(lines); i++) {
+	if (RARRAY_PTR(lines)[i] != Qnil) {
+	    RARRAY_PTR(lines)[i] = INT2FIX(0);
+	}
+    }
+    return ST_CONTINUE;
+}
+
+static void
+clear_coverage(void)
+{
+    if (rb_const_defined_at(rb_cObject, rb_intern("COVERAGE__"))) {
+	VALUE hash = rb_const_get_at(rb_cObject, rb_intern("COVERAGE__"));
+	if (TYPE(hash) == T_HASH) {
+	    st_foreach(RHASH_TBL(hash), clear_coverage_i, 0);
+	}
+    }
+}
+
+static int
 terminate_atfork_i(st_data_t key, st_data_t val, rb_thread_t *current_th)
 {
     VALUE thval = key;
@@ -2124,6 +2149,7 @@ rb_thread_atfork(void)
     st_clear(vm->living_threads);
     st_insert(vm->living_threads, thval, (st_data_t) th->thread_id);
     vm->sleeper = 0;
+    clear_coverage();
     rb_reset_random_seed();
 }
 
@@ -2152,6 +2178,7 @@ rb_thread_atfork_before_exec(void)
     st_clear(vm->living_threads);
     st_insert(vm->living_threads, thval, (st_data_t) th->thread_id);
     vm->sleeper = 0;
+    clear_coverage();
 }
 
 struct thgroup {
@@ -3253,7 +3280,7 @@ call_trace_proc(VALUE args, int tracing)
 	rb_thread_method_id_and_class(GET_THREAD(), &id, &klass);
     }
     if (id == ID_ALLOCATOR)
-	return Qnil;
+      return Qnil;
     if (klass) {
 	if (TYPE(klass) == T_ICLASS) {
 	    klass = RBASIC(klass)->klass;
@@ -3269,7 +3296,7 @@ call_trace_proc(VALUE args, int tracing)
     argv[3] = id ? ID2SYM(id) : Qnil;
     argv[4] = p->self ? rb_binding_new() : Qnil;
     argv[5] = klass ? klass : Qnil;
-    
+
     return rb_proc_call_with_block(p->proc, 6, argv, Qnil);
 }
 

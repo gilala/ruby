@@ -201,6 +201,10 @@ time_timespec(VALUE num, int interval)
 	    double f, d;
 
 	    d = modf(RFLOAT_VALUE(num), &f);
+            if (d < 0) {
+                d += 1;
+                f -= 1;
+            }
 	    t.tv_sec = (time_t)f;
 	    if (f != t.tv_sec) {
 		rb_raise(rb_eRangeError, "%f out of Time range", RFLOAT_VALUE(num));
@@ -490,7 +494,7 @@ leap_year_p(long y)
 static time_t
 timegm_noleapsecond(struct tm *tm)
 {
-    static int common_year_yday_offset[] = {
+    static const int common_year_yday_offset[] = {
 	-1,
 	-1 + 31,
 	-1 + 31 + 28,
@@ -505,7 +509,7 @@ timegm_noleapsecond(struct tm *tm)
 	-1 + 31 + 28 + 31 + 30 + 31 + 30 + 31 + 31 + 30 + 31 + 30
 	  /* 1    2    3    4    5    6    7    8    9    10   11 */
     };
-    static int leap_year_yday_offset[] = {
+    static const int leap_year_yday_offset[] = {
 	-1,
 	-1 + 31,
 	-1 + 31 + 29,

@@ -81,6 +81,7 @@ iseq_mark(void *ptr)
 	RUBY_MARK_UNLESS_NULL(iseq->filename);
 	RUBY_MARK_UNLESS_NULL((VALUE)iseq->cref_stack);
 	RUBY_MARK_UNLESS_NULL(iseq->klass);
+	RUBY_MARK_UNLESS_NULL(iseq->coverage);
 /* 	RUBY_MARK_UNLESS_NULL((VALUE)iseq->node); */
 /*	RUBY_MARK_UNLESS_NULL(iseq->cached_special_block); */
 
@@ -191,6 +192,17 @@ prepare_iseq_build(rb_iseq_t *iseq,
 
     set_relation(iseq, parent);
 
+    iseq->coverage = Qfalse;
+    if (!GET_THREAD()->parse_in_eval) {
+	if (rb_const_defined_at(rb_cObject, rb_intern("COVERAGE__"))) {
+	    VALUE hash = rb_const_get_at(rb_cObject, rb_intern("COVERAGE__"));
+	    if (TYPE(hash) == T_HASH) {
+		iseq->coverage = rb_hash_aref(hash, filename);
+		if (NIL_P(iseq->coverage)) iseq->coverage = Qfalse;
+	    }
+	}
+    }
+
     return Qtrue;
 }
 
@@ -219,7 +231,7 @@ static rb_compile_option_t COMPILE_OPTION_DEFAULT = {
     OPT_STACK_CACHING, /* int stack_caching; */
     OPT_TRACE_INSTRUCTION, /* int trace_instruction */
 };
-static const rb_compile_option_t COMPILE_OPTION_FALSE;
+static const rb_compile_option_t COMPILE_OPTION_FALSE = {0};
 
 static void
 make_compile_option(rb_compile_option_t *option, VALUE opt)
@@ -1290,7 +1302,7 @@ void
 Init_ISeq(void)
 {
     /* declare ::VM::InstructionSequence */
-    rb_cISeq = rb_define_class_under(rb_cVM, "InstructionSequence", rb_cObject);
+    rb_cISeq = rb_define_class_under(rb_cRubyVM, "InstructionSequence", rb_cObject);
     rb_define_alloc_func(rb_cISeq, iseq_alloc);
     rb_define_method(rb_cISeq, "inspect", iseq_inspect, 0);
     rb_define_method(rb_cISeq, "disasm", ruby_iseq_disasm, 0);

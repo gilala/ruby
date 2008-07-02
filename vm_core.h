@@ -201,6 +201,7 @@ struct rb_iseq_struct {
     VALUE *iseq_encoded; /* encoded iseq */
     unsigned long iseq_size;
     VALUE mark_ary;	/* Array: includes operands which should be GC marked */
+    VALUE coverage;     /* coverage array */
 
     /* insn info, must be freed */
     struct iseq_insn_info_entry *insn_info_table;
@@ -371,7 +372,7 @@ enum rb_thread_status {
     THREAD_RUNNABLE,
     THREAD_STOPPED,
     THREAD_STOPPED_FOREVER,
-    THREAD_KILLED,
+    THREAD_KILLED
 };
 
 typedef RUBY_JMP_BUF rb_jmpbuf_t;
@@ -448,6 +449,7 @@ struct rb_thread_struct
     struct rb_vm_trap_tag *trap_tag;
 
     int parse_in_eval;
+    int mild_compile_error;
 
     /* storage */
     st_table *local_storage;
@@ -502,6 +504,10 @@ VALUE ruby_iseq_disasm(VALUE self);
 VALUE ruby_iseq_disasm_insn(VALUE str, VALUE *iseqval, int pos, rb_iseq_t *iseq, VALUE child);
 const char *ruby_node_name(int node);
 
+RUBY_EXTERN VALUE rb_cISeq;
+RUBY_EXTERN VALUE rb_cRubyVM;
+RUBY_EXTERN VALUE rb_cEnv;
+RUBY_EXTERN VALUE rb_mRubyVMFrozenCore;
 
 /* each thread has this size stack : 128KB */
 #define RUBY_VM_THREAD_STACK_SIZE (128 * 1024)
@@ -552,6 +558,9 @@ typedef struct {
 #define VM_CALL_TAILRECURSION_BIT  (0x01 << 6)
 #define VM_CALL_SUPER_BIT          (0x01 << 7)
 #define VM_CALL_SEND_BIT           (0x01 << 8)
+
+#define VM_SPECIAL_OBJECT_VMCORE   0x01
+#define VM_SPECIAL_OBJECT_CBASE    0x02
 
 #define VM_FRAME_MAGIC_METHOD 0x11
 #define VM_FRAME_MAGIC_BLOCK  0x21
