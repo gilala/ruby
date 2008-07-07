@@ -970,11 +970,12 @@ process_options(VALUE arg)
     rb_encoding *enc, *lenc;
     const char *s;
     char fbuf[MAXPATHLEN];
-    int i = proc_options(argc, argv, opt);
+    int opnum = proc_options(argc, argv, opt);
+    int i;
     int safe;
 
-    argc -= i;
-    argv += i;
+    argc -= opnum;
+    argv += opnum;
 
     if (!(opt->disable & DISABLE_BIT(rubyopt)) &&
 	rb_safe_level() == 0 && (s = getenv("RUBYOPT"))) {
@@ -1058,6 +1059,7 @@ process_options(VALUE arg)
 		if (!opt->script)
 		    opt->script = argv[0];
 	    }
+	    opnum++;
 	    argc--;
 	    argv++;
 	}
@@ -1096,6 +1098,15 @@ process_options(VALUE arg)
 	enc = lenc;
     }
     rb_enc_set_default_external(rb_enc_from_encoding(enc));
+#ifdef _WIN32
+    if ((argc = rb_w32_parse_cmdline(&argv, rb_enc_name(enc))) != 0) {
+	argc -= opnum;
+	argv += opnum;
+	ruby_set_argv(argc, argv);
+	for (i = 0; i < RARRAY_LEN(rb_argv); i++)
+	    rb_enc_associate(RARRAY_PTR(rb_argv)[i], enc);
+    }
+#endif
 
     rb_set_safe_level_force(safe);
     if (opt->e_script) {

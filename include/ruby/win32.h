@@ -208,6 +208,7 @@ struct timezone {
 #define isascii __isascii
 #endif
 #define NtInitialize ruby_sysinit
+extern int    rb_w32_parse_cmdline(char ***, const char *);
 extern int    rb_w32_cmdvector(const char *, char ***);
 extern rb_pid_t  rb_w32_pipe_exec(const char *, const char *, int, int *, int *);
 extern int    flock(int fd, int oper);
