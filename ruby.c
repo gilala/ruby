@@ -1102,7 +1102,8 @@ process_options(VALUE arg)
     }
     rb_enc_set_default_external(rb_enc_from_encoding(enc));
 #ifdef _WIN32
-    if ((argc = rb_w32_parse_cmdline(&argv, rb_enc_name(enc))) != 0) {
+    if (enc != lenc &&
+	(argc = rb_w32_parse_cmdline(&argv, rb_enc_name(enc))) != 0) {
 	if (opt->e_script && opt->e_script_pos) {
 	    opt->e_script = rb_str_new(0, 0);
 	    for (i = 0; i < RARRAY_LEN(opt->e_script_pos); ++i) {
