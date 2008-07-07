@@ -1,3 +1,7 @@
+Tue Jul  8 00:33:46 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* ruby.c (process_options): re-set e_script.
+
 Tue Jul  8 00:03:20 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
 
 	* win32/win32.c, include/win32/win32.c (rb_w32_parse_cmndline): new
