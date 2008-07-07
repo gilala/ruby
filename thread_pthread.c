@@ -179,6 +179,10 @@ static struct {
 #endif
 } native_main_thread;
 
+#ifdef STACK_END_ADDRESS
+extern void *STACK_END_ADDRESS;
+#endif
+
 #undef ruby_init_stack
 void
 ruby_init_stack(VALUE *addr
@@ -188,12 +192,16 @@ ruby_init_stack(VALUE *addr
     )
 {
     native_main_thread.id = pthread_self();
+#ifdef STACK_END_ADDRESS
+    native_main_thread.stack_start = STACK_END_ADDRESS;
+#else
     if (!native_main_thread.stack_start ||
         STACK_UPPER(&addr,
                     native_main_thread.stack_start > addr,
                     native_main_thread.stack_start < addr)) {
         native_main_thread.stack_start = addr;
     }
+#endif
 #ifdef __ia64
     if (!native_main_thread.register_stack_start ||
         (VALUE*)bsp < native_main_thread.register_stack_start) {
@@ -641,7 +649,6 @@ remove_signal_thread_list(rb_thread_t *th)
 }
 
 static pthread_t timer_thread_id;
-static void timer_thread_function(void);
 
 static void *
 thread_timer(void *dummy)
@@ -670,7 +677,7 @@ thread_timer(void *dummy)
 	    });
 	}
 #endif
-	timer_thread_function();
+	timer_thread_function(dummy);
     }
     return NULL;
 }
@@ -688,7 +695,7 @@ rb_thread_create_timer_thread(void)
 #ifdef PTHREAD_STACK_MIN
 	pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN);
 #endif
-	err = pthread_create(&timer_thread_id, &attr, thread_timer, 0);
+	err = pthread_create(&timer_thread_id, &attr, thread_timer, GET_VM());
 	if (err != 0) {
 	    rb_bug("rb_thread_create_timer_thread: return non-zero (%d)", err);
 	}

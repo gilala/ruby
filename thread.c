@@ -151,6 +151,7 @@ rb_thread_s_debug_set(VALUE self, VALUE val)
 #endif
 NOINLINE(static int thread_start_func_2(rb_thread_t *th, VALUE *stack_start,
 					VALUE *register_stack_start));
+static void timer_thread_function(void *);
 
 #if   defined(_WIN32)
 #include "thread_win32.c"
@@ -2050,9 +2051,9 @@ rb_gc_save_machine_context(rb_thread_t *th)
 int rb_get_next_signal(rb_vm_t *vm);
 
 static void
-timer_thread_function(void)
+timer_thread_function(void *arg)
 {
-    rb_vm_t *vm = GET_VM(); /* TODO: fix me for Multi-VM */
+    rb_vm_t *vm = arg; /* TODO: fix me for Multi-VM */
 
     /* for time slice */
     RUBY_VM_SET_TIMER_INTERRUPT(vm->running_thread);
@@ -2116,11 +2117,10 @@ clear_coverage_i(st_data_t key, st_data_t val, st_data_t dummy)
 static void
 clear_coverage(void)
 {
-    if (rb_const_defined_at(rb_cObject, rb_intern("COVERAGE__"))) {
-	VALUE hash = rb_const_get_at(rb_cObject, rb_intern("COVERAGE__"));
-	if (TYPE(hash) == T_HASH) {
-	    st_foreach(RHASH_TBL(hash), clear_coverage_i, 0);
-	}
+    extern VALUE rb_vm_get_coverages(void);
+    VALUE coverages = rb_vm_get_coverages();
+    if (RTEST(coverages)) {
+	st_foreach(RHASH_TBL(coverages), clear_coverage_i, 0);
     }
 }
 
@@ -3528,5 +3528,36 @@ rb_check_deadlock(rb_vm_t *vm)
 	st_foreach(vm->living_threads, debug_i, (st_data_t)0);
 #endif
 	rb_thread_raise(2, argv, vm->main_thread);
+    }
+}
+
+static void
+update_coverage(rb_event_flag_t event, VALUE proc, VALUE self, ID id, VALUE klass)
+{
+    VALUE coverage = GET_THREAD()->cfp->iseq->coverage;
+    if (coverage) {
+	long line = rb_sourceline() - 1;
+	long count;
+	if (RARRAY_PTR(coverage)[line] == Qnil) {
+	    rb_bug("bug");
+	}
+	count = FIX2LONG(RARRAY_PTR(coverage)[line]) + 1;
+	if (POSFIXABLE(count)) {
+	    RARRAY_PTR(coverage)[line] = LONG2FIX(count);
+	}
+    }
+}
+
+void
+rb_enable_coverages(void)
+{
+    VALUE rb_mCoverage;
+
+    if (!RTEST(GET_VM()->coverages)) {
+	extern VALUE rb_vm_get_coverages(void);
+	GET_VM()->coverages = rb_hash_new();
+	rb_add_event_hook(update_coverage, RUBY_EVENT_COVERAGE, Qnil);
+	rb_mCoverage = rb_define_module("Coverage");
+	rb_define_module_function(rb_mCoverage, "result", rb_vm_get_coverages, 0);
     }
 }

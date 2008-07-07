@@ -24,6 +24,7 @@
 #include <olectl.h>
 #include <ole2.h>
 #include <stdlib.h>
+#include <math.h>
 #ifdef HAVE_STDARG_PROTOTYPES
 #include <stdarg.h>
 #define va_init_list(a,b) va_start(a,b)
@@ -117,7 +118,7 @@
 
 #define WC2VSTR(x) ole_wc2vstr((x), TRUE)
 
-#define WIN32OLE_VERSION "1.1.8"
+#define WIN32OLE_VERSION "1.2.1"
 
 typedef HRESULT (STDAPICALLTYPE FNCOCREATEINSTANCEEX)
     (REFCLSID, IUnknown*, DWORD, COSERVERINFO*, DWORD, MULTI_QI*);
@@ -367,6 +368,7 @@ static VALUE ole_typelib_from_itypelib(ITypeLib *pTypeLib);
 static VALUE ole_typelib_from_itypeinfo(ITypeInfo *pTypeInfo);
 static VALUE fole_typelib(VALUE self);
 static VALUE fole_query_interface(VALUE self, VALUE str_iid);
+static VALUE fole_respond_to(VALUE self, VALUE method);
 static HRESULT ole_docinfo_from_type(ITypeInfo *pTypeInfo, BSTR *name, BSTR *helpstr, DWORD *helpcontext, BSTR *helpfile);
 static VALUE ole_usertype2val(ITypeInfo *pTypeInfo, TYPEDESC *pTypeDesc, VALUE typedetails);
 static VALUE ole_ptrtype2val(ITypeInfo *pTypeInfo, TYPEDESC *pTypeDesc, VALUE typedetails);
@@ -422,8 +424,11 @@ static VALUE foletype_helpfile(VALUE self);
 static VALUE ole_type_helpcontext(ITypeInfo *pTypeInfo);
 static VALUE foletype_helpcontext(VALUE self);
 static VALUE foletype_ole_typelib(VALUE self);
-static VALUE ole_type_impl_ole_types(ITypeInfo *pTypeInfo);
+static VALUE ole_type_impl_ole_types(ITypeInfo *pTypeInfo, int implflags);
 static VALUE foletype_impl_ole_types(VALUE self);
+static VALUE foletype_source_ole_types(VALUE self);
+static VALUE foletype_default_event_sources(VALUE self);
+static VALUE foletype_default_ole_types(VALUE self);
 static VALUE foletype_inspect(VALUE self);
 static VALUE ole_variables(ITypeInfo *pTypeInfo);
 static VALUE foletype_variables(VALUE self);
@@ -763,7 +768,7 @@ d2time(double v, int *hh, int *mm, int *ss)
     double d_hh, d_mm, d_ss;
     int    i_hh, i_mm, i_ss;
 
-    double d = v * 86400.0;
+    double d = fabs(v * 86400.0);
 
     d_hh = d / 3600.0;
     i_hh = (int)d_hh;
@@ -4373,6 +4378,32 @@ fole_query_interface(VALUE self, VALUE str_iid)
     return create_win32ole_object(cWIN32OLE, pDispatch, 0, 0);
 }
 
+/*
+ *  call-seq:
+ *     WIN32OLE#ole_respond_to?(method) -> true or false
+ * 
+ *  Returns true when OLE object has OLE method, otherwise returns false.
+ *
+ *      ie = WIN32OLE.new('InternetExplorer.Application')
+ *      ie.ole_respond_to?("gohome") => true
+ */
+static VALUE
+fole_respond_to(VALUE self, VALUE method)
+{
+    struct oledata *pole;
+    BSTR wcmdname;
+    DISPID DispID;
+    HRESULT hr;
+    rb_secure(4);
+    Check_SafeStr(method);
+    OLEData_Get_Struct(self, pole);
+    wcmdname = ole_vstr2wc(method);
+    hr = pole->pDispatch->lpVtbl->GetIDsOfNames( pole->pDispatch, &IID_NULL,
+	    &wcmdname, 1, cWIN32OLE_lcid, &DispID);
+    SysFreeString(wcmdname);
+    return SUCCEEDED(hr) ? Qtrue : Qfalse;
+}
+
 static HRESULT
 ole_docinfo_from_type(ITypeInfo *pTypeInfo, BSTR *name, BSTR *helpstr, DWORD *helpcontext, BSTR *helpfile)
 {
@@ -5728,7 +5759,7 @@ foletype_ole_typelib(VALUE self)
 }
 
 static VALUE
-ole_type_impl_ole_types(ITypeInfo *pTypeInfo)
+ole_type_impl_ole_types(ITypeInfo *pTypeInfo, int implflags)
 {
     HRESULT hr;
     ITypeInfo *pRefTypeInfo;
@@ -5754,9 +5785,12 @@ ole_type_impl_ole_types(ITypeInfo *pTypeInfo)
         hr = pTypeInfo->lpVtbl->GetRefTypeInfo(pTypeInfo, href, &pRefTypeInfo);
         if (FAILED(hr)) 
             continue;
-        type = ole_type_from_itypeinfo(pRefTypeInfo);
-        if (type != Qnil) {
-            rb_ary_push(types, type);
+
+        if ((flags & implflags) == implflags) {
+            type = ole_type_from_itypeinfo(pRefTypeInfo);
+            if (type != Qnil) {
+                rb_ary_push(types, type);
+            }
         }
 
         OLE_RELEASE(pRefTypeInfo);
@@ -5779,7 +5813,60 @@ foletype_impl_ole_types(VALUE self)
 {
     struct oletypedata *ptype;
     Data_Get_Struct(self, struct oletypedata, ptype);
-    return ole_type_impl_ole_types(ptype->pTypeInfo);
+    return ole_type_impl_ole_types(ptype->pTypeInfo, 0);
+}
+
+/*
+ *  call-seq:
+ *     WIN32OLE_TYPE#source_ole_types
+ * 
+ *  Returns the array of WIN32OLE_TYPE object which is implemented by the WIN32OLE_TYPE 
+ *  object and having IMPLTYPEFLAG_FSOURCE. 
+ *     tobj = WIN32OLE_TYPE.new('Microsoft Internet Controls', "InternetExplorer") 
+ *     p tobj.source_ole_types
+ *     # => [#<WIN32OLE_TYPE:DWebBrowserEvents2>, #<WIN32OLE_TYPE:DWebBrowserEvents>]
+ */
+static VALUE
+foletype_source_ole_types(VALUE self)
+{
+    struct oletypedata *ptype;
+    Data_Get_Struct(self, struct oletypedata, ptype);
+    return ole_type_impl_ole_types(ptype->pTypeInfo, IMPLTYPEFLAG_FSOURCE);
+}
+
+/*
+ *  call-seq:
+ *     WIN32OLE_TYPE#default_event_sources
+ * 
+ *  Returns the array of WIN32OLE_TYPE object which is implemented by the WIN32OLE_TYPE 
+ *  object and having IMPLTYPEFLAG_FSOURCE and IMPLTYPEFLAG_FDEFAULT. 
+ *     tobj = WIN32OLE_TYPE.new('Microsoft Internet Controls', "InternetExplorer") 
+ *     p tobj.default_event_sources  # => [#<WIN32OLE_TYPE:DWebBrowserEvents2>]
+ */
+static VALUE
+foletype_default_event_sources(VALUE self)
+{
+    struct oletypedata *ptype;
+    Data_Get_Struct(self, struct oletypedata, ptype);
+    return ole_type_impl_ole_types(ptype->pTypeInfo, IMPLTYPEFLAG_FSOURCE|IMPLTYPEFLAG_FDEFAULT);
+}
+
+/*
+ *  call-seq:
+ *     WIN32OLE_TYPE#default_ole_types
+ * 
+ *  Returns the array of WIN32OLE_TYPE object which is implemented by the WIN32OLE_TYPE 
+ *  object and having IMPLTYPEFLAG_FDEFAULT.
+ *     tobj = WIN32OLE_TYPE.new('Microsoft Internet Controls', "InternetExplorer") 
+ *     p tobj.default_ole_types
+ *     # => [#<WIN32OLE_TYPE:IWebBrowser2>, #<WIN32OLE_TYPE:DWebBrowserEvents2>]
+ */
+static VALUE
+foletype_default_ole_types(VALUE self)
+{
+    struct oletypedata *ptype;
+    Data_Get_Struct(self, struct oletypedata, ptype);
+    return ole_type_impl_ole_types(ptype->pTypeInfo, IMPLTYPEFLAG_FDEFAULT);
 }
 
 static VALUE
@@ -7536,20 +7623,27 @@ find_default_source(VALUE ole, IID *piid, ITypeInfo **ppTypeInfo)
                                                  GUIDKIND_DEFAULT_SOURCE_DISP_IID,
                                                  piid);
         OLE_RELEASE(pProvideClassInfo2);
-        return find_iid(ole, NULL, piid, ppTypeInfo);
+        if (SUCCEEDED(hr)) {
+            hr = find_iid(ole, NULL, piid, ppTypeInfo);
+        }
+    }
+    if (SUCCEEDED(hr)) {
+        return hr;
     }
     hr = pDispatch->lpVtbl->QueryInterface(pDispatch,
                                            &IID_IProvideClassInfo,
                                            (void**)&pProvideClassInfo);
+    if (SUCCEEDED(hr)) {
+
+        hr = pProvideClassInfo->lpVtbl->GetClassInfo(pProvideClassInfo,
+                                                     &pTypeInfo);
+        OLE_RELEASE(pProvideClassInfo);
+    }
+    if (FAILED(hr)) {
+        hr = pDispatch->lpVtbl->GetTypeInfo(pDispatch, 0, cWIN32OLE_lcid, &pTypeInfo );
+    }
     if (FAILED(hr))
         return hr;
-
-    hr = pProvideClassInfo->lpVtbl->GetClassInfo(pProvideClassInfo,
-                                                 &pTypeInfo);
-    OLE_RELEASE(pProvideClassInfo);
-    if (FAILED(hr))
-        return hr;
-
     hr = OLE_GET_TYPEATTR(pTypeInfo, &pTypeAttr);
     if (FAILED(hr)) {
         OLE_RELEASE(pTypeInfo);
@@ -8281,7 +8375,6 @@ Init_win32ole()
     message_filter.MessagePending = mf_MessagePending;
  
     com_hash = Data_Wrap_Struct(rb_cData, rb_mark_hash, st_free_table, st_init_numtable());
-    com_hash = Data_Wrap_Struct(rb_cData, rb_mark_hash, st_free_table, st_init_numtable());
     rb_register_mark_object(com_hash);
 
     cWIN32OLE = rb_define_class("WIN32OLE", rb_cObject);
@@ -8331,6 +8424,7 @@ Init_win32ole()
     rb_define_alias(cWIN32OLE, "ole_obj_help", "ole_type");
     rb_define_method(cWIN32OLE, "ole_typelib", fole_typelib, 0);
     rb_define_method(cWIN32OLE, "ole_query_interface", fole_query_interface, 1);
+    rb_define_method(cWIN32OLE, "ole_respond_to?", fole_respond_to, 1);
 
     rb_define_const(cWIN32OLE, "VERSION", rb_str_new2(WIN32OLE_VERSION));
     rb_define_const(cWIN32OLE, "ARGV", rb_ary_new());
@@ -8415,6 +8509,9 @@ Init_win32ole()
     rb_define_method(cWIN32OLE_TYPE, "ole_methods", foletype_methods, 0);
     rb_define_method(cWIN32OLE_TYPE, "ole_typelib", foletype_ole_typelib, 0);
     rb_define_method(cWIN32OLE_TYPE, "implemented_ole_types", foletype_impl_ole_types, 0);
+    rb_define_method(cWIN32OLE_TYPE, "source_ole_types", foletype_source_ole_types, 0);
+    rb_define_method(cWIN32OLE_TYPE, "default_event_sources", foletype_default_event_sources, 0);
+    rb_define_method(cWIN32OLE_TYPE, "default_ole_types", foletype_default_ole_types, 0);
     rb_define_method(cWIN32OLE_TYPE, "inspect", foletype_inspect, 0);
 
     cWIN32OLE_VARIABLE = rb_define_class("WIN32OLE_VARIABLE", rb_cObject);
