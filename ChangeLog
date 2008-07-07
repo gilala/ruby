@@ -1,3 +1,8 @@
+Tue Jul  8 01:04:55 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* ruby.c (proc_options, process_options): now opt->e_script is an array
+	  of arrays. each arrays have two elements -- pos and string.
+
 Tue Jul  8 00:37:50 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
 
 	* ruby.c (process_options): no need to call rb_w32_parse_cmdline() if
@@ -5,7 +10,7 @@ Tue Jul  8 00:37:50 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
 
 Tue Jul  8 00:33:46 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
 
-	* ruby.c (process_options): re-set e_script.
+	* ruby.c (proc_options, process_options): re-set e_script.
 
 Tue Jul  8 00:03:20 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
 

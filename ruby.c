@@ -90,7 +90,6 @@ struct cmdline_options {
     const char *script;
     VALUE script_name;
     VALUE e_script;
-    VALUE e_script_pos;
     struct {
 	struct {
 	    VALUE name;
@@ -717,14 +716,12 @@ proc_options(int argc, char **argv, struct cmdline_options *opt)
 		rb_raise(rb_eRuntimeError, "no code specified for -e");
 	    }
 	    if (!opt->e_script) {
-		opt->e_script = rb_str_new(0, 0);
+		opt->e_script = rb_ary_new();
 		if (opt->script == 0)
 		    opt->script = "-e";
-		opt->e_script_pos = rb_ary_new();
 	    }
-	    rb_str_cat2(opt->e_script, s);
-	    rb_str_cat2(opt->e_script, "\n");
-	    rb_ary_push(opt->e_script_pos, INT2FIX(argc0 - argc));
+	    rb_ary_push(opt->e_script,
+			rb_ary_new3(2, INT2FIX(argc0 - argc), rb_str_new2(s)));
 	    break;
 
 	  case 'r':
@@ -1104,13 +1101,11 @@ process_options(VALUE arg)
 #ifdef _WIN32
     if (enc != lenc &&
 	(argc = rb_w32_parse_cmdline(&argv, rb_enc_name(enc))) != 0) {
-	if (opt->e_script && opt->e_script_pos) {
-	    opt->e_script = rb_str_new(0, 0);
-	    for (i = 0; i < RARRAY_LEN(opt->e_script_pos); ++i) {
-		int pos = FIX2INT(RARRAY_PTR(opt->e_script_pos)[i]);
-		rb_enc_str_buf_cat(opt->e_script, argv[pos], strlen(argv[pos]),
-				   enc);
-		rb_str_cat2(opt->e_script, "\n");
+	if (opt->e_script) {
+	    for (i = 0; i < RARRAY_LEN(opt->e_script); ++i) {
+		int pos = FIX2INT(RARRAY_PTR(RARRAY_PTR(opt->e_script)[i])[0]);
+		RARRAY_PTR(RARRAY_PTR(opt->e_script)[i])[1] =
+		    rb_enc_str_new(argv[pos], strlen(argv[pos]), enc);
 	    }
 	}
 	argc -= opnum;
@@ -1124,15 +1119,22 @@ process_options(VALUE arg)
     rb_set_safe_level_force(safe);
     if (opt->e_script) {
 	rb_encoding *eenc;
+	VALUE script = rb_str_new(0, 0);
 	if (opt->src.enc.index >= 0) {
 	    eenc = rb_enc_from_index(opt->src.enc.index);
 	}
 	else {
 	    eenc = lenc;
 	}
-	rb_enc_associate(opt->e_script, eenc);
+	for (i = 0; i < RARRAY_LEN(opt->e_script); ++i) {
+	    VALUE str = RARRAY_PTR(RARRAY_PTR(opt->e_script)[i])[1];
+	    if (rb_enc_get_index(str) == 0)
+		rb_enc_associate(str, eenc);
+	    rb_str_buf_append(script, str);
+	    rb_str_cat2(script, "\n");
+	}
 	require_libraries(opt);
-	tree = rb_parser_compile_string(parser, opt->script, opt->e_script, 1);
+	tree = rb_parser_compile_string(parser, opt->script, script, 1);
     }
     else {
 	if (opt->script[0] == '-' && !opt->script[1]) {
