@@ -2117,8 +2117,8 @@ clear_coverage_i(st_data_t key, st_data_t val, st_data_t dummy)
 static void
 clear_coverage(void)
 {
-    extern VALUE rb_vm_get_coverages(void);
-    VALUE coverages = rb_vm_get_coverages();
+    extern VALUE rb_get_coverages(void);
+    VALUE coverages = rb_get_coverages();
     if (RTEST(coverages)) {
 	st_foreach(RHASH_TBL(coverages), clear_coverage_i, 0);
     }
@@ -3535,7 +3535,7 @@ static void
 update_coverage(rb_event_flag_t event, VALUE proc, VALUE self, ID id, VALUE klass)
 {
     VALUE coverage = GET_THREAD()->cfp->iseq->coverage;
-    if (coverage) {
+    if (coverage && RBASIC(coverage)->klass == 0) {
 	long line = rb_sourceline() - 1;
 	long count;
 	if (RARRAY_PTR(coverage)[line] == Qnil) {
@@ -3548,16 +3548,22 @@ update_coverage(rb_event_flag_t event, VALUE proc, VALUE self, ID id, VALUE klas
     }
 }
 
-void
-rb_enable_coverages(void)
+VALUE
+rb_get_coverages(void)
 {
-    VALUE rb_mCoverage;
+    return GET_VM()->coverages;
+}
 
-    if (!RTEST(GET_VM()->coverages)) {
-	extern VALUE rb_vm_get_coverages(void);
-	GET_VM()->coverages = rb_hash_new();
-	rb_add_event_hook(update_coverage, RUBY_EVENT_COVERAGE, Qnil);
-	rb_mCoverage = rb_define_module("Coverage");
-	rb_define_module_function(rb_mCoverage, "result", rb_vm_get_coverages, 0);
-    }
+void
+rb_set_coverages(VALUE coverages)
+{
+    GET_VM()->coverages = coverages;
+    rb_add_event_hook(update_coverage, RUBY_EVENT_COVERAGE, Qnil);
+}
+
+void
+rb_reset_coverages(void)
+{
+    GET_VM()->coverages = Qfalse;
+    rb_remove_event_hook(update_coverage);
 }
