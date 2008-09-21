@@ -1,7 +1,17 @@
 require 'test/unit'
 require 'rational'
+require 'timeout'
 
 class TestTime < Test::Unit::TestCase
+  def setup
+    @verbose = $VERBOSE
+    $VERBOSE = nil
+  end
+
+  def teardown
+    $VERBOSE = @verbose
+  end
+
   def test_time_add()
     assert_equal(Time.utc(2000, 3, 21, 3, 30) + 3 * 3600,
                  Time.utc(2000, 3, 21, 6, 30))
@@ -105,6 +115,18 @@ class TestTime < Test::Unit::TestCase
     assert_equal(100, Time.at(0.0000001).nsec)
     assert_equal(10, Time.at(0.00000001).nsec)
     assert_equal(1, Time.at(0.000000001).nsec)
+    assert_equal(0, Time.at(1e-10).nsec)
+    assert_equal(0, Time.at(4e-10).nsec)
+    assert_equal(1, Time.at(6e-10).nsec)
+    assert_equal(1, Time.at(14e-10).nsec)
+    assert_equal(2, Time.at(16e-10).nsec)
+    if negative_time_t?
+      assert_equal(0, Time.at(-1e-10).nsec)
+      assert_equal(0, Time.at(-4e-10).nsec)
+      assert_equal(999999999, Time.at(-6e-10).nsec)
+      assert_equal(999999999, Time.at(-14e-10).nsec)
+      assert_equal(999999998, Time.at(-16e-10).nsec)
+    end
   end
 
   def test_at2
@@ -205,7 +227,11 @@ class TestTime < Test::Unit::TestCase
 
   def test_time_interval
     m = Mutex.new.lock
-    assert_nothing_raised { m.sleep(0) }
+    assert_nothing_raised {
+      Timeout.timeout(10) {
+        m.sleep(0)
+      }
+    }
     assert_raise(ArgumentError) { m.sleep(-1) }
   end
 
@@ -354,13 +380,69 @@ class TestTime < Test::Unit::TestCase
     assert_equal("00:00:00", T2000.strftime("%X"))
     assert_equal("00", T2000.strftime("%y"))
     assert_equal("2000", T2000.strftime("%Y"))
-    assert(["GMT", "UTC"].include?(T2000.strftime("%Z")))
+    assert_equal("UTC", T2000.strftime("%Z"))
     assert_equal("%", T2000.strftime("%%"))
+    assert_equal("0", T2000.strftime("%-S"))
 
     assert_equal("", T2000.strftime(""))
     assert_equal("foo\0bar\x0000\x0000\x0000", T2000.strftime("foo\0bar\0%H\0%M\0%S"))
     assert_equal("foo" * 1000, T2000.strftime("foo" * 1000))
 
-    assert_equal("Sat", Time.at(946684800).strftime("%a"))
+    t = Time.mktime(2000, 1, 1)
+    assert_equal("Sat", t.strftime("%a"))
+
+    t = Time.at(946684800, 123456.789)
+    assert_equal("123", t.strftime("%3N"))
+    assert_equal("123456", t.strftime("%6N"))
+    assert_equal("123456789", t.strftime("%9N"))
+    assert_equal("1234567890", t.strftime("%10N"))
+    assert_equal("", t.strftime("%0N"))
+    assert_equal("000", t.strftime("%3S"))
+    assert_equal("946684800", t.strftime("%s"))
+    assert_equal("946684800", t.utc.strftime("%s"))
+
+    t = Time.mktime(2001, 10, 1)
+    assert_equal("2001-10-01", t.strftime("%F"))
+
+    t = Time.mktime(2001, 10, 1, 2, 0, 0)
+    assert_equal("01", t.strftime("%d"))
+    assert_equal("01", t.strftime("%0d"))
+    assert_equal(" 1", t.strftime("%_d"))
+    assert_equal(" 1", t.strftime("%e"))
+    assert_equal("01", t.strftime("%0e"))
+    assert_equal(" 1", t.strftime("%_e"))
+    assert_equal("AM", t.strftime("%p"))
+    assert_equal("am", t.strftime("%#p"))
+    assert_equal("am", t.strftime("%P"))
+    assert_equal("AM", t.strftime("%#P"))
+    assert_equal("02", t.strftime("%H"))
+    assert_equal("02", t.strftime("%0H"))
+    assert_equal(" 2", t.strftime("%_H"))
+    assert_equal("02", t.strftime("%I"))
+    assert_equal("02", t.strftime("%0I"))
+    assert_equal(" 2", t.strftime("%_I"))
+    assert_equal(" 2", t.strftime("%k"))
+    assert_equal("02", t.strftime("%0k"))
+    assert_equal(" 2", t.strftime("%_k"))
+    assert_equal(" 2", t.strftime("%l"))
+    assert_equal("02", t.strftime("%0l"))
+    assert_equal(" 2", t.strftime("%_l"))
+    t = Time.mktime(2001, 10, 1, 14, 0, 0)
+    assert_equal("PM", t.strftime("%p"))
+    assert_equal("pm", t.strftime("%#p"))
+    assert_equal("pm", t.strftime("%P"))
+    assert_equal("PM", t.strftime("%#P"))
+    assert_equal("14", t.strftime("%H"))
+    assert_equal("14", t.strftime("%0H"))
+    assert_equal("14", t.strftime("%_H"))
+    assert_equal("02", t.strftime("%I"))
+    assert_equal("02", t.strftime("%0I"))
+    assert_equal(" 2", t.strftime("%_I"))
+    assert_equal("14", t.strftime("%k"))
+    assert_equal("14", t.strftime("%0k"))
+    assert_equal("14", t.strftime("%_k"))
+    assert_equal(" 2", t.strftime("%l"))
+    assert_equal("02", t.strftime("%0l"))
+    assert_equal(" 2", t.strftime("%_l"))
   end
 end

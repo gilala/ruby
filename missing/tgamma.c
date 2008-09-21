@@ -1,4 +1,4 @@
-/* tgamma.c  - public domain implementation of error function tgamma(3m)
+/* tgamma.c  - public domain implementation of function tgamma(3m)
 
 reference - Haruhiko Okumura: C-gengo niyoru saishin algorithm jiten
             (New Algorithm handbook in C language) (Gijyutsu hyouron
@@ -24,7 +24,6 @@ double tgamma(double x)
         return 1/x < 0 ? -HUGE_VAL : HUGE_VAL;
     }
     if (x < 0) {
-        int sign;
         static double zero = 0.0;
         double i, f;
         f = modf(-x, &i);

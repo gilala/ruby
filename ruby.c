@@ -66,12 +66,12 @@ void ruby_set_inplace_mode(const char *);
 #define DISABLE_BIT(bit) (1U << disable_##bit)
 enum disable_flag_bits {
     disable_gems,
-    disable_rubyopt,
+    disable_rubyopt
 };
 
 #define DUMP_BIT(bit) (1U << dump_##bit)
 enum dump_flag_bits {
-    dump_insns,
+    dump_insns
 };
 
 struct cmdline_options {
@@ -1069,12 +1069,12 @@ process_options(VALUE arg)
 #endif
     opt->script_name = rb_str_new4(rb_progname);
     opt->script = RSTRING_PTR(opt->script_name);
+    safe = rb_safe_level();
+    rb_set_safe_level_force(0);
     ruby_set_argv(argc, argv);
     process_sflag(opt);
 
     ruby_init_loadpath();
-    safe = rb_safe_level();
-    rb_set_safe_level_force(0);
     ruby_init_gems(!(opt->disable & DISABLE_BIT(gems)));
     lenc = rb_locale_encoding();
     for (i = 0; i < RARRAY_LEN(rb_argv); i++) {
@@ -1260,12 +1260,12 @@ load_file(VALUE parser, const char *fname, int script, struct cmdline_options *o
 		}
 
 		/* push back shebang for pragma may exist in next line */
-		rb_io_ungetc(f, rb_str_new2("!\n"));
+		rb_io_ungetbyte(f, rb_str_new2("!\n"));
 	    }
 	    else if (!NIL_P(c)) {
-		rb_io_ungetc(f, c);
+		rb_io_ungetbyte(f, c);
 	    }
-	    rb_io_ungetc(f, INT2FIX('#'));
+	    rb_io_ungetbyte(f, INT2FIX('#'));
 	    if (no_src_enc && opt->src.enc.name) {
 		opt->src.enc.index = opt_enc_index(opt->src.enc.name);
 		src_encoding_index = opt->src.enc.index;
@@ -1275,7 +1275,7 @@ load_file(VALUE parser, const char *fname, int script, struct cmdline_options *o
 	    }
 	}
 	else if (!NIL_P(c)) {
-	    rb_io_ungetc(f, c);
+	    rb_io_ungetbyte(f, c);
 	}
 	require_libraries(opt);	/* Why here? unnatural */
     }
@@ -1397,14 +1397,14 @@ set_arg0(VALUE val, ID id)
 	}
     }
 #endif
-    rb_progname = rb_tainted_str_new(s, i);
+    rb_progname = rb_obj_freeze(rb_tainted_str_new(s, i));
 }
 
 void
 ruby_script(const char *name)
 {
     if (name) {
-	rb_progname = rb_tainted_str_new2(name);
+	rb_progname = rb_obj_freeze(rb_tainted_str_new2(name));
     }
 }
 
@@ -1440,20 +1440,24 @@ forbid_setid(const char *s, struct cmdline_options *opt)
 }
 
 static void
-verbose_setter(VALUE val, ID id, VALUE *variable)
+verbose_setter(VALUE val, ID id, void *data)
 {
-    ruby_verbose = RTEST(val) ? Qtrue : val;
+    VALUE *variable = data;
+    *variable = RTEST(val) ? Qtrue : val;
 }
 
 static VALUE
-opt_W_getter(VALUE val, ID id)
+opt_W_getter(ID id, void *data)
 {
-    if (ruby_verbose == Qnil)
+    VALUE *variable = data;
+    switch (*variable) {
+      case Qnil:
 	return INT2FIX(0);
-    if (ruby_verbose == Qfalse)
+      case Qfalse:
 	return INT2FIX(1);
-    if (ruby_verbose == Qtrue)
+      case Qtrue:
 	return INT2FIX(2);
+    }
     return Qnil;		/* not reached */
 }
 
@@ -1463,7 +1467,7 @@ ruby_prog_init(void)
     rb_define_hooked_variable("$VERBOSE", &ruby_verbose, 0, verbose_setter);
     rb_define_hooked_variable("$-v", &ruby_verbose, 0, verbose_setter);
     rb_define_hooked_variable("$-w", &ruby_verbose, 0, verbose_setter);
-    rb_define_virtual_variable("$-W", opt_W_getter, 0);
+    rb_define_hooked_variable("$-W", &ruby_verbose, opt_W_getter, 0);
     rb_define_variable("$DEBUG", &ruby_debug);
     rb_define_variable("$-d", &ruby_debug);
 

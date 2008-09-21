@@ -7,14 +7,17 @@ require_relative 'envutil'
 class TestArgf < Test::Unit::TestCase
   def setup
     @t1 = Tempfile.new("foo")
+    @t1.binmode
     @t1.puts "1"
     @t1.puts "2"
     @t1.close
     @t2 = Tempfile.new("bar")
+    @t2.binmode
     @t2.puts "3"
     @t2.puts "4"
     @t2.close
     @t3 = Tempfile.new("baz")
+    @t3.binmode
     @t3.puts "5"
     @t3.puts "6"
     @t3.close
@@ -45,6 +48,10 @@ class TestArgf < Test::Unit::TestCase
     yield(f)
   ensure
     f.close unless !f || f.closed?
+  end
+
+  def no_safe_rename
+    /cygwin|mswin|mingw|bccwin/ =~ RUBY_PLATFORM
   end
 
   def test_argf
@@ -124,149 +131,141 @@ class TestArgf < Test::Unit::TestCase
   end
 
   def test_inplace
-    EnvUtil.rubyexec("-", @t1.path, @t2.path, @t3.path) do |w, r, e|
-      w.puts "ARGF.inplace_mode = '.bak'"
-      w.puts "while line = ARGF.gets"
-      w.puts "  puts line.chomp + '.new'"
-      w.puts "end"
-      w.close
-      assert_equal("", e.read)
-      assert_equal("", r.read)
-      assert_equal("1.new\n2.new\n", File.read(@t1.path))
-      assert_equal("3.new\n4.new\n", File.read(@t2.path))
-      assert_equal("5.new\n6.new\n", File.read(@t3.path))
-      assert_equal("1\n2\n", File.read(@t1.path + ".bak"))
-      assert_equal("3\n4\n", File.read(@t2.path + ".bak"))
-      assert_equal("5\n6\n", File.read(@t3.path + ".bak"))
-    end
+    assert_in_out_err(["-", @t1.path, @t2.path, @t3.path], <<-INPUT, [], [])
+      ARGF.inplace_mode = '.bak'
+      while line = ARGF.gets
+        puts line.chomp + '.new'
+      end
+    INPUT
+    assert_equal("1.new\n2.new\n", File.read(@t1.path))
+    assert_equal("3.new\n4.new\n", File.read(@t2.path))
+    assert_equal("5.new\n6.new\n", File.read(@t3.path))
+    assert_equal("1\n2\n", File.read(@t1.path + ".bak"))
+    assert_equal("3\n4\n", File.read(@t2.path + ".bak"))
+    assert_equal("5\n6\n", File.read(@t3.path + ".bak"))
   end
 
   def test_inplace2
-    EnvUtil.rubyexec("-", @t1.path, @t2.path, @t3.path) do |w, r, e|
-      w.puts "ARGF.inplace_mode = '.bak'"
-      w.puts "puts ARGF.gets.chomp + '.new'"
-      w.puts "puts ARGF.gets.chomp + '.new'"
-      w.puts "p ARGF.inplace_mode"
-      w.puts "ARGF.inplace_mode = nil"
-      w.puts "puts ARGF.gets.chomp + '.new'"
-      w.puts "puts ARGF.gets.chomp + '.new'"
-      w.puts "p ARGF.inplace_mode"
-      w.puts "ARGF.inplace_mode = '.bak'"
-      w.puts "puts ARGF.gets.chomp + '.new'"
-      w.puts "p ARGF.inplace_mode"
-      w.puts "ARGF.inplace_mode = nil"
-      w.puts "puts ARGF.gets.chomp + '.new'"
-      w.close
-      assert_equal("", e.read)
-      assert_equal("", r.read)
-      assert_equal("1.new\n2.new\n\".bak\"\n3.new\n4.new\nnil\n", File.read(@t1.path))
-      assert_equal("3\n4\n", File.read(@t2.path))
-      assert_equal("5.new\n\".bak\"\n6.new\n", File.read(@t3.path))
-      assert_equal("1\n2\n", File.read(@t1.path + ".bak"))
-      assert_equal(false, File.file?(@t2.path + ".bak"))
-      assert_equal("5\n6\n", File.read(@t3.path + ".bak"))
-    end
+    assert_in_out_err(["-", @t1.path, @t2.path, @t3.path], <<-INPUT, [], [])
+      ARGF.inplace_mode = '.bak'
+      puts ARGF.gets.chomp + '.new'
+      puts ARGF.gets.chomp + '.new'
+      p ARGF.inplace_mode
+      ARGF.inplace_mode = nil
+      puts ARGF.gets.chomp + '.new'
+      puts ARGF.gets.chomp + '.new'
+      p ARGF.inplace_mode
+      ARGF.inplace_mode = '.bak'
+      puts ARGF.gets.chomp + '.new'
+      p ARGF.inplace_mode
+      ARGF.inplace_mode = nil
+      puts ARGF.gets.chomp + '.new'
+    INPUT
+    assert_equal("1.new\n2.new\n\".bak\"\n3.new\n4.new\nnil\n", File.read(@t1.path))
+    assert_equal("3\n4\n", File.read(@t2.path))
+    assert_equal("5.new\n\".bak\"\n6.new\n", File.read(@t3.path))
+    assert_equal("1\n2\n", File.read(@t1.path + ".bak"))
+    assert_equal(false, File.file?(@t2.path + ".bak"))
+    assert_equal("5\n6\n", File.read(@t3.path + ".bak"))
   end
 
   def test_inplace3
-    EnvUtil.rubyexec("-i.bak", "-", @t1.path, @t2.path, @t3.path) do |w, r, e|
-      w.puts "puts ARGF.gets.chomp + '.new'"
-      w.puts "puts ARGF.gets.chomp + '.new'"
-      w.puts "p $-i"
-      w.puts "$-i = nil"
-      w.puts "puts ARGF.gets.chomp + '.new'"
-      w.puts "puts ARGF.gets.chomp + '.new'"
-      w.puts "p $-i"
-      w.puts "$-i = '.bak'"
-      w.puts "puts ARGF.gets.chomp + '.new'"
-      w.puts "p $-i"
-      w.puts "$-i = nil"
-      w.puts "puts ARGF.gets.chomp + '.new'"
-      w.close
-      assert_equal("", e.read)
-      assert_equal("", r.read)
-      assert_equal("1.new\n2.new\n\".bak\"\n3.new\n4.new\nnil\n", File.read(@t1.path))
-      assert_equal("3\n4\n", File.read(@t2.path))
-      assert_equal("5.new\n\".bak\"\n6.new\n", File.read(@t3.path))
-      assert_equal("1\n2\n", File.read(@t1.path + ".bak"))
-      assert_equal(false, File.file?(@t2.path + ".bak"))
-      assert_equal("5\n6\n", File.read(@t3.path + ".bak"))
-    end
+    assert_in_out_err(["-i.bak", "-", @t1.path, @t2.path, @t3.path], <<-INPUT, [], [])
+      puts ARGF.gets.chomp + '.new'
+      puts ARGF.gets.chomp + '.new'
+      p $-i
+      $-i = nil
+      puts ARGF.gets.chomp + '.new'
+      puts ARGF.gets.chomp + '.new'
+      p $-i
+      $-i = '.bak'
+      puts ARGF.gets.chomp + '.new'
+      p $-i
+      $-i = nil
+      puts ARGF.gets.chomp + '.new'
+    INPUT
+    assert_equal("1.new\n2.new\n\".bak\"\n3.new\n4.new\nnil\n", File.read(@t1.path))
+    assert_equal("3\n4\n", File.read(@t2.path))
+    assert_equal("5.new\n\".bak\"\n6.new\n", File.read(@t3.path))
+    assert_equal("1\n2\n", File.read(@t1.path + ".bak"))
+    assert_equal(false, File.file?(@t2.path + ".bak"))
+    assert_equal("5\n6\n", File.read(@t3.path + ".bak"))
   end
 
   def test_inplace_rename_impossible
     t = make_tempfile
 
-    EnvUtil.rubyexec("-", t.path) do |w, r, e|
-      w.puts "ARGF.inplace_mode = '/\\\\'"
-      w.puts "while line = ARGF.gets"
-      w.puts "  puts line.chomp + '.new'"
-      w.puts "end"
-      w.close
-      assert_match(/Can't rename .* to .*: .*. skipping file/, e.read)
-      assert_equal("", r.read)
-      assert_equal("foo\nbar\nbaz\n", File.read(t.path))
+    assert_in_out_err(["-", t.path], <<-INPUT) do |r, e|
+      ARGF.inplace_mode = '/\\\\'
+      while line = ARGF.gets
+        puts line.chomp + '.new'
+      end
+    INPUT
+      if no_safe_rename
+        assert_equal([], e)
+        assert_equal([], r)
+        assert_equal("foo.new\nbar.new\nbaz.new\n", File.read(t.path))
+      else
+        assert_match(/Can't rename .* to .*: .*. skipping file/, e.first) #'
+        assert_equal([], r)
+        assert_equal("foo\nbar\nbaz\n", File.read(t.path))
+      end
     end
   end
 
   def test_inplace_no_backup
     t = make_tempfile
 
-    EnvUtil.rubyexec("-", t.path) do |w, r, e|
-      w.puts "ARGF.inplace_mode = ''"
-      w.puts "while line = ARGF.gets"
-      w.puts "  puts line.chomp + '.new'"
-      w.puts "end"
-      w.close
-      assert_equal("", e.read)
-      assert_equal("", r.read)
-      assert_equal("foo.new\nbar.new\nbaz.new\n", File.read(t.path))
+    assert_in_out_err(["-", t.path], <<-INPUT) do |r, e|
+      ARGF.inplace_mode = ''
+      while line = ARGF.gets
+        puts line.chomp + '.new'
+      end
+    INPUT
+      if no_safe_rename
+        assert_match(/Can't do inplace edit without backup/, e.join) #'
+      else
+        assert_equal([], e)
+        assert_equal([], r)
+        assert_equal("foo.new\nbar.new\nbaz.new\n", File.read(t.path))
+      end
     end
   end
 
   def test_inplace_dup
     t = make_tempfile
 
-    EnvUtil.rubyexec("-", t.path) do |w, r, e|
-      w.puts "ARGF.inplace_mode = '.bak'"
-      w.puts "f = ARGF.dup"
-      w.puts "while line = f.gets"
-      w.puts "  puts line.chomp + '.new'"
-      w.puts "end"
-      w.close
-      assert_equal("", e.read)
-      assert_equal("", r.read)
-      assert_equal("foo.new\nbar.new\nbaz.new\n", File.read(t.path))
-    end
+    assert_in_out_err(["-", t.path], <<-INPUT, [], [])
+      ARGF.inplace_mode = '.bak'
+      f = ARGF.dup
+      while line = f.gets
+        puts line.chomp + '.new'
+      end
+    INPUT
+    assert_equal("foo.new\nbar.new\nbaz.new\n", File.read(t.path))
   end
 
   def test_inplace_stdin
     t = make_tempfile
 
-    EnvUtil.rubyexec("-", "-") do |w, r, e|
-      w.puts "ARGF.inplace_mode = '.bak'"
-      w.puts "f = ARGF.dup"
-      w.puts "while line = f.gets"
-      w.puts "  puts line.chomp + '.new'"
-      w.puts "end"
-      w.close
-      assert_match("Can't do inplace edit for stdio; skipping", e.read)
-      assert_equal("", r.read)
-    end
+    assert_in_out_err(["-", "-"], <<-INPUT, [], /Can't do inplace edit for stdio; skipping/)
+      ARGF.inplace_mode = '.bak'
+      f = ARGF.dup
+      while line = f.gets
+        puts line.chomp + '.new'
+      end
+    INPUT
   end
 
   def test_inplace_stdin2
     t = make_tempfile
 
-    EnvUtil.rubyexec("-") do |w, r, e|
-      w.puts "ARGF.inplace_mode = '.bak'"
-      w.puts "while line = ARGF.gets"
-      w.puts "  puts line.chomp + '.new'"
-      w.puts "end"
-      w.close
-      assert_match("Can't do inplace edit for stdio", e.read)
-      assert_equal("", r.read)
-    end
+    assert_in_out_err(["-"], <<-INPUT, [], /Can't do inplace edit for stdio/)
+      ARGF.inplace_mode = '.bak'
+      while line = ARGF.gets
+        puts line.chomp + '.new'
+      end
+    INPUT
   end
 
   def test_encoding
@@ -284,6 +283,7 @@ class TestArgf < Test::Unit::TestCase
   def test_tell
     ruby('-e', <<-SRC, @t1.path, @t2.path, @t3.path) do |f|
       begin
+        ARGF.binmode
         loop do
           p ARGF.tell
           p ARGF.gets
@@ -564,6 +564,11 @@ class TestArgf < Test::Unit::TestCase
     end
   end
 
+  def test_each_line_paragraph
+    assert_in_out_err(['-e', 'ARGF.each_line("") {|para| p para}'], "a\n\nb\n",
+                      ["\"a\\n\\n\"", "\"b\\n\""], [])
+  end
+
   def test_each_byte
     ruby('-e', <<-SRC, @t1.path, @t2.path, @t3.path) do |f|
       s = []
@@ -642,7 +647,8 @@ class TestArgf < Test::Unit::TestCase
   end
 
   def test_binmode
-    ruby('-e', "ARGF.binmode; puts ARGF.read", @t1.path, @t2.path, @t3.path) do |f|
+    ruby('-e', "ARGF.binmode; STDOUT.binmode; puts ARGF.read", @t1.path, @t2.path, @t3.path) do |f|
+      f.binmode
       assert_equal("1\n2\n3\n4\n5\n6\n", f.read)
     end
   end

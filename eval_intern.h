@@ -15,7 +15,6 @@
 #include "ruby/ruby.h"
 #include "ruby/node.h"
 #include "ruby/util.h"
-#include "ruby/signal.h"
 #include "vm_core.h"
 
 #ifdef HAVE_STDLIB_H
@@ -75,7 +74,7 @@ char *strrchr(const char *, const char);
 #include <unistd.h>
 #endif
 
-#ifdef __BEOS__
+#ifdef HAVE_NET_SOCKET_H
 #include <net/socket.h>
 #endif
 
@@ -205,7 +204,7 @@ void rb_thread_wait_other_threads(void);
 enum {
     RAISED_EXCEPTION = 1,
     RAISED_STACKOVERFLOW = 2,
-    RAISED_NOMEMORY = 4,
+    RAISED_NOMEMORY = 4
 };
 int rb_thread_set_raised(rb_thread_t *th);
 int rb_thread_reset_raised(rb_thread_t *th);
@@ -231,5 +230,6 @@ VALUE rb_vm_call_cfunc(VALUE recv, VALUE (*func)(VALUE), VALUE arg, const rb_blo
 void rb_thread_terminate_all(void);
 VALUE rb_vm_top_self();
 VALUE rb_vm_cbase(void);
+void rb_trap_restore_mask(void);
 
 #endif /* RUBY_EVAL_INTERN_H */

@@ -18,7 +18,6 @@
 #include <iconv.h>
 #include <assert.h>
 #include "ruby/st.h"
-#include "ruby/intern.h"
 #include "ruby/encoding.h"
 
 /*
@@ -67,6 +66,12 @@
  * 4. Shorthand for (3).
  *
  *      Iconv.iconv(to, from, *input.to_a)
+ *
+ * == Attentions
+ *
+ * Even if some extentions of implementation dependent are useful,
+ * DON'T USE those extentions in libraries and scripts to widely distribute.
+ * If you want to use those feature, use String#encode.
  */
 
 /* Invalid value for iconv_t is -1 but 0 for VALUE, I hope VALUE is
@@ -136,6 +141,21 @@ charset_map_get(void)
     return charset_map;
 }
 
+static VALUE
+strip_glibc_option(VALUE *code)
+{
+    VALUE val = *code;
+    const char *ptr = RSTRING_PTR(val), *pend = RSTRING_END(val);
+    const char *slash = memchr(ptr, '/', pend - ptr);
+    if (slash && slash < pend - 1 && slash[1] ==  '/') {
+	VALUE opt = rb_str_subseq(val, slash - ptr, pend - slash);
+	val = rb_str_subseq(val, 0, slash - ptr);
+	*code = val;
+	return opt;
+    }
+    return 0;
+}
+
 static char *
 map_charset(VALUE *code)
 {
@@ -154,29 +174,53 @@ map_charset(VALUE *code)
 static iconv_t
 iconv_create(VALUE to, VALUE from, struct rb_iconv_opt_t *opt, int *idx)
 {
+    VALUE toopt = strip_glibc_option(&to);
+    VALUE fromopt = strip_glibc_option(&from);
+    VALUE toenc = 0, fromenc = 0;
     const char* tocode = map_charset(&to);
     const char* fromcode = map_charset(&from);
     iconv_t cd;
+    int retry = 0;
 
-    if ((*idx = rb_enc_find_index(tocode)) < 0) {
-	const char *slash = strchr(tocode, '/');
-	if (slash && slash[1] == '/') {
-	    VALUE tmp = rb_str_new(tocode, slash - tocode);
-	    *idx = rb_enc_find_index(RSTRING_PTR(tmp));
-	}
+    *idx = rb_enc_find_index(tocode);
+
+    if (toopt) {
+	toenc = rb_str_plus(to, toopt);
+	tocode = RSTRING_PTR(toenc);
     }
-
-    cd = iconv_open(tocode, fromcode);
-    if (cd == (iconv_t)-1) {
+    if (fromopt) {
+	fromenc = rb_str_plus(from, fromopt);
+	fromcode = RSTRING_PTR(fromenc);
+    }
+    while ((cd = iconv_open(tocode, fromcode)) == (iconv_t)-1) {
+	int inval = 0;
 	switch (errno) {
 	  case EMFILE:
 	  case ENFILE:
 	  case ENOMEM:
-	    rb_gc();
-	    cd = iconv_open(tocode, fromcode);
+	    if (!retry++) {
+		rb_gc();
+		continue;
+	    }
+	    break;
+	  case EINVAL:
+	    retry = 0;
+	    inval = 1;
+	    if (toenc) {
+		tocode = RSTRING_PTR(to);
+		rb_str_resize(toenc, 0);
+		toenc = 0;
+		continue;
+	    }
+	    if (fromenc) {
+		fromcode = RSTRING_PTR(from);
+		rb_str_resize(fromenc, 0);
+		fromenc = 0;
+		continue;
+	    }
+	    break;
 	}
-	if (cd == (iconv_t)-1) {
-	    int inval = errno == EINVAL;
+	{
 	    const char *s = inval ? "invalid encoding " : "iconv";
 	    volatile VALUE msg = rb_str_new(0, strlen(s) + RSTRING_LEN(to) +
 					    RSTRING_LEN(from) + 8);
@@ -191,10 +235,25 @@ iconv_create(VALUE to, VALUE from, struct rb_iconv_opt_t *opt, int *idx)
 	}
     }
 
+    if (toopt || fromopt) {
+	if (toopt && fromopt && RTEST(rb_str_equal(toopt, fromopt))) {
+	    fromopt = 0;
+	}
+	if (toopt && fromopt) {
+	    rb_warning("encoding option isn't portable: %s, %s",
+		       RSTRING_PTR(toopt) + 2, RSTRING_PTR(fromopt) + 2);
+	}
+	else {
+	    rb_warning("encoding option isn't portable: %s",
+		       (toopt ? RSTRING_PTR(toopt) : RSTRING_PTR(fromopt)) + 2);
+	}
+    }
+
     if (opt) {
 #ifdef ICONV_SET_TRANSLITERATE
 	if (opt->transliterate != Qundef) {
 	    int flag = RTEST(opt->transliterate);
+	    rb_warning("encoding option isn't portable: transliterate");
 	    if (iconvctl(cd, ICONV_SET_TRANSLITERATE, (void *)&flag))
 		rb_sys_fail("ICONV_SET_TRANSLITERATE");
 	}
@@ -202,6 +261,7 @@ iconv_create(VALUE to, VALUE from, struct rb_iconv_opt_t *opt, int *idx)
 #ifdef ICONV_SET_DISCARD_ILSEQ
 	if (opt->discard_ilseq != Qundef) {
 	    int flag = RTEST(opt->discard_ilseq);
+	    rb_warning("encoding option isn't portable: discard_ilseq");
 	    if (iconvctl(cd, ICONV_SET_DISCARD_ILSEQ, (void *)&flag))
 		rb_sys_fail("ICONV_SET_DISCARD_ILSEQ");
 	}

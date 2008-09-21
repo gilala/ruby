@@ -17,7 +17,8 @@ unless File.directory?(dir = File.dirname(rbconfig_rb))
 end
 
 version = RUBY_VERSION
-def (config = "").write(arg)
+config = ""
+def config.write(arg)
   concat(arg.to_s)
 end
 $stdout = config
@@ -140,7 +141,6 @@ end
 print(*v_fast)
 print(*v_others)
 print <<EOS
-  CONFIG["ruby_version"] = "$(MAJOR).$(MINOR).$(TEENY)"
   CONFIG["rubylibdir"] = "$(libdir)/ruby/$(ruby_version)"
   CONFIG["archdir"] = "$(rubylibdir)/$(arch)"
   CONFIG["sitelibdir"] = "$(sitedir)/$(ruby_version)"

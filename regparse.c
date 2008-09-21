@@ -34,7 +34,7 @@
 #define CASE_FOLD_IS_APPLIED_INSIDE_NEGATIVE_CCLASS
 
 
-OnigSyntaxType OnigSyntaxRuby = {
+const OnigSyntaxType OnigSyntaxRuby = {
   (( SYN_GNU_REGEX_OP | ONIG_SYN_OP_QMARK_NON_GREEDY |
      ONIG_SYN_OP_ESC_OCTAL3 | ONIG_SYN_OP_ESC_X_HEX2 |
      ONIG_SYN_OP_ESC_X_BRACE_HEX8 | ONIG_SYN_OP_ESC_CONTROL_CHARS |
@@ -70,7 +70,7 @@ OnigSyntaxType OnigSyntaxRuby = {
   }
 };
 
-OnigSyntaxType*  OnigDefaultSyntax = ONIG_SYNTAX_RUBY;
+const OnigSyntaxType*  OnigDefaultSyntax = ONIG_SYNTAX_RUBY;
 
 extern void onig_null_warn(const char* s ARG_UNUSED) { }
 
@@ -342,7 +342,7 @@ str_end_hash(st_str_end_key* x)
 extern hash_table_type*
 onig_st_init_strend_table_with_size(int size)
 {
-  static struct st_hash_type hashType = {
+  static const struct st_hash_type hashType = {
     str_end_cmp,
     str_end_hash,
   };
@@ -729,7 +729,10 @@ name_add(regex_t* reg, UChar* name, UChar* name_end, int backref, ScanEnv* env)
     CHECK_NULL_RETURN_MEMERR(e);
 
     e->name = strdup_with_null(reg->enc, name, name_end);
-    if (IS_NULL(e->name)) return ONIGERR_MEMORY;
+    if (IS_NULL(e->name)) {
+      xfree(e);
+      return ONIGERR_MEMORY;
+    }
     onig_st_insert_strend(t, e->name, (e->name + (name_end - name)),
                           (HashDataType )e);
 
@@ -2177,7 +2180,7 @@ enum ReduceType {
   RQ_PQ_Q      /* to '+?)?' */
 };
 
-static enum ReduceType ReduceTypeTable[6][6] = {
+static enum ReduceType const ReduceTypeTable[6][6] = {
   {RQ_DEL,  RQ_A,    RQ_A,   RQ_QQ,   RQ_AQ,   RQ_ASIS}, /* '?'  */
   {RQ_DEL,  RQ_DEL,  RQ_DEL, RQ_P_QQ, RQ_P_QQ, RQ_DEL},  /* '*'  */
   {RQ_A,    RQ_A,    RQ_DEL, RQ_ASIS, RQ_P_QQ, RQ_DEL},  /* '+'  */
@@ -2862,7 +2865,7 @@ find_str_position(OnigCodePoint s[], int n, UChar* from, UChar* to,
 
 static int
 str_exist_check_with_esc(OnigCodePoint s[], int n, UChar* from, UChar* to,
-		 OnigCodePoint bad, OnigEncoding enc, OnigSyntaxType* syn)
+		 OnigCodePoint bad, OnigEncoding enc, const OnigSyntaxType* syn)
 {
   int i, in_esc;
   OnigCodePoint x;
@@ -2903,7 +2906,7 @@ fetch_token_in_cc(OnigToken* tok, UChar** src, UChar* end, ScanEnv* env)
 {
   int num;
   OnigCodePoint c, c2;
-  OnigSyntaxType* syn = env->syntax;
+  const OnigSyntaxType* syn = env->syntax;
   OnigEncoding enc = env->enc;
   UChar* prev;
   UChar* p = *src;
@@ -3122,7 +3125,7 @@ fetch_token(OnigToken* tok, UChar** src, UChar* end, ScanEnv* env)
   int r, num;
   OnigCodePoint c;
   OnigEncoding enc = env->enc;
-  OnigSyntaxType* syn = env->syntax;
+  const OnigSyntaxType* syn = env->syntax;
   UChar* prev;
   UChar* p = *src;
   PFETCH_READY;
@@ -3911,7 +3914,7 @@ parse_posix_bracket(CClassNode* cc, UChar** src, UChar* end, ScanEnv* env)
 #define POSIX_BRACKET_CHECK_LIMIT_LENGTH  20
 #define POSIX_BRACKET_NAME_MIN_LEN         4
 
-  static PosixBracketEntryType PBS[] = {
+  static const PosixBracketEntryType PBS[] = {
     { (UChar* )"alnum",  ONIGENC_CTYPE_ALNUM,  5 },
     { (UChar* )"alpha",  ONIGENC_CTYPE_ALPHA,  5 },
     { (UChar* )"blank",  ONIGENC_CTYPE_BLANK,  5 },
@@ -3929,7 +3932,7 @@ parse_posix_bracket(CClassNode* cc, UChar** src, UChar* end, ScanEnv* env)
     { (UChar* )NULL,     -1, 0 }
   };
 
-  PosixBracketEntryType *pb;
+  const PosixBracketEntryType *pb;
   int not, i, r;
   OnigCodePoint c;
   OnigEncoding enc = env->enc;
@@ -4742,11 +4745,11 @@ parse_enclose(Node** np, OnigToken* tok, int term, UChar** src, UChar* end,
   return 0;
 }
 
-static const char* PopularQStr[] = {
+static const char* const PopularQStr[] = {
   "?", "*", "+", "??", "*?", "+?"
 };
 
-static const char* ReduceQStr[] = {
+static const char* const ReduceQStr[] = {
   "", "", "*", "*?", "??", "+ and ??", "+? and ?"
 };
 
@@ -4882,7 +4885,7 @@ static int type_cclass_hash(type_cclass_key* key)
   return val + (val >> 5);
 }
 
-static struct st_hash_type type_type_cclass_hash = {
+static const struct st_hash_type type_type_cclass_hash = {
     type_cclass_cmp,
     type_cclass_hash,
 };
@@ -4906,11 +4909,13 @@ i_free_shared_class(type_cclass_key* key, Node* node, void* arg ARG_UNUSED)
 extern int
 onig_free_shared_cclass_table(void)
 {
+  THREAD_ATOMIC_START;
   if (IS_NOT_NULL(OnigTypeCClassTable)) {
     onig_st_foreach(OnigTypeCClassTable, i_free_shared_class, 0);
     onig_st_free_table(OnigTypeCClassTable);
     OnigTypeCClassTable = NULL;
   }
+  THREAD_ATOMIC_END;
 
   return 0;
 }
@@ -5382,13 +5387,19 @@ parse_exp(Node** np, OnigToken* tok, int term,
       if (tok->u.repeat.possessive != 0) {
 	Node* en;
 	en = node_new_enclose(ENCLOSE_STOP_BACKTRACK);
-	CHECK_NULL_RETURN_MEMERR(en);
+	if (IS_NULL(en)) {
+	  onig_node_free(qn);
+	  return ONIGERR_MEMORY;
+	}
 	NENCLOSE(en)->target = qn;
 	qn = en;
       }
 
       if (r == 0) {
 	*targetp = qn;
+      }
+      else if (r == 1) {
+        onig_node_free(qn);
       }
       else if (r == 2) { /* split case: /abc+/ */
 	Node *tmp;

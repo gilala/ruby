@@ -2,7 +2,7 @@ module Gem
 
   # An Array of the default sources that come with RubyGems.
   def self.default_sources
-    %w[http://gems.rubyforge.org]
+    %w[http://gems.rubyforge.org/]
   end
 
   # Default home directory path to be used if an alternate value is not
@@ -19,9 +19,9 @@ module Gem
     end
   end
 
-  # Default gem path.
+  # Default gem load path.
   def self.default_path
-    default_dir
+    [File.join(ENV['HOME'], '.gem'), default_dir]
   end
 
   # Deduce Ruby's --program-prefix and --program-suffix from its install name.

@@ -22,6 +22,7 @@ static void syslog_write(int pri, int argc, VALUE *argv)
 {
     VALUE str;
 
+    rb_secure(4);
     if (argc < 1) {
         rb_raise(rb_eArgError, "no log message supplied");
     }
@@ -38,6 +39,7 @@ static void syslog_write(int pri, int argc, VALUE *argv)
 /* Syslog module methods */
 static VALUE mSyslog_close(VALUE self)
 {
+    rb_secure(4);
     if (!syslog_opened) {
         rb_raise(rb_eRuntimeError, "syslog not opened");
     }
@@ -65,11 +67,7 @@ static VALUE mSyslog_open(int argc, VALUE *argv, VALUE self)
     if (NIL_P(ident)) {
         ident = rb_gv_get("$0"); 
     }
-#ifdef SafeStringValue
     SafeStringValue(ident);
-#else
-    Check_SafeStr(ident);
-#endif
     syslog_ident = strdup(RSTRING_PTR(ident));
 
     if (NIL_P(opt)) {
@@ -132,6 +130,7 @@ static VALUE mSyslog_get_mask(VALUE self)
 
 static VALUE mSyslog_set_mask(VALUE self, VALUE mask)
 {
+    rb_secure(4);
     if (!syslog_opened) {
         rb_raise(rb_eRuntimeError, "must open syslog before setting log mask");
     }
@@ -221,12 +220,12 @@ define_syslog_shortcut_method(LOG_DEBUG, debug)
 
 static VALUE mSyslogConstants_LOG_MASK(VALUE klass, VALUE pri)
 {
-    return INT2FIX(LOG_MASK(FIX2INT(pri)));
+    return INT2FIX(LOG_MASK(NUM2INT(pri)));
 }
 
 static VALUE mSyslogConstants_LOG_UPTO(VALUE klass, VALUE pri)
 {
-    return INT2FIX(LOG_UPTO(FIX2INT(pri)));
+    return INT2FIX(LOG_UPTO(NUM2INT(pri)));
 }
 
 /* Init for package syslog */

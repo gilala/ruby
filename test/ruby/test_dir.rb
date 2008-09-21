@@ -2,11 +2,14 @@ require 'test/unit'
 
 require 'tmpdir'
 require 'fileutils'
+require 'pathname'
 
 class TestDir < Test::Unit::TestCase
 
   def setup
-    @root = Dir.mktmpdir('__test_dir__')
+    @verbose = $VERBOSE
+    $VERBOSE = nil
+    @root = Pathname.new(Dir.mktmpdir('__test_dir__')).realpath.to_s
     @nodir = File.join(@root, "dummy")
     for i in ?a..?z
       if i.ord % 2 == 0
@@ -18,6 +21,7 @@ class TestDir < Test::Unit::TestCase
   end
 
   def teardown
+    $VERBOSE = @verbose
     FileUtils.remove_entry_secure @root if File.directory?(@root)
   end
 
@@ -131,7 +135,8 @@ class TestDir < Test::Unit::TestCase
   end
 
   def test_chroot_nodir
-    assert_raise(NotImplementedError, Errno::ENOENT) { Dir.chroot(File.join(@nodir, "")) }
+    assert_raise(NotImplementedError, Errno::ENOENT, Errno::EPERM
+		) { Dir.chroot(File.join(@nodir, "")) }
   end
 
   def test_close

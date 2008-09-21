@@ -240,8 +240,8 @@ rb_load(VALUE fname, int wrap)
     rb_thread_t *th = GET_THREAD();
     volatile VALUE wrapper = th->top_wrapper;
     volatile VALUE self = th->top_self;
-    volatile int parse_in_eval;
     volatile int loaded = Qfalse;
+    volatile int mild_compile_error;
 #ifndef __GNUC__
     rb_thread_t *volatile th0 = th;
 #endif
@@ -267,19 +267,19 @@ rb_load(VALUE fname, int wrap)
 	rb_extend_object(th->top_self, th->top_wrapper);
     }
 
-    parse_in_eval = th->parse_in_eval;
+    mild_compile_error = th->mild_compile_error;
     PUSH_TAG();
     state = EXEC_TAG();
     if (state == 0) {
 	NODE *node;
 	VALUE iseq;
 
-	th->parse_in_eval++;
+	th->mild_compile_error++;
 	node = (NODE *)rb_load_file(RSTRING_PTR(fname));
-	th->parse_in_eval--;
 	loaded = Qtrue;
 	iseq = rb_iseq_new(node, rb_str_new2("<top (required)>"),
 			   fname, Qfalse, ISEQ_TYPE_TOP);
+	th->mild_compile_error--;
 	rb_iseq_eval(iseq);
     }
     POP_TAG();
@@ -288,7 +288,7 @@ rb_load(VALUE fname, int wrap)
     th = th0;
     fname = RB_GC_GUARD(fname);
 #endif
-    th->parse_in_eval = parse_in_eval;
+    th->mild_compile_error = mild_compile_error;
     th->top_self = self;
     th->top_wrapper = wrapper;
 
@@ -675,13 +675,15 @@ rb_f_autoload_p(VALUE obj, VALUE sym)
 void
 Init_load()
 {
+#undef rb_intern
+#define rb_intern(str) rb_intern2(str, strlen(str))
     rb_vm_t *vm = GET_VM();
-    const char *var_load_path = "$:";
-    ID id_load_path = rb_intern(var_load_path);
+    static const char var_load_path[] = "$:";
+    ID id_load_path = rb_intern2(var_load_path, sizeof(var_load_path)-1);
 
-    rb_define_hooked_variable(var_load_path, (VALUE*)GET_VM(), load_path_getter, 0);
-    rb_alias_variable((rb_intern)("$-I"), id_load_path);
-    rb_alias_variable((rb_intern)("$LOAD_PATH"), id_load_path);
+    rb_define_hooked_variable(var_load_path, (VALUE*)vm, load_path_getter, 0);
+    rb_alias_variable(rb_intern("$-I"), id_load_path);
+    rb_alias_variable(rb_intern("$LOAD_PATH"), id_load_path);
     vm->load_path = rb_ary_new();
 
     rb_define_virtual_variable("$\"", get_loaded_features, 0);

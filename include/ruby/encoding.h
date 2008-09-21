@@ -53,7 +53,7 @@
 				   (RBASIC(obj)->flags & ~ENC_CODERANGE_MASK) | (cr))
 #define ENC_CODERANGE_CLEAR(obj) ENC_CODERANGE_SET(obj,0)
 
-/* assumed ASCII compatiblity */
+/* assumed ASCII compatibility */
 #define ENC_CODERANGE_AND(a, b) \
     (a == ENC_CODERANGE_7BIT ? b : \
      a == ENC_CODERANGE_VALID ? (b == ENC_CODERANGE_7BIT ? ENC_CODERANGE_VALID : b) : \
@@ -70,7 +70,7 @@ typedef OnigEncodingType rb_encoding;
 
 int rb_enc_replicate(const char *, rb_encoding *);
 int rb_define_dummy_encoding(const char *);
-#define rb_enc_to_index(enc) ((enc) ? ((enc)->ruby_encoding_index) : 0)
+#define rb_enc_to_index(enc) ((enc) ? ENC_TO_ENCINDEX(enc) : 0)
 int rb_enc_get_index(VALUE obj);
 void rb_enc_set_index(VALUE obj, int encindex);
 int rb_enc_find_index(const char *name);
@@ -98,10 +98,10 @@ rb_encoding* rb_enc_from_index(int idx);
 /* name -> rb_encoding */
 rb_encoding * rb_enc_find(const char *name);
 
-/* encoding -> name */
+/* rb_encoding * -> name */
 #define rb_enc_name(enc) (enc)->name
 
-/* encoding -> minlen/maxlen */
+/* rb_encoding * -> minlen/maxlen */
 #define rb_enc_mbminlen(enc) (enc)->min_enc_len
 #define rb_enc_mbmaxlen(enc) (enc)->max_enc_len
 
@@ -120,7 +120,7 @@ int rb_enc_precise_mbclen(const char *p, const char *e, rb_encoding *enc);
 int rb_enc_ascget(const char *p, const char *e, int *len, rb_encoding *enc);
 
 /* -> code or raise exception */
-int rb_enc_codepoint(const char *p, const char *e, rb_encoding *enc);
+unsigned int rb_enc_codepoint(const char *p, const char *e, rb_encoding *enc);
 #define rb_enc_mbc_to_codepoint(p, e, enc) ONIGENC_MBC_TO_CODE(enc,(UChar*)(p),(UChar*)(e))
 
 /* -> codelen>0 or raise exception */
@@ -143,6 +143,7 @@ int rb_enc_codelen(int code, rb_encoding *enc);
 #define rb_enc_isalpha(c,enc) ONIGENC_IS_CODE_ALPHA(enc,c)
 #define rb_enc_islower(c,enc) ONIGENC_IS_CODE_LOWER(enc,c)
 #define rb_enc_isupper(c,enc) ONIGENC_IS_CODE_UPPER(enc,c)
+#define rb_enc_ispunct(c,enc) ONIGENC_IS_CODE_PUNCT(enc,c)
 #define rb_enc_isalnum(c,enc) ONIGENC_IS_CODE_ALNUM(enc,c)
 #define rb_enc_isprint(c,enc) ONIGENC_IS_CODE_PRINT(enc,c)
 #define rb_enc_isspace(c,enc) ONIGENC_IS_CODE_SPACE(enc,c)
@@ -165,31 +166,121 @@ rb_encoding *rb_ascii8bit_encoding(void);
 rb_encoding *rb_utf8_encoding(void);
 rb_encoding *rb_usascii_encoding(void);
 rb_encoding *rb_locale_encoding(void);
+rb_encoding *rb_filesystem_encoding(void);
 rb_encoding *rb_default_external_encoding(void);
-int rb_usascii_encindex(void);
 int rb_ascii8bit_encindex(void);
+int rb_utf8_encindex(void);
+int rb_usascii_encindex(void);
 VALUE rb_enc_default_external(void);
 void rb_enc_set_default_external(VALUE encoding);
 VALUE rb_locale_charmap(VALUE klass);
 long rb_memsearch(const void*,long,const void*,long,rb_encoding*);
 
 RUBY_EXTERN VALUE rb_cEncoding;
+#define enc_initialized_p(enc) ((enc)->ruby_encoding_index != ENC_UNINITIALIZED)
+#define ENC_DUMMY_FLAG (1<<24)
+#define ENC_INDEX_MASK (~(~0U<<24))
 
-#define ENC_UNINITIALIZED (&rb_cEncoding)
-#define enc_initialized_p(enc) ((enc)->auxiliary_data != &rb_cEncoding)
-#define ENC_FROM_ENCODING(enc) ((VALUE)(enc)->auxiliary_data)
+#define ENC_TO_ENCINDEX(enc)   ((enc)->ruby_encoding_index & ENC_INDEX_MASK)
+#define ENC_FROM_ENCINDEX(idx) (RARRAY_PTR(rb_encoding_list)[idx])
+#define ENC_FROM_ENCODING(enc) ENC_FROM_ENCINDEX(ENC_TO_ENCINDEX(enc))
 
-#define ENC_DUMMY_FLAG FL_USER2
-#define ENC_DUMMY_P(enc) (RBASIC(enc)->flags & ENC_DUMMY_FLAG)
-#define ENC_SET_DUMMY(enc) (RBASIC(enc)->flags |= ENC_DUMMY_FLAG)
+#define ENC_DUMMY_P(enc) ((enc)->ruby_encoding_index & ENC_DUMMY_FLAG)
+#define ENC_SET_DUMMY(enc) ((enc)->ruby_encoding_index |= ENC_DUMMY_FLAG)
 
 static inline int
 rb_enc_dummy_p(rb_encoding *enc)
 {
-    if (!enc_initialized_p(enc)) return Qfalse;
-    return ENC_DUMMY_P(ENC_FROM_ENCODING(enc));
+    return ENC_DUMMY_P(enc) != 0;
 }
 
-VALUE rb_str_transcode(VALUE str, VALUE to);
+/* econv stuff */
+
+typedef enum {
+    econv_invalid_byte_sequence,
+    econv_undefined_conversion,
+    econv_destination_buffer_full,
+    econv_source_buffer_empty,
+    econv_finished,
+    econv_after_output,
+    econv_incomplete_input,
+} rb_econv_result_t;
+
+typedef struct rb_econv_t rb_econv_t;
+
+VALUE rb_str_transcode(VALUE str, VALUE to, int ecflags, VALUE ecopts);
+
+int rb_econv_prepare_opts(VALUE opthash, VALUE *ecopts);
+
+rb_econv_t *rb_econv_open(const char *source_encoding, const char *destination_encoding, int ecflags);
+rb_econv_t *rb_econv_open_opts(const char *source_encoding, const char *destination_encoding, int ecflags, VALUE ecopts);
+
+rb_econv_result_t rb_econv_convert(rb_econv_t *ec,
+    const unsigned char **source_buffer_ptr, const unsigned char *source_buffer_end,
+    unsigned char **destination_buffer_ptr, unsigned char *destination_buffer_end,
+    int flags);
+void rb_econv_close(rb_econv_t *ec);
+
+/* result: 0:success -1:failure */
+int rb_econv_set_replacement(rb_econv_t *ec, const unsigned char *str, size_t len, const char *encname);
+
+/* result: 0:success -1:failure */
+int rb_econv_decorate_at_first(rb_econv_t *ec, const char *decorator_name);
+int rb_econv_decorate_at_last(rb_econv_t *ec, const char *decorator_name);
+
+VALUE rb_econv_open_exc(const char *senc, const char *denc, int ecflags);
+
+/* result: 0:success -1:failure */
+int rb_econv_insert_output(rb_econv_t *ec,
+    const unsigned char *str, size_t len, const char *str_encoding);
+
+/* encoding that rb_econv_insert_output doesn't need conversion */
+const char *rb_econv_encoding_to_insert_output(rb_econv_t *ec);
+
+/* raise an error if the last rb_econv_convert is error */
+void rb_econv_check_error(rb_econv_t *ec);
+
+int rb_econv_putbackable(rb_econv_t *ec);
+void rb_econv_putback(rb_econv_t *ec, unsigned char *p, int n);
+
+/* returns the corresponding ASCII compatible encoding for encname,
+ * or NULL if encname is not ASCII incompatible encoding. */
+const char *rb_econv_asciicompat_encoding(const char *encname);
+
+VALUE rb_econv_str_convert(rb_econv_t *ec, VALUE src, int flags);
+VALUE rb_econv_substr_convert(rb_econv_t *ec, VALUE src, long byteoff, long bytesize, int flags);
+VALUE rb_econv_str_append(rb_econv_t *ec, VALUE src, VALUE dst, int flags);
+VALUE rb_econv_substr_append(rb_econv_t *ec, VALUE src, long byteoff, long bytesize, VALUE dst, int flags);
+
+void rb_econv_binmode(rb_econv_t *ec);
+
+/* flags for rb_econv_open */
+
+#define ECONV_ERROR_HANDLER_MASK                0x000000ff
+
+#define ECONV_INVALID_MASK                      0x0000000f
+#define ECONV_INVALID_REPLACE                   0x00000002
+
+#define ECONV_UNDEF_MASK                        0x000000f0
+#define ECONV_UNDEF_REPLACE                     0x00000020
+#define ECONV_UNDEF_HEX_CHARREF                 0x00000030
+
+#define ECONV_DECORATOR_MASK                    0x0000ff00
+
+#define ECONV_UNIVERSAL_NEWLINE_DECORATOR       0x00000100
+#define ECONV_CRLF_NEWLINE_DECORATOR            0x00001000
+#define ECONV_CR_NEWLINE_DECORATOR              0x00002000
+#define ECONV_XML_TEXT_DECORATOR                0x00004000
+#define ECONV_XML_ATTR_CONTENT_DECORATOR        0x00008000
+
+#define ECONV_STATEFUL_DECORATOR_MASK           0x00f00000
+#define ECONV_XML_ATTR_QUOTE_DECORATOR          0x00100000
+
+/* end of flags for rb_econv_open */
+
+/* flags for rb_econv_convert */
+#define ECONV_PARTIAL_INPUT                     0x00010000
+#define ECONV_AFTER_OUTPUT                      0x00020000
+/* end of flags for rb_econv_convert */
 
 #endif /* RUBY_ENCODING_H */

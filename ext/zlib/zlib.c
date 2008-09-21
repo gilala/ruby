@@ -1293,6 +1293,7 @@ rb_deflate_params(VALUE obj, VALUE v_level, VALUE v_strategy)
     level = ARG_LEVEL(v_level);
     strategy = ARG_STRATEGY(v_strategy);
 
+    zstream_run(z, (Bytef*)"", 0, Z_SYNC_FLUSH);
     err = deflateParams(&z->stream, level, strategy);
     while (err == Z_BUF_ERROR) {
 	rb_warning("deflateParams() returned Z_BUF_ERROR");
@@ -2293,7 +2294,7 @@ gzfile_s_open(int argc, VALUE *argv, VALUE klass, const char *mode)
     }
     filename = argv[0];
     FilePathValue(filename);
-    io = rb_file_open(RSTRING_PTR(filename), mode);
+    io = rb_file_open_str(filename, mode);
 
     argv[0] = io;
     return rb_gzfile_s_wrap(argc, argv, klass);

@@ -86,7 +86,7 @@ class OpenSSL::TestSSL < Test::Unit::TestCase
         server_proc.call(ctx, ssl)
       end
     end
-  rescue Errno::EBADF, IOError
+  rescue Errno::EBADF, IOError, Errno::EINVAL, Errno::ECONNABORTED
   end
 
   def start_server(port0, verify_mode, start_immediately, args = {}, &block)
@@ -128,14 +128,25 @@ class OpenSSL::TestSSL < Test::Unit::TestCase
 
       block.call(server, port.to_i)
     ensure
-      tcps.close if (tcps)
-      if (server)
-        server.join(5)
-        if server.alive?
-          server.kill
-          server.join
-          flunk("TCPServer was closed and SSLServer is still alive") unless $!
+      begin
+        begin
+          tcps.shutdown
+        rescue Errno::ENOTCONN
+          # when `Errno::ENOTCONN: Socket is not connected' on some platforms,
+          # call #close instead of #shutdown.
+          tcps.close
+          tcps = nil
+        end if (tcps)
+        if (server)
+          server.join(5)
+          if server.alive?
+            server.kill
+            server.join
+            flunk("TCPServer was closed and SSLServer is still alive") unless $!
+          end
         end
+      ensure
+        tcps.close if (tcps)
       end
     end
   end
@@ -428,7 +439,10 @@ class OpenSSL::TestSSL < Test::Unit::TestCase
     start_server(PORT, OpenSSL::SSL::VERIFY_NONE, true) do |server, port|
       2.times do
         sock = TCPSocket.new("127.0.0.1", port)
-        ssl = OpenSSL::SSL::SSLSocket.new(sock)
+        # Debian's openssl 0.9.8g-13 failed at assert(ssl.session_reused?),
+        # when use default SSLContext. [ruby-dev:36167]
+        ctx = OpenSSL::SSL::SSLContext.new("TLSv1")
+        ssl = OpenSSL::SSL::SSLSocket.new(sock, ctx)
         ssl.sync_close = true
         ssl.session = last_session if last_session
         ssl.connect

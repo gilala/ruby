@@ -207,6 +207,7 @@ static void
 native_sleep(rb_thread_t *th, struct timeval *tv)
 {
     DWORD msec;
+
     if (tv) {
 	msec = tv->tv_sec * 1000 + tv->tv_usec / 1000;
     }
@@ -217,11 +218,11 @@ native_sleep(rb_thread_t *th, struct timeval *tv)
     GVL_UNLOCK_BEGIN();
     {
 	DWORD ret;
-	int status = th->status;
 
-	th->status = THREAD_STOPPED;
+	native_mutex_lock(&th->interrupt_lock);
 	th->unblock.func = ubf_handle;
 	th->unblock.arg = th;
+	native_mutex_unlock(&th->interrupt_lock);
 
 	if (RUBY_VM_INTERRUPTED(th)) {
 	    /* interrupted.  return immediate */
@@ -232,12 +233,12 @@ native_sleep(rb_thread_t *th, struct timeval *tv)
 	    thread_debug("native_sleep done (%lu)\n", ret);
 	}
 
+	native_mutex_lock(&th->interrupt_lock);
 	th->unblock.func = 0;
 	th->unblock.arg = 0;
-	th->status = status;
+	native_mutex_unlock(&th->interrupt_lock);
     }
     GVL_UNLOCK_END();
-    RUBY_VM_CHECK_INTS();
 }
 
 static int
@@ -414,6 +415,32 @@ native_cond_destroy(rb_thread_cond_t *cond)
     /* */
 }
 
+void
+ruby_init_stack(VALUE *addr)
+{
+}
+
+#define CHECK_ERR(expr) \
+    {if (!(expr)) {rb_bug("err: %lu - %s", GetLastError(), #expr);}}
+
+static void
+native_thread_init_stack(rb_thread_t *th)
+{
+    MEMORY_BASIC_INFORMATION mi;
+    char *base, *end;
+    DWORD size, space;
+
+    CHECK_ERR(VirtualQuery(&mi, &mi, sizeof(mi)));
+    base = mi.AllocationBase;
+    end = mi.BaseAddress;
+    end += mi.RegionSize;
+    size = end - base;
+    space = size / 5;
+    if (space > 1024*1024) space = 1024*1024;
+    th->machine_stack_start = (VALUE *)end - 1;
+    th->machine_stack_maxsize = size - space;
+}
+
 static void
 native_thread_destroy(rb_thread_t *th)
 {
@@ -431,6 +458,7 @@ thread_start_func_1(void *th_ptr)
     VALUE stack_start;
     volatile HANDLE thread_id = th->thread_id;
 
+    native_thread_init_stack(th);
     th->native_thread_data.interrupt_event = CreateEvent(0, TRUE, FALSE, 0);
 
     /* run */
@@ -443,15 +471,11 @@ thread_start_func_1(void *th_ptr)
     return 0;
 }
 
-extern size_t rb_gc_stack_maxsize;
-
 static int
 native_thread_create(rb_thread_t *th)
 {
     size_t stack_size = 4 * 1024; /* 4KB */
     th->thread_id = w32_create_thread(stack_size, thread_start_func_1, th);
-
-    th->machine_stack_maxsize = rb_gc_stack_maxsize; /* not tested. */
 
     if ((th->thread_id) == 0) {
 	st_delete_wrap(th->vm->living_threads, th->self);
@@ -475,6 +499,8 @@ native_thread_join(HANDLE th)
     w32_wait_events(&th, 1, 0, 0);
 }
 
+#if USE_NATIVE_THREAD_PRIORITY
+
 static void
 native_thread_apply_priority(rb_thread_t *th)
 {
@@ -492,15 +518,17 @@ native_thread_apply_priority(rb_thread_t *th)
     SetThreadPriority(th->thread_id, priority);
 }
 
+#endif /* USE_NATIVE_THREAD_PRIORITY */
+
 static void
 ubf_handle(void *ptr)
 {
+    typedef BOOL (WINAPI *cancel_io_func_t)(HANDLE);
     rb_thread_t *th = (rb_thread_t *)ptr;
     thread_debug("ubf_handle: %p\n", th);
+
     w32_set_event(th->native_thread_data.interrupt_event);
 }
-
-static void timer_thread_function(void);
 
 static HANDLE timer_thread_id = 0;
 
@@ -510,7 +538,7 @@ timer_thread_func(void *dummy)
     thread_debug("timer_thread\n");
     while (system_working) {
 	Sleep(WIN32_WAIT_TIMEOUT);
-	timer_thread_function();
+	timer_thread_function(dummy);
     }
     thread_debug("timer killed\n");
     return 0;
@@ -520,7 +548,8 @@ void
 rb_thread_create_timer_thread(void)
 {
     if (timer_thread_id == 0) {
-	timer_thread_id = w32_create_thread(1024, timer_thread_func, 0);
+	timer_thread_id = w32_create_thread(1024 + (THREAD_DEBUG ? BUFSIZ : 0),
+					    timer_thread_func, GET_VM());
 	w32_resume_thread(timer_thread_id);
     }
 }

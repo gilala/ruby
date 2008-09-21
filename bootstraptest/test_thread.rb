@@ -302,3 +302,66 @@ assert_normal_exit %q{
 assert_normal_exit %q{
   Thread.new("foo", &Object.method(:class_eval)).join
 }, '[ruby-dev:34128]'
+
+assert_equal 'ok', %q{
+  begin
+    Thread.new { Thread.stop }
+    Thread.stop
+    :ng
+  rescue Exception
+    :ok
+  end
+}
+
+assert_equal 'ok', %q{
+  begin
+    m1, m2 = Mutex.new, Mutex.new
+    Thread.new { m1.lock; sleep 1; m2.lock }
+    m2.lock; sleep 1; m1.lock
+    :ng
+  rescue Exception
+    :ok
+  end
+}
+
+assert_equal 'ok', %q{
+  m = Mutex.new
+  Thread.new { m.lock }; sleep 1; m.lock
+  :ok
+}
+
+assert_equal 'ok', %q{
+  m = Mutex.new
+  Thread.new { m.lock }; m.lock
+  :ok
+}
+
+assert_equal 'ok', %q{
+  m = Mutex.new
+  Thread.new { m.lock }.join; m.lock
+  :ok
+}
+
+assert_equal 'ok', %q{
+  m = Mutex.new
+  Thread.new { m.lock; sleep 2 }
+  sleep 1; m.lock
+  :ok
+}
+
+assert_equal 'ok', %q{
+  m = Mutex.new
+  Thread.new { m.lock; sleep 2; m.unlock }
+  sleep 1; m.lock
+  :ok
+}
+
+assert_equal 'ok', %q{
+  t = Thread.new {`echo`}
+  t.join
+  $? ? :ng : :ok
+}, '[ruby-dev:35414]'
+
+assert_equal 'ok', %q{
+  10000.times { Thread.new(true) {|x| x == false } }; :ok
+}

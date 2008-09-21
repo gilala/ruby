@@ -11,6 +11,12 @@
 
 #ifdef THREAD_SYSTEM_DEPENDENT_IMPLEMENTATION
 
+#include "gc.h"
+
+#ifdef HAVE_SYS_RESOURCE_H
+#include <sys/resource.h>
+#endif
+
 static void native_mutex_lock(pthread_mutex_t *lock);
 static void native_mutex_unlock(pthread_mutex_t *lock);
 static int native_mutex_trylock(pthread_mutex_t *lock);
@@ -113,7 +119,11 @@ native_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
 
 #define native_cleanup_push pthread_cleanup_push
 #define native_cleanup_pop  pthread_cleanup_pop
-#define native_thread_yield() sched_yield()
+#ifdef HAVE_SCHED_YIELD
+#define native_thread_yield() (void)sched_yield()
+#else
+#define native_thread_yield() ((void)0)
+#endif
 
 #ifndef __CYGWIN__
 static void add_signal_thread_list(rb_thread_t *th);
@@ -163,6 +173,94 @@ native_thread_destroy(rb_thread_t *th)
 }
 
 #define USE_THREAD_CACHE 0
+
+static struct {
+    rb_thread_id_t id;
+    size_t stack_maxsize;
+    VALUE *stack_start;
+#ifdef __ia64
+    VALUE *register_stack_start;
+#endif
+} native_main_thread;
+
+#ifdef STACK_END_ADDRESS
+extern void *STACK_END_ADDRESS;
+#endif
+
+#undef ruby_init_stack
+void
+ruby_init_stack(VALUE *addr
+#ifdef __ia64
+    , void *bsp
+#endif
+    )
+{
+    native_main_thread.id = pthread_self();
+#ifdef STACK_END_ADDRESS
+    native_main_thread.stack_start = STACK_END_ADDRESS;
+#else
+    if (!native_main_thread.stack_start ||
+        STACK_UPPER(&addr,
+                    native_main_thread.stack_start > addr,
+                    native_main_thread.stack_start < addr)) {
+        native_main_thread.stack_start = addr;
+    }
+#endif
+#ifdef __ia64
+    if (!native_main_thread.register_stack_start ||
+        (VALUE*)bsp < native_main_thread.register_stack_start) {
+        native_main_thread.register_stack_start = (VALUE*)bsp;
+    }
+#endif
+#ifdef HAVE_GETRLIMIT
+    {
+	struct rlimit rlim;
+
+	if (getrlimit(RLIMIT_STACK, &rlim) == 0) {
+	    unsigned int space = rlim.rlim_cur/5;
+
+	    if (space > 1024*1024) space = 1024*1024;
+	    native_main_thread.stack_maxsize = rlim.rlim_cur - space;
+	}
+    }
+#endif
+}
+
+#define CHECK_ERR(expr) \
+    {int err = (expr); if (err) {rb_bug("err: %d - %s", err, #expr);}}
+
+static int
+native_thread_init_stack(rb_thread_t *th)
+{
+    rb_thread_id_t curr = pthread_self();
+
+    if (pthread_equal(curr, native_main_thread.id)) {
+	th->machine_stack_start = native_main_thread.stack_start;
+	th->machine_stack_maxsize = native_main_thread.stack_maxsize;
+    }
+    else {
+#ifdef HAVE_PTHREAD_GETATTR_NP
+	pthread_attr_t attr;
+	void *start;
+	CHECK_ERR(pthread_getattr_np(curr, &attr));
+# if defined HAVE_PTHREAD_ATTR_GETSTACK
+	CHECK_ERR(pthread_attr_getstack(&attr, &start, &th->machine_stack_maxsize));
+# elif defined HAVE_PTHREAD_ATTR_GETSTACKSIZE && defined HAVE_PTHREAD_ATTR_GETSTACKADDR
+	CHECK_ERR(pthread_attr_getstackaddr(&attr, &start));
+	CHECK_ERR(pthread_attr_getstacksize(&attr, &th->machine_stack_maxsize));
+# endif
+	th->machine_stack_start = start;
+#else
+	rb_raise(rb_eNotImpError, "ruby engine can initialize only in the main thread");
+#endif
+    }
+#ifdef __ia64
+    th->machine_register_stack_start = native_main_thread.register_stack_start;
+    th->machine_stack_maxsize /= 2;
+    th->machine_register_stack_maxsize = th->machine_stack_maxsize;
+#endif
+    return 0;
+}
 
 static void *
 thread_start_func_1(void *th_ptr)
@@ -282,9 +380,6 @@ use_cached_thread(rb_thread_t *th)
     return result;
 }
 
-#define CHECK_ERR(expr) \
-  { int err; if ((err = (expr)) != 0) { rb_bug("err: %d - %s", err, #expr); }}
-
 static int
 native_thread_create(rb_thread_t *th)
 {
@@ -318,7 +413,9 @@ native_thread_create(rb_thread_t *th)
 	CHECK_ERR(pthread_attr_setstacksize(&attr, stack_size));
 #endif
 
+#ifdef HAVE_PTHREAD_ATTR_SETINHERITSCHED
 	CHECK_ERR(pthread_attr_setinheritsched(&attr, PTHREAD_INHERIT_SCHED));
+#endif
 	CHECK_ERR(pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED));
 
 	err = pthread_create(&th->thread_id, &attr, thread_start_func_1, th);
@@ -346,6 +443,9 @@ native_thread_join(pthread_t th)
     }
 }
 
+
+#if USE_NATIVE_THREAD_PRIORITY
+
 static void
 native_thread_apply_priority(rb_thread_t *th)
 {
@@ -371,6 +471,8 @@ native_thread_apply_priority(rb_thread_t *th)
     /* not touched */
 #endif
 }
+
+#endif /* USE_NATIVE_THREAD_PRIORITY */
 
 static void
 ubf_pthread_cond_signal(void *ptr)
@@ -404,7 +506,6 @@ ubf_select(void *ptr)
 static void
 native_sleep(rb_thread_t *th, struct timeval *tv)
 {
-    int prev_status = th->status;
     struct timespec ts;
     struct timeval tvn;
 
@@ -417,8 +518,6 @@ native_sleep(rb_thread_t *th, struct timeval *tv)
 	    ts.tv_nsec -= 1000000000;
         }
     }
-
-    th->status = THREAD_STOPPED;
 
     thread_debug("native_sleep %ld\n", tv ? tv->tv_sec : -1);
     GVL_UNLOCK_BEGIN();
@@ -455,10 +554,8 @@ native_sleep(rb_thread_t *th, struct timeval *tv)
 	th->unblock.arg = 0;
 
 	pthread_mutex_unlock(&th->interrupt_lock);
-	th->status = prev_status;
     }
     GVL_UNLOCK_END();
-    RUBY_VM_CHECK_INTS();
 
     thread_debug("native_sleep done\n");
 }
@@ -550,7 +647,6 @@ remove_signal_thread_list(rb_thread_t *th)
 }
 
 static pthread_t timer_thread_id;
-static void timer_thread_function(void);
 
 static void *
 thread_timer(void *dummy)
@@ -579,7 +675,7 @@ thread_timer(void *dummy)
 	    });
 	}
 #endif
-	timer_thread_function();
+	timer_thread_function(dummy);
     }
     return NULL;
 }
@@ -595,9 +691,10 @@ rb_thread_create_timer_thread(void)
 
 	pthread_attr_init(&attr);
 #ifdef PTHREAD_STACK_MIN
-	pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN);
+	pthread_attr_setstacksize(&attr,
+				  PTHREAD_STACK_MIN + (THREAD_DEBUG ? BUFSIZ : 0));
 #endif
-	err = pthread_create(&timer_thread_id, &attr, thread_timer, 0);
+	err = pthread_create(&timer_thread_id, &attr, thread_timer, GET_VM());
 	if (err != 0) {
 	    rb_bug("rb_thread_create_timer_thread: return non-zero (%d)", err);
 	}

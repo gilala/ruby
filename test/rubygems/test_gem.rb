@@ -3,6 +3,7 @@ require 'rubygems'
 require 'rubygems/gem_openssl'
 require 'rubygems/installer'
 require 'pathname'
+require 'tmpdir'
 
 class TestGem < RubyGemTestCase
 
@@ -26,6 +27,14 @@ class TestGem < RubyGemTestCase
     ]
 
     assert_equal expected, Gem.all_load_paths.sort
+  end
+
+  def test_self_available?
+    util_make_gems
+    assert(Gem.available?("a"))
+    assert(Gem.available?("a", "1"))
+    assert(Gem.available?("a", ">1"))
+    assert(!Gem.available?("monkeys"))
   end
 
   def test_self_bindir
@@ -129,7 +138,7 @@ class TestGem < RubyGemTestCase
   end
 
   def test_self_default_sources
-    assert_equal %w[http://gems.rubyforge.org], Gem.default_sources
+    assert_equal %w[http://gems.rubyforge.org/], Gem.default_sources
   end
 
   def test_self_dir
@@ -237,12 +246,25 @@ class TestGem < RubyGemTestCase
     assert_equal [Gem.dir], Gem.path
   end
 
+  def test_self_path_default
+    if defined? APPLE_GEM_HOME
+      orig_APPLE_GEM_HOME = APPLE_GEM_HOME
+      Object.send :remove_const, :APPLE_GEM_HOME
+    end
+    Gem.instance_variable_set :@gem_path, nil
+
+    assert_equal [Gem.default_path, Gem.dir].flatten, Gem.path
+  ensure
+    Object.const_set :APPLE_GEM_HOME, orig_APPLE_GEM_HOME
+  end
+
   unless win_platform?
     def test_self_path_APPLE_GEM_HOME
       Gem.clear_paths
-      Gem.const_set :APPLE_GEM_HOME, '/tmp/apple_gem_home'
-  
-      assert Gem.path.include?('/tmp/apple_gem_home')
+      Dir.mktmpdir("apple_gem_home") {|d|
+        Gem.const_set :APPLE_GEM_HOME, d
+        assert Gem.path.include?(d)
+      }
     ensure
       Gem.send :remove_const, :APPLE_GEM_HOME
     end
@@ -259,16 +281,16 @@ class TestGem < RubyGemTestCase
   end
 
   def test_self_path_ENV_PATH
-    Gem.clear_paths
+    Gem.send :set_paths, nil
     path_count = Gem.path.size
-    path_count -= 1 if defined? APPLE_GEM_HOME
     Gem.clear_paths
-    util_ensure_gem_dirs
 
     ENV['GEM_PATH'] = @additional.join(File::PATH_SEPARATOR)
 
     assert_equal @additional, Gem.path[0,2]
-    assert_equal path_count + @additional.size, Gem.path.size
+
+    assert_equal path_count + @additional.size, Gem.path.size,
+                 "extra path components: #{Gem.path[2..-1].inspect}"
     assert_match Gem.dir, Gem.path.last
   end
 
@@ -317,6 +339,7 @@ class TestGem < RubyGemTestCase
 
     file_name = File.expand_path __FILE__
     prefix = File.dirname File.dirname(file_name)
+    prefix = File.dirname prefix if File.basename(prefix) == 'test'
 
     Gem::ConfigMap[:libdir] = prefix
 
@@ -330,6 +353,7 @@ class TestGem < RubyGemTestCase
 
     file_name = File.expand_path __FILE__
     prefix = File.dirname File.dirname(file_name)
+    prefix = File.dirname prefix if File.basename(prefix) == 'test'
 
     Gem::ConfigMap[:sitelibdir] = prefix
 
@@ -382,7 +406,7 @@ class TestGem < RubyGemTestCase
   end
 
   def test_self_sources
-    assert_equal %w[http://gems.example.com], Gem.sources
+    assert_equal %w[http://gems.example.com/], Gem.sources
   end
 
   def test_ssl_available_eh

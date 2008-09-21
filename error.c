@@ -328,6 +328,7 @@ VALUE rb_eSecurityError;
 VALUE rb_eNotImpError;
 VALUE rb_eNoMemError;
 VALUE rb_cNameErrorMesg;
+VALUE rb_eEncCompatError;
 
 VALUE rb_eScriptError;
 VALUE rb_eSyntaxError;
@@ -621,13 +622,11 @@ rb_name_error(ID id, const char *fmt, ...)
 {
     VALUE exc, argv[2];
     va_list args;
-    char buf[BUFSIZ];
 
     va_start(args, fmt);
-    vsnprintf(buf, BUFSIZ, fmt, args);
+    argv[0] = rb_vsprintf(fmt, args);
     va_end(args);
 
-    argv[0] = rb_str_new2(buf);
     argv[1] = ID2SYM(id);
     exc = rb_class_new_instance(2, argv, rb_eNameError);
     rb_exc_raise(exc);
@@ -1034,6 +1033,7 @@ Init_Exception(void)
     rb_eIndexError    = rb_define_class("IndexError", rb_eStandardError);
     rb_eKeyError      = rb_define_class("KeyError", rb_eIndexError);
     rb_eRangeError    = rb_define_class("RangeError", rb_eStandardError);
+    rb_eEncCompatError = rb_define_class("EncodingCompatibilityError", rb_eStandardError);
 
     rb_eScriptError = rb_define_class("ScriptError", rb_eException);
     rb_eSyntaxError = rb_define_class("SyntaxError", rb_eScriptError);
@@ -1074,24 +1074,24 @@ void
 rb_raise(VALUE exc, const char *fmt, ...)
 {
     va_list args;
-    char buf[BUFSIZ];
+    VALUE mesg;
 
-    va_start(args,fmt);
-    vsnprintf(buf, BUFSIZ, fmt, args);
+    va_start(args, fmt);
+    mesg = rb_vsprintf(fmt, args);
     va_end(args);
-    rb_exc_raise(rb_exc_new2(exc, buf));
+    rb_exc_raise(rb_exc_new3(exc, mesg));
 }
 
 void
 rb_loaderror(const char *fmt, ...)
 {
     va_list args;
-    char buf[BUFSIZ];
+    VALUE mesg;
 
     va_start(args, fmt);
-    vsnprintf(buf, BUFSIZ, fmt, args);
+    mesg = rb_vsprintf(fmt, args);
     va_end(args);
-    rb_exc_raise(rb_exc_new2(rb_eLoadError, buf));
+    rb_exc_raise(rb_exc_new3(rb_eLoadError, mesg));
 }
 
 void
@@ -1106,13 +1106,13 @@ void
 rb_fatal(const char *fmt, ...)
 {
     va_list args;
-    char buf[BUFSIZ];
+    VALUE mesg;
 
     va_start(args, fmt);
-    vsnprintf(buf, BUFSIZ, fmt, args);
+    mesg = rb_vsprintf(fmt, args);
     va_end(args);
 
-    rb_exc_fatal(rb_exc_new2(rb_eFatal, buf));
+    rb_exc_fatal(rb_exc_new3(rb_eFatal, mesg));
 }
 
 void
@@ -1546,7 +1546,7 @@ err_append(const char *s)
     rb_thread_t *th = GET_THREAD();
     VALUE err = th->errinfo;
 
-    if (th->parse_in_eval) {
+    if (th->mild_compile_error) {
 	if (!RTEST(err)) {
 	    err = rb_exc_new2(rb_eSyntaxError, s);
 	    th->errinfo = err;

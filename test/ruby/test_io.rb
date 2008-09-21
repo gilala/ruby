@@ -44,6 +44,15 @@ class TestIO < Test::Unit::TestCase
     r.close
   end
 
+  def test_gets_limit_extra_arg
+    with_pipe {|r, w|
+      r, w = IO.pipe
+      w << "0123456789"
+      w.close
+      assert_raise(TypeError) { r.gets(3,nil) }
+    }
+  end
+
   # This test cause SEGV.
   def test_ungetc
     r, w = IO.pipe
@@ -99,7 +108,7 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_copy_stream
-    mkcdtmpdir {|d|
+    mkcdtmpdir {
 
       content = "foobar"
       File.open("src", "w") {|f| f << content }
@@ -313,7 +322,7 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_copy_stream_rbuf
-    mkcdtmpdir {|d|
+    mkcdtmpdir {
       with_pipe {|r, w|
         File.open("foo", "w") {|f| f << "abcd" }
         File.open("foo") {|f|
@@ -338,7 +347,7 @@ class TestIO < Test::Unit::TestCase
 
   def test_copy_stream_socket
     return unless defined? UNIXSocket
-    mkcdtmpdir {|d|
+    mkcdtmpdir {
 
       content = "foobar"
       File.open("src", "w") {|f| f << content }
@@ -441,7 +450,7 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_copy_stream_fname_to_strio
-    mkcdtmpdir {|d|
+    mkcdtmpdir {
       File.open("foo", "w") {|f| f << "abcd" }
       src = "foo"
       dst = StringIO.new
@@ -452,7 +461,7 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_copy_stream_strio_to_fname
-    mkcdtmpdir {|d|
+    mkcdtmpdir {
       # StringIO to filename
       src = StringIO.new("abcd")
       ret = IO.copy_stream(src, "fooo", 3)
@@ -463,7 +472,7 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_copy_stream_io_to_strio
-    mkcdtmpdir {|d|
+    mkcdtmpdir {
       # IO to StringIO
       File.open("bar", "w") {|f| f << "abcd" }
       File.open("bar") {|src|
@@ -477,7 +486,7 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_copy_stream_strio_to_io
-    mkcdtmpdir {|d|
+    mkcdtmpdir {
       # StringIO to IO
       src = StringIO.new("abcd")
       ret = File.open("baz", "w") {|dst|
@@ -515,7 +524,7 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_copy_stream_src_wbuf
-    mkcdtmpdir {|d|
+    mkcdtmpdir {
       with_pipe {|r, w|
         File.open("foe", "w+") {|f|
           f.write "abcd\n"
@@ -532,11 +541,11 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_copy_stream_dst_rbuf
-    mkcdtmpdir {|d|
+    mkcdtmpdir {
       with_pipe {|r, w|
         w << "xyz"
         w.close
-        File.open("fom", "w+") {|f|
+        File.open("fom", "w+b") {|f|
           f.write "abcd\n"
           f.rewind
           assert_equal("abc", f.read(3))
@@ -557,14 +566,16 @@ class TestIO < Test::Unit::TestCase
     end.join
   end
 
-  def pipe
+  def pipe(wp, rp)
     r, w = IO.pipe
-    Timeout.timeout(10) do
-      yield(r, w)
-    end
+    rt = Thread.new { rp.call(r) }
+    wt = Thread.new { wp.call(w) }
+    flunk("timeout") unless rt.join(10) && wt.join(10)
   ensure
     r.close unless !r || r.closed?
     w.close unless !w || w.closed?
+    (rt.kill; rt.join) if rt
+    (wt.kill; wt.join) if wt
   end
 
   def pipe2(&b)
@@ -594,16 +605,20 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_ungetc2
-    pipe do |r, w|
-      r.ungetc("0" * 10000)
+    f = false
+    pipe(proc do |w|
+      0 until f
       w.write("1" * 10000)
       w.close
+    end, proc do |r|
+      r.ungetc("0" * 10000)
+      f = true
       assert_equal("0" * 10000 + "1" * 10000, r.read)
-    end
+    end)
   end
 
   def test_write_non_writable
-    pipe do |r, w|
+    with_pipe do |r, w|
       assert_raise(IOError) do
         r.write "foobarbaz"
       end
@@ -621,15 +636,19 @@ class TestIO < Test::Unit::TestCase
       assert_equal("", f2.read)
     end
 
+    proc do
+      open(__FILE__) # see Bug #493 [ruby-dev:35957]
+    end.call
+
     pipe2 do |r, w|
-      assert_raise(Errno::EMFILE, Errno::ENFILE, Errno::NOMEM) do
+      assert_raise(Errno::EMFILE, Errno::ENFILE, Errno::ENOMEM) do
         r2, w2 = r.dup, w.dup
       end
     end
   end
 
   def test_inspect
-    pipe do |r, w|
+    with_pipe do |r, w|
       assert(r.inspect =~ /^#<IO:0x[0-9a-f]+>$/)
       assert_raise(SecurityError) do
         safe_4 { r.inspect }
@@ -638,18 +657,19 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_readpartial
-    pipe do |r, w|
+    pipe(proc do |w|
       w.write "foobarbaz"
       w.close
+    end, proc do |r|
       assert_raise(ArgumentError) { r.readpartial(-1) }
       assert_equal("fooba", r.readpartial(5))
       r.readpartial(5, s = "")
       assert_equal("rbaz", s)
-    end
+    end)
   end
 
   def test_readpartial_error
-    pipe do |r, w|
+    with_pipe do |r, w|
       s = ""
       t = Thread.new { r.readpartial(5, s) }
       0 until s.size == 5
@@ -661,18 +681,19 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_read
-    pipe do |r, w|
+    pipe(proc do |w|
       w.write "foobarbaz"
       w.close
+    end, proc do |r|
       assert_raise(ArgumentError) { r.read(-1) }
       assert_equal("fooba", r.read(5))
       r.read(nil, s = "")
       assert_equal("rbaz", s)
-    end
+    end)
   end
 
   def test_read_error
-    pipe do |r, w|
+    with_pipe do |r, w|
       s = ""
       t = Thread.new { r.read(5, s) }
       0 until s.size == 5
@@ -684,20 +705,22 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_write_nonblock
-    pipe do |r, w|
+    pipe(proc do |w|
       w.write_nonblock(1)
       w.close
+    end, proc do |r|
       assert_equal("1", r.read)
-    end
+    end)
   end
 
   def test_gets
-    pipe do |r, w|
+    pipe(proc do |w|
       w.write "foobarbaz"
       w.close
+    end, proc do |r|
       assert_equal("", r.gets(0))
-      assert_equal("foobarbaz", r.gets(9))
-    end
+      assert_equal("foobarbaz", s = r.gets(9))
+    end)
   end
 
   def test_close_read
@@ -709,14 +732,14 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_close_read_pipe
-    pipe do |r, w|
+    with_pipe do |r, w|
       r.close_read
       assert_raise(Errno::EPIPE) { w.write "foobarbaz" }
     end
   end
 
   def test_close_read_security_error
-    pipe do |r, w|
+    with_pipe do |r, w|
       assert_raise(SecurityError) do
         safe_4 { r.close_read }
       end
@@ -724,7 +747,7 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_close_read_non_readable
-    pipe do |r, w|
+    with_pipe do |r, w|
       assert_raise(IOError) do
         w.close_read
       end
@@ -740,7 +763,7 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_close_write_security_error
-    pipe do |r, w|
+    with_pipe do |r, w|
       assert_raise(SecurityError) do
         safe_4 { r.close_write }
       end
@@ -748,7 +771,7 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_close_write_non_readable
-    pipe do |r, w|
+    with_pipe do |r, w|
       assert_raise(IOError) do
         r.close_write
       end
@@ -773,6 +796,7 @@ class TestIO < Test::Unit::TestCase
 
   def make_tempfile
     t = Tempfile.new("foo")
+    t.binmode
     t.puts "foo"
     t.puts "bar"
     t.puts "baz"
@@ -801,111 +825,119 @@ class TestIO < Test::Unit::TestCase
       assert_equal("nil,1,2,2,1001,1001,1001,1,2,3,3", f.read.chomp.gsub("\n", ","))
     end
 
-    pipe do |r, w|
+    pipe(proc do |w|
       w.puts "foo"
       w.puts "bar"
       w.puts "baz"
       w.close
+    end, proc do |r|
       r.gets; assert_equal(1, $.)
       r.gets; assert_equal(2, $.)
       r.lineno = 1000; assert_equal(2, $.)
       r.gets; assert_equal(1001, $.)
       r.gets; assert_equal(1001, $.)
-    end
+    end)
   end
 
   def test_readline
-    pipe do |r, w|
+    pipe(proc do |w|
       w.puts "foo"
       w.puts "bar"
       w.puts "baz"
       w.close
+    end, proc do |r|
       r.readline; assert_equal(1, $.)
       r.readline; assert_equal(2, $.)
       r.lineno = 1000; assert_equal(2, $.)
       r.readline; assert_equal(1001, $.)
       assert_raise(EOFError) { r.readline }
-    end
+    end)
   end
 
   def test_each_char
-    pipe do |r, w|
+    pipe(proc do |w|
       w.puts "foo"
       w.puts "bar"
       w.puts "baz"
       w.close
+    end, proc do |r|
       a = []
       r.each_char {|c| a << c }
       assert_equal(%w(f o o) + ["\n"] + %w(b a r) + ["\n"] + %w(b a z) + ["\n"], a)
-    end
+    end)
   end
 
   def test_lines
-    pipe do |r, w|
+    pipe(proc do |w|
       w.puts "foo"
       w.puts "bar"
       w.puts "baz"
       w.close
+    end, proc do |r|
       e = r.lines
       assert_equal("foo\n", e.next)
       assert_equal("bar\n", e.next)
       assert_equal("baz\n", e.next)
       assert_raise(StopIteration) { e.next }
-    end
+    end)
   end
 
   def test_bytes
-    pipe do |r, w|
+    pipe(proc do |w|
       w.puts "foo"
       w.puts "bar"
       w.puts "baz"
       w.close
+    end, proc do |r|
       e = r.bytes
       (%w(f o o) + ["\n"] + %w(b a r) + ["\n"] + %w(b a z) + ["\n"]).each do |c|
         assert_equal(c.ord, e.next)
       end
       assert_raise(StopIteration) { e.next }
-    end
+    end)
   end
 
   def test_chars
-    pipe do |r, w|
+    pipe(proc do |w|
       w.puts "foo"
       w.puts "bar"
       w.puts "baz"
       w.close
+    end, proc do |r|
       e = r.chars
       (%w(f o o) + ["\n"] + %w(b a r) + ["\n"] + %w(b a z) + ["\n"]).each do |c|
         assert_equal(c, e.next)
       end
       assert_raise(StopIteration) { e.next }
-    end
+    end)
   end
 
   def test_readbyte
-    pipe do |r, w|
+    pipe(proc do |w|
       w.puts "foo"
       w.puts "bar"
       w.puts "baz"
       w.close
+    end, proc do |r|
       (%w(f o o) + ["\n"] + %w(b a r) + ["\n"] + %w(b a z) + ["\n"]).each do |c|
         assert_equal(c.ord, r.readbyte)
       end
       assert_raise(EOFError) { r.readbyte }
-    end
+    end)
   end
 
   def test_readchar
-    pipe do |r, w|
+    pipe(proc do |w|
       w.puts "foo"
       w.puts "bar"
       w.puts "baz"
       w.close
+    end, proc do |r|
       (%w(f o o) + ["\n"] + %w(b a r) + ["\n"] + %w(b a z) + ["\n"]).each do |c|
         assert_equal(c, r.readchar)
       end
       assert_raise(EOFError) { r.readchar }
-    end
+    end)
   end
 
   def test_close_on_exec
@@ -918,7 +950,7 @@ class TestIO < Test::Unit::TestCase
       assert_equal(false, f.close_on_exec?)
     end
 
-    pipe do |r, w|
+    with_pipe do |r, w|
       assert_equal(false, r.close_on_exec?)
       r.close_on_exec = true
       assert_equal(true, r.close_on_exec?)
@@ -934,7 +966,7 @@ class TestIO < Test::Unit::TestCase
   end
 
   def test_close_security_error
-    pipe do |r, w|
+    with_pipe do |r, w|
       assert_raise(SecurityError) do
         safe_4 { r.close }
       end
@@ -1033,7 +1065,7 @@ class TestIO < Test::Unit::TestCase
   def test_reopen
     t = make_tempfile
 
-    pipe do |r, w|
+    with_pipe do |r, w|
       assert_raise(SecurityError) do
         safe_4 { r.reopen(t.path) }
       end
@@ -1056,6 +1088,10 @@ class TestIO < Test::Unit::TestCase
     t = make_tempfile
 
     a = []
+    IO.foreach(t.path) {|x| a << x }
+    assert_equal(["foo\n", "bar\n", "baz\n"], a)
+
+    a = []
     IO.foreach(t.path, {:mode => "r" }) {|x| a << x }
     assert_equal(["foo\n", "bar\n", "baz\n"], a)
 
@@ -1066,79 +1102,84 @@ class TestIO < Test::Unit::TestCase
     a = []
     IO.foreach(t.path, {:open_args => ["r"] }) {|x| a << x }
     assert_equal(["foo\n", "bar\n", "baz\n"], a)
+
+    a = []
+    IO.foreach(t.path, "b") {|x| a << x }
+    assert_equal(["foo\nb", "ar\nb", "az\n"], a)
+
+    a = []
+    IO.foreach(t.path, 3) {|x| a << x }
+    assert_equal(["foo", "\n", "bar", "\n", "baz", "\n"], a)
+
+    a = []
+    IO.foreach(t.path, "b", 3) {|x| a << x }
+    assert_equal(["foo", "\nb", "ar\n", "b", "az\n"], a)
+
+  end
+
+  def test_s_readlines
+    t = make_tempfile
+
+    assert_equal(["foo\n", "bar\n", "baz\n"], IO.readlines(t.path))
+    assert_equal(["foo\nb", "ar\nb", "az\n"], IO.readlines(t.path, "b"))
+    assert_equal(["fo", "o\n", "ba", "r\n", "ba", "z\n"], IO.readlines(t.path, 2))
+    assert_equal(["fo", "o\n", "b", "ar", "\nb", "az", "\n"], IO.readlines(t.path, "b", 2))
   end
 
   def test_printf
-    pipe do |r, w|
+    pipe(proc do |w|
       printf(w, "foo %s baz\n", "bar")
       w.close_write
+    end, proc do |r|
       assert_equal("foo bar baz\n", r.read)
-    end
+    end)
   end
 
   def test_print
     t = make_tempfile
 
-    EnvUtil.rubyexec("-", t.path) do |w, r, e|
-      w.puts "print while $<.gets"
-      w.close
-      assert_equal("", e.read)
-      assert_equal("foo\nbar\nbaz\n", r.read)
-    end
+    assert_in_out_err(["-", t.path], "print while $<.gets", %w(foo bar baz), [])
   end
 
   def test_putc
-    pipe do |r, w|
+    pipe(proc do |w|
       w.putc "A"
       w.putc "BC"
       w.putc 68
       w.close_write
+    end, proc do |r|
       assert_equal("ABD", r.read)
-    end
+    end)
 
-    EnvUtil.rubyexec do |w, r, e|
-      w.puts "putc 65"
-      w.close
-      assert_equal("", e.read)
-      assert_equal("A", r.read)
-    end
+    assert_in_out_err([], "putc 65", %w(A), [])
   end
 
   def test_puts_recursive_array
     a = ["foo"]
     a << a
-    pipe do |r, w|
+    pipe(proc do |w|
       w.puts a
       w.close
+    end, proc do |r|
       assert_equal("foo\n[...]\n", r.read)
-    end
+    end)
   end
 
   def test_display
-    pipe do |r, w|
+    pipe(proc do |w|
       "foo".display(w)
       w.close
+    end, proc do |r|
       assert_equal("foo", r.read)
-    end
+    end)
 
-    EnvUtil.rubyexec do |w, r, e|
-      w.puts "'foo'.display"
-      w.close
-      assert_equal("", e.read)
-      assert_equal("foo", r.read)
-    end
+    assert_in_out_err([], "'foo'.display", %w(foo), [])
   end
 
   def test_set_stdout
     assert_raise(TypeError) { $> = Object.new }
 
-    EnvUtil.rubyexec do |w, r, e|
-      w.puts "$> = $stderr"
-      w.puts "puts 'foo'"
-      w.close
-      assert_equal("foo\n", e.read)
-      assert_equal("", r.read)
-    end
+    assert_in_out_err([], "$> = $stderr\nputs 'foo'", [], %w(foo))
   end
 
   def test_initialize
@@ -1152,29 +1193,6 @@ class TestIO < Test::Unit::TestCase
 
     assert_equal("foo\nbar\nbaz\n", File.read(t.path))
 
-    pipe do |r, w|
-      assert_raise(RuntimeError) do
-        o = Object.new
-        class << o; self; end.instance_eval do
-          define_method(:to_io) { r }
-        end
-        w.instance_eval { initialize(o) }
-      end
-    end
-
-    pipe do |r, w|
-      r, w = IO.new(r), IO.new(w)
-      w.puts "foo"
-      w.puts "bar"
-      w.puts "baz"
-      w.close
-      assert_equal("foo\nbar\nbaz\n", r.read)
-    end
-
-    pipe do |r, w|
-      assert_raise(ArgumentError) { IO.new(r, "r+") }
-    end
-
     f = open(t.path)
     assert_raise(RuntimeError) do
       f.instance_eval { initialize }
@@ -1182,17 +1200,11 @@ class TestIO < Test::Unit::TestCase
   end
   
   def test_new_with_block
-    EnvUtil.rubyexec do |w, r, e|
-      w.puts "r, w = IO.pipe"
-      w.puts "IO.new(r) {}"
-      w.close
-      assert_not_equal("", e.read)
-      assert_equal("", r.read)
-    end
+    assert_in_out_err([], "r, w = IO.pipe; IO.new(r) {}", [], /^.+$/)
   end
 
   def test_readline2
-    EnvUtil.rubyexec("-e", <<-SRC) do |w, r, e|
+    assert_in_out_err(["-e", <<-SRC], "foo\nbar\nbaz\n", %w(foo bar baz end), [])
       puts readline
       puts readline
       puts readline
@@ -1202,33 +1214,42 @@ class TestIO < Test::Unit::TestCase
         puts "end"
       end
     SRC
-      w.puts "foo"
-      w.puts "bar"
-      w.puts "baz"
-      w.close
-      assert_equal("", e.read)
-      assert_equal("foo\nbar\nbaz\nend\n", r.read)
-    end
   end
 
   def test_readlines
-    EnvUtil.rubyexec("-e", "p readlines") do |w, r, e|
-      w.puts "foo"
-      w.puts "bar"
-      w.puts "baz"
-      w.close
-      assert_equal("", e.read)
-      assert_equal("[\"foo\\n\", \"bar\\n\", \"baz\\n\"]\n", r.read)
-    end
+    assert_in_out_err(["-e", "p readlines"], "foo\nbar\nbaz\n",
+                      ["[\"foo\\n\", \"bar\\n\", \"baz\\n\"]"], [])
   end
 
   def test_s_read
     t = make_tempfile
 
+    assert_equal("foo\nbar\nbaz\n", File.read(t.path))
+    assert_equal("foo\nba", File.read(t.path, 6))
     assert_equal("bar\n", File.read(t.path, 4, 4))
   end
 
   def test_uninitialized
     assert_raise(IOError) { IO.allocate.print "" }
+  end
+
+  def test_nofollow
+    # O_NOFOLLOW is not standard.
+    return if /freebsd|linux/ !~ RUBY_PLATFORM
+    return unless defined? File::NOFOLLOW
+    mkcdtmpdir {
+      open("file", "w") {|f| f << "content" }
+      begin
+        File.symlink("file", "slnk")
+      rescue NotImplementedError
+        return
+      end
+      assert_raise(Errno::EMLINK, Errno::ELOOP) {
+        open("slnk", File::RDONLY|File::NOFOLLOW) {}
+      }
+      assert_raise(Errno::EMLINK, Errno::ELOOP) {
+        File.foreach("slnk", :open_args=>[File::RDONLY|File::NOFOLLOW]) {}
+      }
+    }
   end
 end

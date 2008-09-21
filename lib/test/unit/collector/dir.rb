@@ -10,13 +10,13 @@ module Test
         attr_reader :pattern, :exclude
         attr_accessor :base
 
-        def initialize(dir=::Dir, file=::File, object_space=::ObjectSpace, req=nil)
+        def initialize(dir=::Dir, file=::File, object_space=nil, req=nil)
           super()
           @dir = dir
           @file = file
           @object_space = object_space
           @req = req
-          @pattern = []
+          @pattern = [/\btest_.*\.rb\Z/m]
           @exclude = []
         end
 
@@ -43,8 +43,14 @@ module Test
 
         def find_test_cases(ignore=[])
           cases = []
-          @object_space.each_object(Class) do |c|
-            cases << c if(c < TestCase && !ignore.include?(c))
+          if @object_space
+            @object_space.each_object(Class) do |c|
+              cases << c if(c < TestCase && !ignore.include?(c))
+            end
+          else
+            TestCase::DECENDANT_CLASSES.each do |c|
+              cases << c if !ignore.include?(c)
+            end
           end
           ignore.concat(cases)
           cases
@@ -64,7 +70,6 @@ module Test
                 sub_suites << sub_suite unless(sub_suite.empty?)
               else
                 next if /~\z/ =~ e_name or /\A\.\#/ =~ e
-                next unless /\Atest_.*\.rb\z/m =~ e
                 if @pattern and !@pattern.empty?
                   next unless @pattern.any? {|pat| pat =~ e_name}
                 end

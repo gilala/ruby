@@ -3,10 +3,6 @@ require 'thread'
 require_relative 'envutil'
 
 class TestThread < Test::Unit::TestCase
-  def ruby(*r, &b)
-    EnvUtil.rubyexec(*r, &b)
-  end
-
   class Thread < ::Thread
     Threads = []
     def self.new(*)
@@ -130,7 +126,7 @@ class TestThread < Test::Unit::TestCase
     sleep 0.5
     t1.kill
     t2.kill
-    assert(c1 > c2 * 2, "[ruby-dev:33124]")
+    assert(c1 > c2, "[ruby-dev:33124]")
   end
 
   def test_new
@@ -180,13 +176,11 @@ class TestThread < Test::Unit::TestCase
   end
 
   def test_kill_main_thread
-    ruby do |w, r, e|
-      w.puts "p 1"
-      w.puts "Thread.kill Thread.current"
-      w.puts "p 2"
-      w.close
-      assert_equal("1", r.read.chomp)
-    end
+    assert_in_out_err([], <<-INPUT, %w(1), [])
+      p 1
+      Thread.kill Thread.current
+      p 2
+    INPUT
   end
 
   def test_exit
@@ -218,104 +212,84 @@ class TestThread < Test::Unit::TestCase
   end
 
   def test_stop
-    ruby do |w, r, e|
-      w.puts "begin"
-      w.puts "  Thread.stop"
-      w.puts "  p 1"
-      w.puts "rescue ThreadError"
-      w.puts "  p 2"
-      w.puts "end"
-      w.close
-      assert_equal("2", r.read.chomp)
-    end
+    assert_in_out_err([], <<-INPUT, %w(2), [])
+      begin
+        Thread.stop
+        p 1
+      rescue ThreadError
+        p 2
+      end
+    INPUT
   end
 
   def test_list
-    ruby do |w, r, e|
-      w.puts "t1 = Thread.new { sleep }"
-      w.puts "t2 = Thread.new { loop { } }"
-      w.puts "t3 = Thread.new { }.join"
-      w.puts "p [Thread.current, t1, t2].sort_by {|t| t.object_id }"
-      w.puts "p Thread.list.sort_by {|t| t.object_id }"
-      w.close
-      assert_equal(r.gets, r.gets)
+    assert_in_out_err([], <<-INPUT) do |r, e|
+      t1 = Thread.new { sleep }
+      Thread.pass
+      t2 = Thread.new { loop { } }
+      t3 = Thread.new { }.join
+      p [Thread.current, t1, t2].sort_by {|t| t.object_id }
+      p Thread.list.sort_by {|t| t.object_id }
+    INPUT
+      assert_equal(r.first, r.last)
+      assert_equal([], e)
     end
   end
 
   def test_main
-    ruby do |w, r, e|
-      w.puts "p Thread.main == Thread.current"
-      w.puts "Thread.new { p Thread.main == Thread.current }.join"
-      w.close
-      assert_equal("true", r.gets.chomp)
-      assert_equal("false", r.gets.chomp)
-    end
+    assert_in_out_err([], <<-INPUT, %w(true false), [])
+      p Thread.main == Thread.current
+      Thread.new { p Thread.main == Thread.current }.join
+    INPUT
   end
 
   def test_abort_on_exception
-    ruby do |w, r, e|
-      w.puts "p Thread.abort_on_exception"
-      w.puts "begin"
-      w.puts "  Thread.new { raise }"
-      w.puts "  sleep 0.5"
-      w.puts "  p 1"
-      w.puts "rescue"
-      w.puts "  p 2"
-      w.puts "end"
-      w.close_write
-      assert_equal("false", r.gets.chomp)
-      assert_equal("1", r.gets.chomp)
-      assert_equal("", e.read)
-    end
+    assert_in_out_err([], <<-INPUT, %w(false 1), [])
+      p Thread.abort_on_exception
+      begin
+        Thread.new { raise }
+        sleep 0.5
+        p 1
+      rescue
+        p 2
+      end
+    INPUT
 
-    ruby do |w, r, e|
-      w.puts "Thread.abort_on_exception = true"
-      w.puts "p Thread.abort_on_exception"
-      w.puts "begin"
-      w.puts "  Thread.new { raise }"
-      w.puts "  sleep 0.5"
-      w.puts "  p 1"
-      w.puts "rescue"
-      w.puts "  p 2"
-      w.puts "end"
-      w.close_write
-      assert_equal("true", r.gets.chomp)
-      assert_equal("2", r.gets.chomp)
-      assert_equal("", e.read)
-    end
+    assert_in_out_err([], <<-INPUT, %w(true 2), [])
+      Thread.abort_on_exception = true
+      p Thread.abort_on_exception
+      begin
+        Thread.new { raise }
+        sleep 0.5
+        p 1
+      rescue
+        p 2
+      end
+    INPUT
 
-    ruby('-d') do |w, r, e|
-      w.puts "p Thread.abort_on_exception"
-      w.puts "begin"
-      w.puts "  Thread.new { raise }"
-      w.puts "  sleep 0.5"
-      w.puts "  p 1"
-      w.puts "rescue"
-      w.puts "  p 2"
-      w.puts "end"
-      w.close_write
-      assert_equal("false", r.gets.chomp)
-      assert_equal("2", r.gets.chomp)
-      assert_not_equal("", e.read)
-    end
+    assert_in_out_err(%w(-d), <<-INPUT, %w(false 2), /.+/)
+      p Thread.abort_on_exception
+      begin
+        Thread.new { raise }
+        sleep 0.5
+        p 1
+      rescue
+        p 2
+      end
+    INPUT
 
-    ruby do |w, r, e|
-      w.puts "p Thread.abort_on_exception"
-      w.puts "begin"
-      w.puts "  t = Thread.new { sleep 0.5; raise }"
-      w.puts "  t.abort_on_exception = true"
-      w.puts "  p t.abort_on_exception"
-      w.puts "  sleep 1"
-      w.puts "  p 1"
-      w.puts "rescue"
-      w.puts "  p 2"
-      w.puts "end"
-      w.close_write
-      assert_equal("false", r.gets.chomp)
-      assert_equal("true", r.gets.chomp)
-      assert_equal("2", r.gets.chomp)
-      assert_equal("", e.read)
-    end
+    assert_in_out_err([], <<-INPUT, %w(false true 2), [])
+      p Thread.abort_on_exception
+      begin
+        t = Thread.new { sleep 0.5; raise }
+        t.abort_on_exception = true
+        p t.abort_on_exception
+        sleep 1
+        p 1
+      rescue
+        p 2
+      end
+    INPUT
   end
 
   def test_status_and_stop_p
@@ -325,19 +299,22 @@ class TestThread < Test::Unit::TestCase
     d = Thread.new { sleep }
     e = Thread.current
     sleep 0.5
-    d.kill
 
     assert_equal(nil, a.status)
+    assert(a.stop?)
+
     assert_equal("sleep", b.status)
+    assert(b.stop?)
+
     assert_equal(false, c.status)
     assert_match(/^#<TestThread::Thread:.* dead>$/, c.inspect)
-    assert_equal("aborting", d.status)
-    assert_equal("run", e.status)
-
-    assert(a.stop?)
-    assert(b.stop?)
     assert(c.stop?)
+
+    d.kill
+    assert_equal("aborting", d.status)
     assert(!d.stop?)
+
+    assert_equal("run", e.status)
     assert(!e.stop?)
 
   ensure
@@ -437,6 +414,28 @@ class TestThread < Test::Unit::TestCase
         m.unlock
       end.join
     end
+  end
+
+  def test_mutex_fifo_like_lock
+    m1 = Mutex.new
+    m2 = Mutex.new
+    m1.lock
+    m2.lock
+    m1.unlock
+    m2.unlock
+    assert_equal(false, m1.locked?)
+    assert_equal(false, m2.locked?)
+
+    m3 = Mutex.new
+    m1.lock
+    m2.lock
+    m3.lock
+    m1.unlock
+    m2.unlock
+    m3.unlock
+    assert_equal(false, m1.locked?)
+    assert_equal(false, m2.locked?)
+    assert_equal(false, m3.locked?)
   end
 
   def test_recursive_error

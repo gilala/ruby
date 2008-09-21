@@ -90,8 +90,9 @@ module Test
           end
           
           def test_started(name)
-            $0 += "\0#{name}"
-            $0.sub!(/\0.*\z/, '')
+            $program_name = $0
+            alias $0 $program_name
+            $PROGRAM_NAME += "\0#{name}"
             output_single(name + ": ", VERBOSE)
           end
           

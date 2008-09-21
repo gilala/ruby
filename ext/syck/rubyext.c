@@ -8,6 +8,7 @@
  */
 
 #include "ruby/ruby.h"
+#include "ruby/encoding.h"
 #include "syck.h"
 #include <sys/types.h>
 #include <time.h>
@@ -70,7 +71,7 @@ static VALUE syck_node_transform( VALUE );
  * handler prototypes
  */
 SYMID rb_syck_load_handler _((SyckParser *, SyckNode *));
-void rb_syck_err_handler _((SyckParser *, char *));
+void rb_syck_err_handler _((SyckParser *, const char *));
 SyckNode * rb_syck_bad_anchor_handler _((SyckParser *, char *));
 void rb_syck_output_handler _((SyckEmitter *, char *, long));
 void rb_syck_emitter_handler _((SyckEmitter *, st_data_t));
@@ -102,7 +103,8 @@ rb_syck_compile(VALUE self, VALUE port)
     int taint;
     char *ret;
     VALUE bc;
-    bytestring_t *sav; 
+    bytestring_t *sav = NULL;
+    void *data = NULL;
 
     SyckParser *parser = syck_new_parser();
     taint = syck_parser_assign_io(parser, &port);
@@ -111,7 +113,10 @@ rb_syck_compile(VALUE self, VALUE port)
     syck_parser_implicit_typing( parser, 0 );
     syck_parser_taguri_expansion( parser, 0 );
     oid = syck_parse( parser );
-    syck_lookup_sym( parser, oid, (char **)&sav );
+    if (!syck_lookup_sym( parser, oid, &data )) {
+	rb_raise(rb_eSyntaxError, "root node <%lx> not found", oid);
+    }
+    sav = data;
 
     ret = S_ALLOCA_N( char, strlen( sav->buffer ) + 3 );
     ret[0] = '\0';
@@ -511,6 +516,7 @@ yaml_org_handler( SyckNode *n, VALUE *ref )
             else if ( strcmp( type_id, "str" ) == 0 )
             {
                 obj = rb_str_new( n->data.str->ptr, n->data.str->len );
+                rb_enc_associate(obj, rb_utf8_encoding());
             }
             else
             {
@@ -632,7 +638,7 @@ rb_syck_load_handler(SyckParser *p, SyckNode *n)
  * friendly errors.
  */
 void
-rb_syck_err_handler(SyckParser *p, char *msg)
+rb_syck_err_handler(SyckParser *p, const char *msg)
 {
     char *endl = p->cursor;
 
@@ -640,7 +646,7 @@ rb_syck_err_handler(SyckParser *p, char *msg)
         endl++;
 
     endl[0] = '\0';
-    rb_raise(rb_eArgError, "%s on line %d, col %d: `%s'",
+    rb_raise(rb_eArgError, "%s on line %d, col %"PRIdPTRDIFF": `%s'",
            msg,
            p->linect,
            p->cursor - p->lineptr, 
@@ -925,7 +931,7 @@ VALUE
 syck_resolver_node_import(VALUE self, VALUE node)
 {
     SyckNode *n;
-    VALUE obj;
+    VALUE obj = Qnil;
     int i = 0;
     Data_Get_Struct(node, SyckNode, n);
 
@@ -1187,7 +1193,7 @@ syck_resolver_tagurize(VALUE self, VALUE val)
 VALUE
 syck_defaultresolver_detect_implicit(VALUE self, VALUE val)
 {
-    char *type_id;
+    const char *type_id;
     VALUE tmp = rb_check_string_type(val);
 
     if ( !NIL_P(tmp) )
@@ -1237,6 +1243,7 @@ syck_genericresolver_node_import(VALUE self, VALUE node)
         case syck_str_kind:
         {
             v = rb_str_new( n->data.str->ptr, n->data.str->len );
+	    rb_enc_associate(v, rb_utf8_encoding());
             if ( n->data.str->style == scalar_1quote )
             {
                 style = sym_1quote;
@@ -1373,6 +1380,11 @@ syck_node_mark(SyckNode *n)
                 rb_gc_mark( syck_map_read( n, map_value, i ) );
             }
         break;
+
+	case syck_str_kind:
+	default:
+	    /* nothing */
+	break;
     }
 #if 0 /* maybe needed */
     if ( n->shortcut ) syck_node_mark( n->shortcut ); /* caution: maybe cyclic */
@@ -1726,7 +1738,7 @@ VALUE
 syck_node_transform(VALUE self)
 {
     VALUE t;
-    SyckNode *n;
+    SyckNode *n = NULL;
     SyckNode *orig_n;
     Data_Get_Struct(self, SyckNode, orig_n);
     t = Data_Wrap_Struct( cNode, syck_node_mark, syck_free_node, 0 );
@@ -2047,9 +2059,7 @@ VALUE
 syck_out_scalar(int argc, VALUE *argv, VALUE self)
 {
     VALUE type_id, str, style, scalar;
-    if (rb_scan_args(argc, argv, "21", &type_id, &str, &style) == 2) {
-        style = Qnil;
-    }
+    rb_scan_args(argc, argv, "21", &type_id, &str, &style);
     scalar = rb_funcall( cScalar, s_new, 3, type_id, str, style );
     syck_out_mark( rb_ivar_get( self, s_emitter ), scalar );
     return scalar;

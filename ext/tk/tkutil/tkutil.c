@@ -11,14 +11,9 @@
 
 #include "ruby.h"
 
-#ifdef HAVE_RUBY_RUBY_H
-/* #include "ruby/ruby.h" */
-#include "ruby/signal.h"
+#ifdef HAVE_RUBY_ST_H
 #include "ruby/st.h"
 #else
-/* #include "ruby.h" */
-#include "rubysig.h"
-#include "version.h"
 #include "st.h"
 #endif
 
@@ -205,6 +200,7 @@ fromDefaultEnc_toUTF8(str, self)
     return tk_toUTF8(1, argv, self);
 }
 
+#if 0
 static VALUE
 fromUTF8_toDefaultEnc(str, self)
     VALUE str;
@@ -215,6 +211,7 @@ fromUTF8_toDefaultEnc(str, self)
     argv[0] = str;
     return tk_fromUTF8(1, argv, self);
 }
+#endif
 
 static int
 to_strkey(key, value, hash)
@@ -893,15 +890,12 @@ tk_conv_args(argc, argv, self)
 {
     int idx, size;
     volatile VALUE dst;
-    int thr_crit_bup;
     VALUE old_gc;
 
     if (argc < 2) {
       rb_raise(rb_eArgError, "too few arguments");
     }
 
-    thr_crit_bup = rb_thread_critical;
-    rb_thread_critical = Qtrue;
     old_gc = rb_gc_disable();
 
     for(size = 0, idx = 2; idx < argc; idx++) {
@@ -926,7 +920,6 @@ tk_conv_args(argc, argv, self)
     }
 
     if (old_gc == Qfalse) rb_gc_enable();
-    rb_thread_critical = thr_crit_bup;
 
     return rb_ary_plus(argv[0], dst);
 }
@@ -968,12 +961,14 @@ tcl2rb_bool(self, value)
     }
 }
 
+#if 0
 static VALUE
 tkstr_to_dec(value)
     VALUE value;
 {
     return rb_cstr_to_inum(RSTRING_PTR(value), 10, 1);
 }
+#endif
 
 static VALUE
 tkstr_to_int(value)
@@ -1077,8 +1072,8 @@ tcl2rb_num_or_str(self, value)
 struct cbsubst_info {
     int   full_subst_length;
     int   keylen[CBSUBST_TBL_MAX];
-    unsigned char  *key[CBSUBST_TBL_MAX];
-    unsigned char  type[CBSUBST_TBL_MAX];
+    char  *key[CBSUBST_TBL_MAX];
+    char  type[CBSUBST_TBL_MAX];
     ID    ivar[CBSUBST_TBL_MAX];
     VALUE proc;
     VALUE aliases;
@@ -1100,9 +1095,9 @@ subst_free(ptr)
 
     if (ptr) {
       for(i = 0; i < CBSUBST_TBL_MAX; i++) {
-	if (ptr->key[i] != (unsigned char *)NULL) {
+	if (ptr->key[i] != NULL) {
 	  free(ptr->key[i]);
-	  ptr->key[i] = (unsigned char *)NULL;
+	  ptr->key[i] = NULL;
 	}
       }
       free(ptr);
@@ -1122,7 +1117,7 @@ allocate_cbsubst_info()
 
   for(idx = 0; idx < CBSUBST_TBL_MAX; idx++) {
     inf->keylen[idx] = 0;
-    inf->key[idx]    = (unsigned char *) NULL;
+    inf->key[idx]    = NULL;
     inf->type[idx]   = '\0';
     inf->ivar[idx]   = (ID) 0;
   }
@@ -1240,7 +1235,7 @@ cbsubst_sym_to_subst(self, sym)
 {
     struct cbsubst_info *inf;
     const char *str;
-    unsigned char *buf, *ptr;
+    char *buf, *ptr;
     int idx, len;
     ID id;
     volatile VALUE ret;
@@ -1273,7 +1268,7 @@ cbsubst_sym_to_subst(self, sym)
       ptr += len;
     } else {
       /* single char */
-      *(ptr++) = idx;
+      *(ptr++) = (unsigned char)idx;
     }
 
     *(ptr++) = ' ';
@@ -1294,7 +1289,7 @@ cbsubst_get_subst_arg(argc, argv, self)
 {
     struct cbsubst_info *inf;
     const char *str;
-    unsigned char *buf, *ptr;
+    char *buf, *ptr;
     int i, idx, len;
     ID id;
     volatile VALUE arg_sym, ret;
@@ -1339,7 +1334,7 @@ cbsubst_get_subst_arg(argc, argv, self)
 	  ptr += len;
 	} else {
 	  /* single char */
-	  *(ptr++) = idx;
+	  *(ptr++) = (unsigned char)idx;
 	}
 
 	*(ptr++) = ' ';
@@ -1364,7 +1359,7 @@ cbsubst_get_subst_key(self, str)
     volatile VALUE ret;
     VALUE keyval;
     int i, len, keylen, idx;
-    unsigned char *buf, *ptr, *key;
+    char *buf, *ptr, *key;
 
     list = rb_funcall(cTclTkLib, ID_split_tklist, 1, str);
     len = RARRAY_LEN(list);
@@ -1372,11 +1367,11 @@ cbsubst_get_subst_key(self, str)
     Data_Get_Struct(rb_const_get(self, ID_SUBST_INFO), 
                     struct cbsubst_info, inf);
 
-    ptr = buf = ALLOC_N(unsigned char, inf->full_subst_length + len + 1);
+    ptr = buf = ALLOC_N(char, inf->full_subst_length + len + 1);
 
     for(i = 0; i < len; i++) {
       keyval = RARRAY_PTR(list)[i];
-      key = (unsigned char*)RSTRING_PTR(keyval);
+      key = RSTRING_PTR(keyval);
       if (*key == '%') {
 	if (*(key + 2) == '\0') {
 	  /* single char */
@@ -1386,7 +1381,7 @@ cbsubst_get_subst_key(self, str)
 	  keylen = RSTRING_LEN(keyval) - 1;
 	  for(idx = 0; idx < CBSUBST_TBL_MAX; idx++) {
 	    if (inf->keylen[idx] != keylen) continue;
-	    if (inf->key[idx][0] != *(key + 1)) continue;
+	    if ((unsigned char)inf->key[idx][0] != (unsigned char)*(key + 1)) continue;
 	    if (strncmp(inf->key[idx], key + 1, keylen)) continue;
 	    break;
 	  }
@@ -1402,7 +1397,7 @@ cbsubst_get_subst_key(self, str)
     }
     *ptr = '\0';
 
-    ret = rb_str_new2((const char*)buf);
+    ret = rb_str_new2(buf);
     free(buf);
     return ret;
 }
@@ -1412,16 +1407,16 @@ cbsubst_get_all_subst_keys(self)
     VALUE self;
 {
     struct cbsubst_info *inf;
-    unsigned char *buf, *ptr;
-    unsigned char *keys_buf, *keys_ptr;
+    char *buf, *ptr;
+    char *keys_buf, *keys_ptr;
     int idx, len;
     volatile VALUE ret;
 
     Data_Get_Struct(rb_const_get(self, ID_SUBST_INFO), 
                     struct cbsubst_info, inf);
 
-    ptr = buf = ALLOC_N(unsigned char, inf->full_subst_length + 1);
-    keys_ptr = keys_buf = ALLOC_N(unsigned char, CBSUBST_TBL_MAX + 1);
+    ptr = buf = ALLOC_N(char, inf->full_subst_length + 1);
+    keys_ptr = keys_buf = ALLOC_N(char, CBSUBST_TBL_MAX + 1);
 
     for(idx = 0; idx < CBSUBST_TBL_MAX; idx++) {
       if (inf->ivar[idx] == (ID) 0) continue;
@@ -1445,7 +1440,7 @@ cbsubst_get_all_subst_keys(self)
     *ptr = '\0';
     *keys_ptr = '\0';
 
-    ret = rb_ary_new3(2, rb_str_new2(keys_buf), rb_str_new2((const char*)buf));
+    ret = rb_ary_new3(2, rb_str_new2(keys_buf), rb_str_new2(buf));
 
     free(buf);
     free(keys_buf);
@@ -1595,11 +1590,7 @@ cbsubst_scan_args(self, arg_key, val_ary)
     unsigned char type_chr;
     volatile VALUE dst = rb_ary_new2(vallen);
     volatile VALUE proc;
-    int thr_crit_bup;
     VALUE old_gc;
-
-    thr_crit_bup = rb_thread_critical;
-    rb_thread_critical = Qtrue;
 
     old_gc = rb_gc_disable();
 
@@ -1628,7 +1619,6 @@ cbsubst_scan_args(self, arg_key, val_ary)
     }
 
     if (old_gc == Qfalse) rb_gc_enable();
-    rb_thread_critical = thr_crit_bup;
 
     return dst;
 }

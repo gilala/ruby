@@ -11,10 +11,10 @@
 
 **********************************************************************/
 
+#include "eval_intern.h"
 #include "ruby/ruby.h"
 #include "ruby/st.h"
 #include "ruby/util.h"
-#include "ruby/signal.h"
 
 #ifdef __APPLE__
 #include <crt_externs.h>
@@ -36,12 +36,6 @@ VALUE rb_cHash;
 static VALUE envtbl;
 static ID id_hash, id_yield, id_default;
 
-static VALUE
-eql(VALUE *args)
-{
-    return (VALUE)rb_eql(args[0], args[1]);
-}
-
 static int
 rb_any_cmp(VALUE a, VALUE b)
 {
@@ -62,7 +56,7 @@ rb_any_cmp(VALUE a, VALUE b)
 
     args[0] = a;
     args[1] = b;
-    return !rb_with_disable_interrupt(eql, (VALUE)args);
+    return !rb_eql(a, b);
 }
 
 VALUE
@@ -247,7 +241,7 @@ static void
 rb_hash_modify_check(VALUE hash)
 {
     if (OBJ_FROZEN(hash)) rb_error_frozen("hash");
-    if (!OBJ_TAINTED(hash) && rb_safe_level() >= 4)
+    if (!OBJ_UNTRUSTED(hash) && rb_safe_level() >= 4)
 	rb_raise(rb_eSecurityError, "Insecure: can't modify hash");
 }
 
@@ -572,7 +566,7 @@ rb_hash_default(int argc, VALUE *argv, VALUE hash)
 
 /*
  *  call-seq:
- *     hsh.default = obj     => hsh
+ *     hsh.default = obj     => obj
  *
  *  Sets the default value, the value returned for a key that does not
  *  exist in the hash. It is not possible to set the a default to a
@@ -621,6 +615,37 @@ rb_hash_default_proc(VALUE hash)
 	return RHASH(hash)->ifnone;
     }
     return Qnil;
+}
+
+/*
+ *  call-seq:
+ *     hsh.default_proc = proc_obj     => proc_obj
+ *
+ *  Sets the default proc to be executed on each key lookup.
+ *
+ *     h.default_proc = proc do |hash, key|
+ *       hash[key] = key + key
+ *     end
+ *     h[2]       #=> 4
+ *     h["cat"]   #=> "catcat"
+ */
+
+static VALUE
+rb_hash_set_default_proc(VALUE hash, VALUE proc)
+{
+    VALUE b;
+
+    rb_hash_modify(hash);
+    b = rb_check_convert_type(proc, T_DATA, "Proc", "to_proc");
+    if (NIL_P(b) || !rb_obj_is_proc(b)) {
+	rb_raise(rb_eTypeError,
+		 "wrong default_proc type %s (expected Proc)",
+		 rb_obj_classname(proc));
+    }
+    proc = b;
+    RHASH(hash)->ifnone = proc;
+    FL_SET(hash, HASH_PROC_DEFAULT);
+    return proc;
 }
 
 static int
@@ -1166,7 +1191,7 @@ rb_hash_to_a(VALUE hash)
 
     ary = rb_ary_new();
     rb_hash_foreach(hash, to_a_i, ary);
-    if (OBJ_TAINTED(hash)) OBJ_TAINT(ary);
+    OBJ_INFECT(ary, hash);
 
     return ary;
 }
@@ -2565,6 +2590,7 @@ void
 Init_Hash(void)
 {
 #undef rb_intern
+#define rb_intern(str) rb_intern_const(str)
 
     id_hash = rb_intern("hash");
     id_yield = rb_intern("yield");
@@ -2596,6 +2622,7 @@ Init_Hash(void)
     rb_define_method(rb_cHash,"default", rb_hash_default, -1);
     rb_define_method(rb_cHash,"default=", rb_hash_set_default, 1);
     rb_define_method(rb_cHash,"default_proc", rb_hash_default_proc, 0);
+    rb_define_method(rb_cHash,"default_proc=", rb_hash_set_default_proc, 1);
     rb_define_method(rb_cHash,"key", rb_hash_key, 1);
     rb_define_method(rb_cHash,"index", rb_hash_index, 1);
     rb_define_method(rb_cHash,"size", rb_hash_size, 0);

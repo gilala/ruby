@@ -997,12 +997,13 @@ assert_equal 'ok', %q{
 
 assert_normal_exit %q{
   begin
-    Process.setrlimit(Process::RLIMIT_STACK, 1024*1024)
+    Process.setrlimit(Process::RLIMIT_STACK, 4_202_496)
+    # FreeBSD fails this less than 4M + 8K bytes.
   rescue Exception
     exit
   end
   class C
-    attr "a" * (2*1024*1024)
+    attr "a" * (10*1024*1024)
   end
 }, '[ruby-dev:31818]'
 
@@ -1026,3 +1027,45 @@ assert_not_match /method_missing/, %q{
   STDERR.reopen(STDOUT)
   variable_or_mehtod_not_exist
 }
+
+assert_equal '[false, false, false, false, true, true]', %q{
+  class C
+    define_method(:foo) {
+      block_given?
+    }
+  end
+
+  C.new.foo {}
+
+  class D
+    def foo
+      D.module_eval{
+        define_method(:m1){
+          block_given?
+        }
+      }
+    end
+    def bar
+      D.module_eval{
+        define_method(:m2){
+          block_given?
+        }
+      }
+    end
+  end
+
+  D.new.foo
+  D.new.bar{}
+  [C.new.foo, C.new.foo{}, D.new.m1, D.new.m1{}, D.new.m2, D.new.m2{}]
+}, '[ruby-core:14813]'
+
+assert_equal 'ok', %q{
+  class Foo
+    define_method(:foo) do |&b|
+      b.call
+    end
+  end
+  Foo.new.foo do
+    break :ok
+  end
+}, '[ruby-dev:36028]'

@@ -60,7 +60,7 @@ static void
 time_modify(VALUE time)
 {
     rb_check_frozen(time);
-    if (!OBJ_TAINTED(time) && rb_safe_level() >= 4)
+    if (!OBJ_UNTRUSTED(time) && rb_safe_level() >= 4)
 	rb_raise(rb_eSecurityError, "Insecure: can't modify Time");
 }
 
@@ -201,6 +201,10 @@ time_timespec(VALUE num, int interval)
 	    double f, d;
 
 	    d = modf(RFLOAT_VALUE(num), &f);
+            if (d < 0) {
+                d += 1;
+                f -= 1;
+            }
 	    t.tv_sec = (time_t)f;
 	    if (f != t.tv_sec) {
 		rb_raise(rb_eRangeError, "%f out of Time range", RFLOAT_VALUE(num));
@@ -479,6 +483,18 @@ static VALUE time_gmtime(VALUE);
 static VALUE time_localtime(VALUE);
 static VALUE time_get_tm(VALUE, int);
 
+#ifdef HAVE_GMTIME_R
+#define IF_HAVE_GMTIME_R(x) x
+#define ASCTIME(tm, buf) asctime_r(tm, buf)
+#define GMTIME(tm, result) gmtime_r(tm, &result)
+#define LOCALTIME(tm, result) localtime_r(tm, &result)
+#else
+#define IF_HAVE_GMTIME_R(x) 	/* nothing */
+#define ASCTIME(tm, buf) asctime(tm)
+#define GMTIME(tm, result) gmtime(tm)
+#define LOCALTIME(tm, result) localtime(tm)
+#endif
+
 static int
 leap_year_p(long y)
 {
@@ -490,7 +506,7 @@ leap_year_p(long y)
 static time_t
 timegm_noleapsecond(struct tm *tm)
 {
-    static int common_year_yday_offset[] = {
+    static const int common_year_yday_offset[] = {
 	-1,
 	-1 + 31,
 	-1 + 31 + 28,
@@ -505,7 +521,7 @@ timegm_noleapsecond(struct tm *tm)
 	-1 + 31 + 28 + 31 + 30 + 31 + 30 + 31 + 31 + 30 + 31 + 30
 	  /* 1    2    3    4    5    6    7    8    9    10   11 */
     };
-    static int leap_year_yday_offset[] = {
+    static const int leap_year_yday_offset[] = {
 	-1,
 	-1 + 31,
 	-1 + 31 + 29,
@@ -578,6 +594,8 @@ search_time_t(struct tm *tptr, int utc_p)
     struct tm *tm, tm_lo, tm_hi;
     int d, have_guess;
     int find_dst;
+    IF_HAVE_GMTIME_R(struct tm result);
+#define GUESS(p) (utc_p ? GMTIME(p, result) : LOCALTIME(p, result))
 
     find_dst = 0 < tptr->tm_isdst;
 
@@ -591,7 +609,7 @@ search_time_t(struct tm *tptr, int utc_p)
 	       ~(time_t)0;
 
     guess = timegm_noleapsecond(tptr);
-    tm = (utc_p ? gmtime : localtime)(&guess);
+    tm = GUESS(&guess);
     if (tm) {
 	d = tmcmp(tptr, tm);
 	if (d == 0) return guess;
@@ -603,8 +621,7 @@ search_time_t(struct tm *tptr, int utc_p)
 	    guess_lo = guess;
 	    guess += 24 * 60 * 60;
 	}
-	if (guess_lo < guess && guess < guess_hi &&
-	    (tm = (utc_p ? gmtime : localtime)(&guess)) != NULL) {
+	if (guess_lo < guess && guess < guess_hi && (tm = GUESS(&guess)) != NULL) {
 	    d = tmcmp(tptr, tm);
 	    if (d == 0) return guess;
 	    if (d < 0)
@@ -614,14 +631,14 @@ search_time_t(struct tm *tptr, int utc_p)
 	}
     }
 
-    tm = (utc_p ? gmtime : localtime)(&guess_lo);
+    tm = GUESS(&guess_lo);
     if (!tm) goto error;
     d = tmcmp(tptr, tm);
     if (d < 0) goto out_of_range;
     if (d == 0) return guess_lo;
     tm_lo = *tm;
 
-    tm = (utc_p ? gmtime : localtime)(&guess_hi);
+    tm = GUESS(&guess_hi);
     if (!tm) goto error;
     d = tmcmp(tptr, tm);
     if (d > 0) goto out_of_range;
@@ -718,7 +735,7 @@ search_time_t(struct tm *tptr, int utc_p)
 	    range = 0;
 	}
 
-	tm = (utc_p ? gmtime : localtime)(&guess);
+	tm = GUESS(&guess);
 	if (!tm) goto error;
 	have_guess = 0;
 	
@@ -749,7 +766,7 @@ search_time_t(struct tm *tptr, int utc_p)
 		time_t guess2;
 		if (find_dst) {
 		    guess2 = guess - 2 * 60 * 60;
-		    tm = localtime(&guess2);
+		    tm = LOCALTIME(&guess2, result);
 		    if (tm) {
 			if (tptr->tm_hour != (tm->tm_hour + 2) % 24 ||
 			    tptr->tm_min != tm->tm_min ||
@@ -761,7 +778,7 @@ search_time_t(struct tm *tptr, int utc_p)
 			    if (tptr->tm_mday != tm->tm_mday)
 				guess2 += 24 * 60 * 60;
 			    if (guess != guess2) {
-				tm = localtime(&guess2);
+				tm = LOCALTIME(&guess2, result);
 				if (tmcmp(tptr, tm) == 0) {
 				    if (guess < guess2)
 					return guess;
@@ -774,7 +791,7 @@ search_time_t(struct tm *tptr, int utc_p)
 		}
 		else {
 		    guess2 = guess + 2 * 60 * 60;
-		    tm = localtime(&guess2);
+		    tm = LOCALTIME(&guess2, result);
 		    if (tm) {
 			if ((tptr->tm_hour + 2) % 24 != tm->tm_hour ||
 			    tptr->tm_min != tm->tm_min ||
@@ -786,7 +803,7 @@ search_time_t(struct tm *tptr, int utc_p)
 			    if (tptr->tm_mday != tm->tm_mday)
 				guess2 -= 24 * 60 * 60;
 			    if (guess != guess2) {
-				tm = localtime(&guess2);
+				tm = LOCALTIME(&guess2, result);
 				if (tmcmp(tptr, tm) == 0) {
 				    if (guess < guess2)
 					return guess2;
@@ -833,13 +850,15 @@ make_time_t(struct tm *tptr, int utc_p)
     struct tm *tmp;
 #endif
     struct tm buf;
+    IF_HAVE_GMTIME_R(struct tm result);
+
     buf = *tptr;
     if (utc_p) {
 #if defined(HAVE_TIMEGM)
 	if ((t = timegm(&buf)) != -1)
 	    return t;
 #ifdef NEGATIVE_TIME_T
-	if ((tmp = gmtime(&t)) &&
+	if ((tmp = GMTIME(&t, result)) &&
 	    tptr->tm_year == tmp->tm_year &&
 	    tptr->tm_mon == tmp->tm_mon &&
 	    tptr->tm_mday == tmp->tm_mday &&
@@ -857,7 +876,7 @@ make_time_t(struct tm *tptr, int utc_p)
 	if ((t = mktime(&buf)) != -1)
 	    return t;
 #ifdef NEGATIVE_TIME_T
-	if ((tmp = localtime(&t)) &&
+	if ((tmp = LOCALTIME(&t, result)) &&
 	    tptr->tm_year == tmp->tm_year &&
 	    tptr->tm_mon == tmp->tm_mon &&
 	    tptr->tm_mday == tmp->tm_mday &&
@@ -997,7 +1016,7 @@ time_to_f(VALUE time)
     struct time_object *tobj;
 
     GetTimeval(time, tobj);
-    return DOUBLE2NUM((double)tobj->ts.tv_sec+(double)tobj->ts.tv_nsec/1e9);
+    return DBL2NUM((double)tobj->ts.tv_sec+(double)tobj->ts.tv_nsec/1e9);
 }
 
 /*
@@ -1083,8 +1102,18 @@ time_cmp(VALUE time1, VALUE time2)
 	if (tobj1->ts.tv_sec > tobj2->ts.tv_sec) return INT2FIX(1);
 	return INT2FIX(-1);
     }
+    else {
+	VALUE cmp;
+	int n;
 
-    return Qnil;
+	cmp = rb_funcall(time2, rb_intern("<=>"), 1, time1);
+	if (NIL_P(cmp)) return Qnil;
+
+	n = rb_cmpint(cmp, time1, time2);
+	if (n == 0) return INT2FIX(0);
+	if (n > 0) return INT2FIX(1);
+	return INT2FIX(-1);
+    }
 }
 
 /*
@@ -1203,6 +1232,7 @@ time_localtime(VALUE time)
     struct time_object *tobj;
     struct tm *tm_tmp;
     time_t t;
+    IF_HAVE_GMTIME_R(struct tm result);
 
     GetTimeval(time, tobj);
     if (!tobj->gmt) {
@@ -1213,7 +1243,7 @@ time_localtime(VALUE time)
 	time_modify(time);
     }
     t = tobj->ts.tv_sec;
-    tm_tmp = localtime(&t);
+    tm_tmp = LOCALTIME(&t, result);
     if (!tm_tmp)
 	rb_raise(rb_eArgError, "localtime error");
     tobj->tm = *tm_tmp;
@@ -1246,6 +1276,7 @@ time_gmtime(VALUE time)
     struct time_object *tobj;
     struct tm *tm_tmp;
     time_t t;
+    IF_HAVE_GMTIME_R(struct tm result);
 
     GetTimeval(time, tobj);
     if (tobj->gmt) {
@@ -1256,7 +1287,7 @@ time_gmtime(VALUE time)
 	time_modify(time);
     }
     t = tobj->ts.tv_sec;
-    tm_tmp = gmtime(&t);
+    tm_tmp = GMTIME(&t, result);
     if (!tm_tmp)
 	rb_raise(rb_eArgError, "gmtime error");
     tobj->tm = *tm_tmp;
@@ -1328,16 +1359,25 @@ time_asctime(VALUE time)
 {
     struct time_object *tobj;
     char *s;
+    IF_HAVE_GMTIME_R(char buf[32]);
 
     GetTimeval(time, tobj);
     if (tobj->tm_got == 0) {
 	time_get_tm(time, tobj->gmt);
     }
-    s = asctime(&tobj->tm);
+    s = ASCTIME(&tobj->tm, buf);
     if (s[24] == '\n') s[24] = '\0';
+#if (defined(_MSC_VER) && defined(_DLL)) || defined(__MSVCRT__)
+    /* workaround for MSVCRT's bug */
+    if (s[8] == '0') s[8] = ' ';
+#endif
 
     return rb_str_new2(s);
 }
+
+size_t
+rb_strftime(char *s, size_t maxsize, const char *format,
+	    const struct tm *timeptr, const struct timespec *ts, int gmt);
 
 /*
  *  call-seq:
@@ -1367,24 +1407,12 @@ time_to_s(VALUE time)
 	time_get_tm(time, tobj->gmt);
     }
     if (tobj->gmt == 1) {
-	len = strftime(buf, 128, "%Y-%m-%d %H:%M:%S UTC", &tobj->tm);
+	len = rb_strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S UTC",
+			  &tobj->tm, &tobj->ts, tobj->gmt);
     }
     else {
-	long off;
-	char sign = '+';
-#if defined(HAVE_STRUCT_TM_TM_GMTOFF)
-	off = tobj->tm.tm_gmtoff;
-#else
-	VALUE tmp = time_utc_offset(time);
-	off = NUM2INT(tmp);
-#endif
-	if (off < 0) {
-	    sign = '-';
-	    off = -off;
-	}
-	len = strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S ", &tobj->tm);
-        len += snprintf(buf+len, sizeof(buf)-len, "%c%02d%02d", sign,
-                        (int)(off/3600), (int)(off%3600/60));
+	len = rb_strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %z",
+			  &tobj->tm, &tobj->ts, tobj->gmt);
     }
     return rb_str_new(buf, len);
 }
@@ -1485,7 +1513,7 @@ time_minus(VALUE time1, VALUE time2)
             f = (double)(unsigned_time_t)(tobj->ts.tv_sec - tobj2->ts.tv_sec);
 	f += ((double)tobj->ts.tv_nsec - (double)tobj2->ts.tv_nsec)*1e-9;
 
-	return DOUBLE2NUM(f);
+	return DBL2NUM(f);
     }
     return time_add(tobj, time2, -1);
 }
@@ -1904,7 +1932,8 @@ time_zone(VALUE time)
 #elif defined(HAVE_TZNAME) && defined(HAVE_DAYLIGHT)
     return rb_str_new2(tzname[daylight && tobj->tm.tm_isdst]);
 #else
-    len = strftime(buf, 64, "%Z", &tobj->tm);
+    len = rb_strftime(buf, sizeof(buf), "%Z",
+		      &tobj->tm, &tobj->ts, tobj->gmt);
     return rb_str_new(buf, len);
 #endif
 }
@@ -1944,9 +1973,10 @@ time_utc_offset(VALUE time)
 	struct tm *u, *l;
 	time_t t;
 	long off;
+	IF_HAVE_GMTIME_R(struct tm result);
 	l = &tobj->tm;
 	t = tobj->ts.tv_sec;
-	u = gmtime(&t);
+	u = GMTIME(&t, result);
 	if (!u)
 	    rb_raise(rb_eArgError, "gmtime error");
 	if (l->tm_year != u->tm_year)
@@ -2004,7 +2034,8 @@ time_to_a(VALUE time)
 
 #define SMALLBUF 100
 static int
-rb_strftime(char **buf, const char *format, struct tm *time)
+rb_strftime_alloc(char **buf, const char *format,
+		  struct tm *time, struct timespec *ts, int gmt)
 {
     int size, len, flen;
 
@@ -2014,12 +2045,12 @@ rb_strftime(char **buf, const char *format, struct tm *time)
 	return 0;
     }
     errno = 0;
-    len = strftime(*buf, SMALLBUF, format, time);
+    len = rb_strftime(*buf, SMALLBUF, format, time, ts, gmt);
     if (len != 0 || (**buf == '\0' && errno != ERANGE)) return len;
     for (size=1024; ; size*=2) {
 	*buf = xmalloc(size);
 	(*buf)[0] = '\0';
-	len = strftime(*buf, size, format, time);
+	len = rb_strftime(*buf, size, format, time, ts, gmt);
 	/*
 	 * buflen can be zero EITHER because there's not enough
 	 * room in the string, or because the control command
@@ -2048,12 +2079,20 @@ rb_strftime(char **buf, const char *format, struct tm *time)
  *    %B - The  full  month  name (``January'')
  *    %c - The preferred local date and time representation
  *    %d - Day of the month (01..31)
+ *    %F - Equivalent to %Y-%m-%d (the ISO 8601 date format)
  *    %H - Hour of the day, 24-hour clock (00..23)
  *    %I - Hour of the day, 12-hour clock (01..12)
  *    %j - Day of the year (001..366)
+ *    %L - Millisecond of the second (000..999)
  *    %m - Month of the year (01..12)
  *    %M - Minute of the hour (00..59)
+ *    %N - Fractional seconds digits, default is 9 digits (nanosecond)
+ *            %3N  millisecond (3 digits)
+ *            %6N  microsecond (6 digits)
+ *            %9N  nanosecond (9 digits)
  *    %p - Meridian indicator (``AM''  or  ``PM'')
+ *    %P - Meridian indicator (``am''  or  ``pm'')
+ *    %s - Number of seconds since 1970-01-01 00:00:00 UTC.
  *    %S - Second of the minute (00..60)
  *    %U - Week  number  of the current year,
  *            starting with the first Sunday as the first
@@ -2104,7 +2143,7 @@ time_strftime(VALUE time, VALUE format)
 
 	str = rb_str_new(0, 0);
 	while (p < pe) {
-	    len = rb_strftime(&buf, p, &tobj->tm);
+	    len = rb_strftime_alloc(&buf, p, &tobj->tm, &tobj->ts, tobj->gmt);
 	    rb_str_cat(str, buf, len);
 	    p += strlen(p);
 	    if (buf != buffer) {
@@ -2117,7 +2156,8 @@ time_strftime(VALUE time, VALUE format)
 	return str;
     }
     else {
-	len = rb_strftime(&buf, RSTRING_PTR(format), &tobj->tm);
+	len = rb_strftime_alloc(&buf, RSTRING_PTR(format),
+			       	&tobj->tm, &tobj->ts, tobj->gmt);
     }
     str = rb_str_new(buf, len);
     if (buf != buffer) xfree(buf);
@@ -2140,11 +2180,12 @@ time_mdump(VALUE time)
     int nsec;
     int i;
     VALUE str;
+    IF_HAVE_GMTIME_R(struct tm result);
 
     GetTimeval(time, tobj);
 
     t = tobj->ts.tv_sec;
-    tm = gmtime(&t);
+    tm = GMTIME(&t, result);
 
     if ((tm->tm_year & 0xffff) != tm->tm_year)
         rb_raise(rb_eArgError, "year too big to marshal: %ld", (long)tm->tm_year);
@@ -2339,6 +2380,7 @@ void
 Init_Time(void)
 {
 #undef rb_intern
+#define rb_intern(str) rb_intern_const(str)
 
     id_divmod = rb_intern("divmod");
     id_mul = rb_intern("*");

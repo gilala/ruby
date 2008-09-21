@@ -85,6 +85,10 @@
 /* escape other system UChar definition */
 #ifndef RUBY_DEFINES_H
 #include "ruby/ruby.h"
+#undef xmalloc
+#undef xrealloc
+#undef xcalloc
+#undef xfree
 #endif
 #ifdef ONIG_ESCAPE_UCHAR_COLLISION
 #undef ONIG_ESCAPE_UCHAR_COLLISION
@@ -111,8 +115,7 @@
 
 #ifdef RUBY
 
-#include "vm_core.h"
-#define CHECK_INTERRUPT_IN_MATCH_AT RUBY_VM_CHECK_INTS()
+#define CHECK_INTERRUPT_IN_MATCH_AT rb_thread_check_ints()
 #define onig_st_init_table                  st_init_table
 #define onig_st_init_table_with_size        st_init_table_with_size
 #define onig_st_init_numtable               st_init_numtable
@@ -213,13 +216,7 @@
 
 #include <ctype.h>
 #ifdef HAVE_SYS_TYPES_H
-#ifndef __BORLANDC__
 #include <sys/types.h>
-#endif
-#endif
-
-#ifdef __BORLANDC__
-#include <malloc.h>
 #endif
 
 #ifdef ONIG_DEBUG
@@ -262,13 +259,13 @@
 
 #define GET_ALIGNMENT_PAD_SIZE(addr,pad_size) do {\
   (pad_size) = WORD_ALIGNMENT_SIZE \
-               - ((unsigned int )(addr) % WORD_ALIGNMENT_SIZE);\
+               - ((uintptr_t )(addr) % WORD_ALIGNMENT_SIZE);\
   if ((pad_size) == WORD_ALIGNMENT_SIZE) (pad_size) = 0;\
 } while (0)
 
 #define ALIGNMENT_RIGHT(addr) do {\
   (addr) += (WORD_ALIGNMENT_SIZE - 1);\
-  (addr) -= ((unsigned int )(addr) % WORD_ALIGNMENT_SIZE);\
+  (addr) -= ((uintptr_t )(addr) % WORD_ALIGNMENT_SIZE);\
 } while (0)
 
 #endif /* PLATFORM_UNALIGNED_WORD_ACCESS */
@@ -802,7 +799,7 @@ extern void onig_print_statistics P_((FILE* f));
 extern UChar* onig_error_code_to_format P_((int code));
 extern void  onig_snprintf_with_pattern PV_((UChar buf[], int bufsize, OnigEncoding enc, UChar* pat, UChar* pat_end, const UChar *fmt, ...));
 extern int  onig_bbuf_init P_((BBuf* buf, int size));
-extern int  onig_alloc_init P_((regex_t** reg, OnigOptionType option, OnigCaseFoldType case_fold_flag, OnigEncoding enc, OnigSyntaxType* syntax));
+extern int  onig_alloc_init P_((regex_t** reg, OnigOptionType option, OnigCaseFoldType case_fold_flag, OnigEncoding enc, const OnigSyntaxType* syntax));
 extern int  onig_compile P_((regex_t* reg, const UChar* pattern, const UChar* pattern_end, OnigErrorInfo* einfo));
 extern void onig_chain_reduce P_((regex_t* reg));
 extern void onig_chain_link_add P_((regex_t* to, regex_t* add));
@@ -813,7 +810,7 @@ extern int  onig_is_code_in_cc_len P_((int enclen, OnigCodePoint code, CClassNod
 /* strend hash */
 typedef void hash_table_type;
 #ifdef RUBY
-#include <ruby/st.h>
+#include "ruby/st.h"
 typedef st_data_t hash_data_type;
 #else
 typedef unsigned long hash_data_type;

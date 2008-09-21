@@ -835,7 +835,7 @@ strio_getline(int argc, VALUE *argv, struct StringIO *ptr)
 		str = tmp;
 	    }
 	}
-	else {
+	else if (!NIL_P(str)) {
 	    StringValue(str);
 	}
     }
@@ -862,7 +862,7 @@ strio_getline(int argc, VALUE *argv, struct StringIO *ptr)
 	s = p;
 	while ((p = memchr(p, '\n', e - p)) && (p != e)) {
 	    if (*++p == '\n') {
-		e = p;
+		e = p + 1;
 		break;
 	    }
 	}
@@ -928,7 +928,7 @@ strio_gets(int argc, VALUE *argv, VALUE self)
 static VALUE
 strio_readline(int argc, VALUE *argv, VALUE self)
 {
-    VALUE line = strio_getline(argc, argv, readable(StringIO(self)));
+    VALUE line = strio_gets(argc, argv, self);
     if (NIL_P(line)) rb_eof_error();
     return line;
 }
@@ -1152,7 +1152,7 @@ static VALUE
 strio_sysread(int argc, VALUE *argv, VALUE self)
 {
     VALUE val = strio_read(argc, argv, self);
-    if (NIL_P(val) || RSTRING_LEN(val) == 0) {
+    if (NIL_P(val)) {
 	rb_eof_error();
     }
     return val;

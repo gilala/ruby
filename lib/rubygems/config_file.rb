@@ -18,6 +18,34 @@ class Gem::ConfigFile
   DEFAULT_VERBOSITY = true
   DEFAULT_UPDATE_SOURCES = true
 
+  ##
+  # For Ruby packagers to set configuration defaults.  Set in
+  # rubygems/defaults/operating_system.rb
+
+  OPERATING_SYSTEM_DEFAULTS = {}
+
+  ##
+  # For Ruby implementers to set configuration defaults.  Set in
+  # rubygems/defaults/#{RUBY_ENGINE}.rb
+
+  PLATFORM_DEFAULTS = {}
+
+  system_config_path = 
+    begin
+      require 'Win32API'
+
+      CSIDL_COMMON_APPDATA = 0x0023
+      path = 0.chr * 260
+      SHGetFolderPath = Win32API.new 'shell32', 'SHGetFolderPath', 'LLLLP', 'L'
+      SHGetFolderPath.call 0, CSIDL_COMMON_APPDATA, 0, 1, path
+
+      path.strip
+    rescue LoadError
+      '/etc'
+    end
+
+  SYSTEM_WIDE_CONFIG_FILE = File.join system_config_path, 'gemrc'
+  
   # List of arguments supplied to the config file object.
   attr_reader :args
 
@@ -63,6 +91,7 @@ class Gem::ConfigFile
     arg_list = arg_list.map do |arg|
       if need_config_file_name then
         @config_file_name = arg
+        need_config_file_name = false
         nil
       elsif arg =~ /^--config-file=(.*)/ then
         @config_file_name = $1
@@ -81,18 +110,14 @@ class Gem::ConfigFile
     @verbose = DEFAULT_VERBOSITY
     @update_sources = DEFAULT_UPDATE_SOURCES
 
-    begin
-      # HACK $SAFE ok?
-      @hash = open(config_file_name.dup.untaint) {|f| YAML.load(f) }
-    rescue ArgumentError
-      warn "Failed to load #{config_file_name}"
-    rescue Errno::ENOENT
-      # Ignore missing config file error.
-    rescue Errno::EACCES
-      warn "Failed to load #{config_file_name} due to permissions problem."
-    end
+    operating_system_config = Marshal.load Marshal.dump(OPERATING_SYSTEM_DEFAULTS)
+    platform_config = Marshal.load Marshal.dump(PLATFORM_DEFAULTS)
+    system_config = load_file SYSTEM_WIDE_CONFIG_FILE
+    user_config = load_file config_file_name.dup.untaint
 
-    @hash ||= {}
+    @hash = operating_system_config.merge platform_config
+    @hash = @hash.merge system_config
+    @hash = @hash.merge user_config
 
     # HACK these override command-line args, which is bad
     @backtrace = @hash[:backtrace] if @hash.key? :backtrace
@@ -103,6 +128,16 @@ class Gem::ConfigFile
     @update_sources = @hash[:update_sources] if @hash.key? :update_sources
 
     handle_arguments arg_list
+  end
+
+  def load_file(filename)
+    begin
+      YAML.load(File.read(filename)) if filename and File.exist?(filename)
+    rescue ArgumentError
+      warn "Failed to load #{config_file_name}"
+    rescue Errno::EACCES
+      warn "Failed to load #{config_file_name} due to permissions problem."
+    end or {}
   end
 
   # True if the backtrace option has been specified, or debug is on.

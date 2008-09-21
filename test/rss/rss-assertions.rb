@@ -557,20 +557,16 @@ EOA
 
     def assert_atom_content_inline_other_text(generator)
       _wrap_assertion do
-        require "zlib"
-
-        type = "application/zip"
+        type = "image/png"
         assert_parse(generator.call(<<-EOA), :nothing_raised)
   <content type="#{type}"/>
 EOA
 
-        text = ""
-        char = "a"
-        100.times do |i|
-          text << char
-          char.succ!
+        png_file = File.join(File.dirname(__FILE__), "dot.png")
+        png = File.open(png_file, "rb") do |file|
+          file.read.force_encoding("binary")
         end
-        base64_content = [Zlib::Deflate.deflate(text)].pack("m").delete("\n")
+        base64_content = [png].pack("m").delete("\n")
 
         [false, true].each do |with_space|
           xml_content = base64_content
@@ -591,7 +587,7 @@ EOA
           assert(content.inline_other_base64?)
           assert(!content.out_of_line?)
           assert(!content.have_xml_content?)
-          assert_equal(text, Zlib::Inflate.inflate(content.content))
+          assert_equal(png, content.content)
 
           xml = REXML::Document.new(content.to_s).root
           assert_rexml_element([], {"type" => type}, base64_content, xml)
@@ -1272,22 +1268,32 @@ EOA
                                     invalid_feed_checker=nil)
       _wrap_assertion do
         elements = []
-        invalid_feed = false
-        feed = RSS::Maker.make("atom:#{feed_type}") do |maker|
-          yield maker
-          targets = chain_reader(maker, maker_readers)
-          targets.each do |target|
-            element = maker_extractor.call(target)
-            elements << element if element
+        invalid_feed_exception = nil
+        feed = nil
+        begin
+          feed = RSS::Maker.make("atom:#{feed_type}") do |maker|
+            yield maker
+            targets = chain_reader(maker, maker_readers)
+            targets.each do |target|
+              element = maker_extractor.call(target)
+              elements << element if element
+            end
+            if invalid_feed_checker
+              invalid_feed_exception = invalid_feed_checker.call(targets)
+            end
           end
-          if invalid_feed_checker
-            invalid_feed = invalid_feed_checker.call(targets)
+        rescue RSS::Error
+          if invalid_feed_exception.is_a?(RSS::TooMuchTagError)
+            assert_too_much_tag(invalid_feed_exception.tag,
+                                invalid_feed_exception.parent) do
+              raise
+            end
+          else
+            raise
           end
         end
 
-        if invalid_feed
-          assert_nil(feed)
-        else
+        if invalid_feed_exception.nil?
           actual_elements = chain_reader(feed, feed_readers) || []
           actual_elements = actual_elements.collect do |target|
             feed_extractor.call(target)
@@ -1542,18 +1548,24 @@ EOA
           :length => target.length,
         }
       end
+
+      if feed_readers.first == "entries"
+        parent = "entry"
+      else
+        parent = feed_type
+      end
       invalid_feed_checker = Proc.new do |targets|
         infos = {}
-        invalid = false
+        invalid_exception = nil
         targets.each do |target|
           key = [target.hreflang, target.type]
           if infos.has_key?(key)
-            invalid = true
+            invalid_exception = RSS::TooMuchTagError.new("link", parent)
             break
           end
           infos[key] = true if target.rel.nil? or target.rel == "alternate"
         end
-        invalid
+        invalid_exception
       end
       invalid_feed_checker = nil if allow_duplication
       _assert_maker_atom_elements(feed_type, maker_readers, feed_readers,

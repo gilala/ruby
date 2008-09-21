@@ -22,6 +22,10 @@
 #include <float.h>
 #include <math.h>
 #include "math.h"
+
+#ifdef HAVE_IEEEFP_H
+#include <ieeefp.h>
+#endif
  
 /* #define ENABLE_NUMERIC_STRING */
 
@@ -408,9 +412,15 @@ BigDecimal_mode(int argc, VALUE *argv, VALUE self)
             VpSetException((unsigned short)((val==Qtrue)?(fo|VP_EXCEPTION_INFINITY):
                            (fo&(~VP_EXCEPTION_INFINITY))));
         }
+        fo = VpGetException();
         if(f&VP_EXCEPTION_NaN) {
             VpSetException((unsigned short)((val==Qtrue)?(fo|VP_EXCEPTION_NaN):
                            (fo&(~VP_EXCEPTION_NaN))));
+        }
+        fo = VpGetException();
+        if(f&VP_EXCEPTION_UNDERFLOW) {
+            VpSetException((unsigned short)((val==Qtrue)?(fo|VP_EXCEPTION_UNDERFLOW):
+                           (fo&(~VP_EXCEPTION_UNDERFLOW))));
         }
         fo = VpGetException();
         return INT2FIX(fo);
@@ -726,11 +736,11 @@ BigDecimalCmp(VALUE self, VALUE r,char op)
     GUARD_OBJ(a,GetVpValue(self,1));
     b = GetVpValue(r,0);
     if(!b) {
-	ID f;
+	ID f = 0;
 
 	switch(op)
 	{
-	  case '*': return   INT2FIX(e); /* any op */
+	  case '*': f = rb_intern("<=>");break;
 	  case '=': f = rb_intern("=="); break;
 	  case '!': f = rb_intern("!="); break;
 	  case 'G': f = rb_intern(">="); break;
@@ -1840,7 +1850,7 @@ Init_bigdecimal(void)
 
     /* 
      * 0x01: Determines what happens when the result of a computation is an
-     * underflow (a result too large to be represented). See BigDecimal.mode.
+     * overflow (a result too large to be represented). See BigDecimal.mode.
      */
     rb_define_const(rb_cBigDecimal, "EXCEPTION_OVERFLOW",INT2FIX(VP_EXCEPTION_OVERFLOW));
 
@@ -2091,9 +2101,9 @@ VpGetRoundMode(void)
 VP_EXPORT int
 VpIsRoundMode(unsigned long n)
 {
-    if(n==VP_ROUND_UP      || n!=VP_ROUND_DOWN      ||
-       n==VP_ROUND_HALF_UP || n!=VP_ROUND_HALF_DOWN ||
-       n==VP_ROUND_CEIL    || n!=VP_ROUND_FLOOR     ||
+    if(n==VP_ROUND_UP      || n==VP_ROUND_DOWN      ||
+       n==VP_ROUND_HALF_UP || n==VP_ROUND_HALF_DOWN ||
+       n==VP_ROUND_CEIL    || n==VP_ROUND_FLOOR     ||
        n==VP_ROUND_HALF_EVEN
       ) return 1;
     return 0;
@@ -2192,12 +2202,14 @@ VpGetDoubleNegZero(void) /* Returns the value of -0 */
     return nzero;
 }
 
+#if 0  /* unused */
 VP_EXPORT int
 VpIsNegDoubleZero(double v)
 {
     double z = VpGetDoubleNegZero();
     return MemCmp(&v,&z,sizeof(v))==0;
 }
+#endif
 
 VP_EXPORT int
 VpException(unsigned short f, const char *str,int always)
@@ -3158,7 +3170,10 @@ VpMult(Real *c, Real *a, Real *b)
     /* set LHSV c info */
 
     c->exponent = a->exponent;    /* set exponent */
-    if(!AddExponent(c,b->exponent)) return 0;
+    if(!AddExponent(c,b->exponent)) {
+	if(w) VpFree(c);
+	return 0;
+    }
     VpSetSign(c,VpGetSign(a)*VpGetSign(b));    /* set sign  */
     Carry = 0;
     nc = ind_c = MxIndAB;
@@ -4169,6 +4184,7 @@ Exit:
 /*
  *  m <- ival
  */
+#if 0  /* unused */
 VP_EXPORT void
 VpItoV(Real *m, S_INT ival)
 {
@@ -4226,6 +4242,7 @@ Exit:
 #endif /* _DEBUG */
     return;
 }
+#endif
 
 /*
  * y = SQRT(x),  y*y - x =>0

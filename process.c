@@ -12,7 +12,6 @@
 **********************************************************************/
 
 #include "ruby/ruby.h"
-#include "ruby/signal.h"
 #include "ruby/io.h"
 #include "ruby/util.h"
 #include "vm_core.h"
@@ -163,8 +162,8 @@ get_pid(void)
  *  call-seq:
  *     Process.ppid   => fixnum
  *
- *  Returns the process id of the parent of this process. Always
- *  returns 0 on NT. Not available on all platforms.
+ *  Returns the process id of the parent of this process. Returns
+ *  untrustworthy value on Win32/64. Not available on all platforms.
  *
  *     puts "I am #{Process.pid}"
  *     Process.fork { puts "Dad is #{Process.ppid}" }
@@ -179,11 +178,7 @@ static VALUE
 get_ppid(void)
 {
     rb_secure(2);
-#ifdef _WIN32
-    return INT2FIX(0);
-#else
     return PIDT2NUM(getppid());
-#endif
 }
 
 
@@ -222,23 +217,22 @@ static VALUE rb_cProcessStatus;
 VALUE
 rb_last_status_get(void)
 {
-    return GET_VM()->last_status;
+    return GET_THREAD()->last_status;
 }
 
 void
 rb_last_status_set(int status, rb_pid_t pid)
 {
-    rb_vm_t *vm = GET_VM();
-    vm->last_status = rb_obj_alloc(rb_cProcessStatus);
-    rb_iv_set(vm->last_status, "status", INT2FIX(status));
-    rb_iv_set(vm->last_status, "pid", PIDT2NUM(pid));
+    rb_thread_t *th = GET_THREAD();
+    th->last_status = rb_obj_alloc(rb_cProcessStatus);
+    rb_iv_set(th->last_status, "status", INT2FIX(status));
+    rb_iv_set(th->last_status, "pid", PIDT2NUM(pid));
 }
 
 static void
 rb_last_status_clear(void)
 {
-    rb_vm_t *vm = GET_VM();
-    vm->last_status = Qnil;
+    GET_THREAD()->last_status = Qnil;
 }
 
 /*
@@ -260,6 +254,7 @@ pst_to_i(VALUE st)
     return rb_iv_get(st, "status");
 }
 
+#define PST2INT(st) NUM2INT(pst_to_i(st))
 
 /*
  *  call-seq:
@@ -275,40 +270,35 @@ pst_to_i(VALUE st)
 static VALUE
 pst_pid(VALUE st)
 {
-    return rb_iv_get(st, "pid");
+    return rb_attr_get(st, rb_intern("pid"));
 }
 
 static void
 pst_message(VALUE str, rb_pid_t pid, int status)
 {
-    char buf[256];
-    snprintf(buf, sizeof(buf), "pid %ld", (long)pid);
-    rb_str_cat2(str, buf);
+    rb_str_catf(str, "pid %ld", (long)pid);
     if (WIFSTOPPED(status)) {
 	int stopsig = WSTOPSIG(status);
 	const char *signame = ruby_signal_name(stopsig);
 	if (signame) {
-	    snprintf(buf, sizeof(buf), " stopped SIG%s (signal %d)", signame, stopsig);
+	    rb_str_catf(str, " stopped SIG%s (signal %d)", signame, stopsig);
 	}
 	else {
-	    snprintf(buf, sizeof(buf), " stopped signal %d", stopsig);
+	    rb_str_catf(str, " stopped signal %d", stopsig);
 	}
-	rb_str_cat2(str, buf);
     }
     if (WIFSIGNALED(status)) {
 	int termsig = WTERMSIG(status);
 	const char *signame = ruby_signal_name(termsig);
 	if (signame) {
-	    snprintf(buf, sizeof(buf), " SIG%s (signal %d)", signame, termsig);
+	    rb_str_catf(str, " SIG%s (signal %d)", signame, termsig);
 	}
 	else {
-	    snprintf(buf, sizeof(buf), " signal %d", termsig);
+	    rb_str_catf(str, " signal %d", termsig);
 	}
-	rb_str_cat2(str, buf);
     }
     if (WIFEXITED(status)) {
-	snprintf(buf, sizeof(buf), " exit %d", WEXITSTATUS(status));
-	rb_str_cat2(str, buf);
+	rb_str_catf(str, " exit %d", WEXITSTATUS(status));
     }
 #ifdef WCOREDUMP
     if (WCOREDUMP(status)) {
@@ -333,7 +323,7 @@ pst_to_s(VALUE st)
     VALUE str;
 
     pid = NUM2LONG(pst_pid(st));
-    status = NUM2INT(pst_to_i(st));
+    status = PST2INT(st);
 
     str = rb_str_buf_new(0);
     pst_message(str, pid, status);
@@ -353,10 +343,14 @@ pst_inspect(VALUE st)
 {
     rb_pid_t pid;
     int status;
-    VALUE str;
+    VALUE vpid, str;
 
-    pid = NUM2LONG(pst_pid(st));
-    status = NUM2INT(pst_to_i(st));
+    vpid = pst_pid(st);
+    if (NIL_P(vpid)) {
+        return rb_sprintf("#<%s: uninitialized>", rb_class2name(CLASS_OF(st)));
+    }
+    pid = NUM2LONG(vpid);
+    status = PST2INT(st);
 
     str = rb_sprintf("#<%s: ", rb_class2name(CLASS_OF(st)));
     pst_message(str, pid, status);
@@ -396,7 +390,7 @@ pst_equal(VALUE st1, VALUE st2)
 static VALUE
 pst_bitand(VALUE st1, VALUE st2)
 {
-    int status = NUM2INT(st1) & NUM2INT(st2);
+    int status = PST2INT(st1) & NUM2INT(st2);
 
     return INT2NUM(status);
 }
@@ -417,7 +411,7 @@ pst_bitand(VALUE st1, VALUE st2)
 static VALUE
 pst_rshift(VALUE st1, VALUE st2)
 {
-    int status = NUM2INT(st1) >> NUM2INT(st2);
+    int status = PST2INT(st1) >> NUM2INT(st2);
 
     return INT2NUM(status);
 }
@@ -435,7 +429,7 @@ pst_rshift(VALUE st1, VALUE st2)
 static VALUE
 pst_wifstopped(VALUE st)
 {
-    int status = NUM2INT(st);
+    int status = PST2INT(st);
 
     if (WIFSTOPPED(status))
 	return Qtrue;
@@ -455,7 +449,7 @@ pst_wifstopped(VALUE st)
 static VALUE
 pst_wstopsig(VALUE st)
 {
-    int status = NUM2INT(st);
+    int status = PST2INT(st);
 
     if (WIFSTOPPED(status))
 	return INT2NUM(WSTOPSIG(status));
@@ -474,7 +468,7 @@ pst_wstopsig(VALUE st)
 static VALUE
 pst_wifsignaled(VALUE st)
 {
-    int status = NUM2INT(st);
+    int status = PST2INT(st);
 
     if (WIFSIGNALED(status))
 	return Qtrue;
@@ -495,7 +489,7 @@ pst_wifsignaled(VALUE st)
 static VALUE
 pst_wtermsig(VALUE st)
 {
-    int status = NUM2INT(st);
+    int status = PST2INT(st);
 
     if (WIFSIGNALED(status))
 	return INT2NUM(WTERMSIG(status));
@@ -515,7 +509,7 @@ pst_wtermsig(VALUE st)
 static VALUE
 pst_wifexited(VALUE st)
 {
-    int status = NUM2INT(st);
+    int status = PST2INT(st);
 
     if (WIFEXITED(status))
 	return Qtrue;
@@ -546,7 +540,7 @@ pst_wifexited(VALUE st)
 static VALUE
 pst_wexitstatus(VALUE st)
 {
-    int status = NUM2INT(st);
+    int status = PST2INT(st);
 
     if (WIFEXITED(status))
 	return INT2NUM(WEXITSTATUS(status));
@@ -565,7 +559,7 @@ pst_wexitstatus(VALUE st)
 static VALUE
 pst_success_p(VALUE st)
 {
-    int status = NUM2INT(st);
+    int status = PST2INT(st);
 
     if (!WIFEXITED(status))
 	return Qnil;
@@ -585,7 +579,7 @@ static VALUE
 pst_wcoredump(VALUE st)
 {
 #ifdef WCOREDUMP
-    int status = NUM2INT(st);
+    int status = PST2INT(st);
 
     if (WCOREDUMP(status))
 	return Qtrue;
@@ -615,7 +609,6 @@ rb_waitpid_blocking(void *data)
     struct waitpid_arg *arg = data;
 #endif
 
-    TRAP_BEG;
 #if defined NO_WAITPID
     result = wait(data);
 #elif defined HAVE_WAITPID
@@ -623,7 +616,7 @@ rb_waitpid_blocking(void *data)
 #else  /* HAVE_WAIT4 */
     result = wait4(arg->pid, arg->st, arg->flags, NULL);
 #endif
-    TRAP_END;
+
     return (VALUE)result;
 }
 
@@ -638,7 +631,7 @@ rb_waitpid(rb_pid_t pid, int *st, int flags)
     arg.st = st;
     arg.flags = flags;
     result = (rb_pid_t)rb_thread_blocking_region(rb_waitpid_blocking, &arg,
-						 RB_UBF_DFL, 0);
+						 RUBY_UBF_PROCESS, 0);
     if (result < 0) {
 #if 0
 	if (errno == EINTR) {
@@ -661,7 +654,7 @@ rb_waitpid(rb_pid_t pid, int *st, int flags)
 
     for (;;) {
 	result = (rb_pid_t)rb_thread_blocking_region(rb_waitpid_blocking,
-						     st, RB_UBF_DFL);
+						     st, RUBY_UBF_PROCESS);
 	if (result < 0) {
 	    if (errno == EINTR) {
 		rb_thread_schedule();
@@ -885,6 +878,20 @@ proc_waitall(void)
     return result;
 }
 
+static inline ID
+id_pid(void)
+{
+    ID pid;
+    CONST_ID(pid, "pid");
+    return pid;
+}
+
+static VALUE
+detach_process_pid(VALUE thread)
+{
+    return rb_thread_local_aref(thread, id_pid());
+}
+
 static VALUE
 detach_process_watcher(void *arg)
 {
@@ -900,7 +907,10 @@ detach_process_watcher(void *arg)
 VALUE
 rb_detach_process(rb_pid_t pid)
 {
-    return rb_thread_create(detach_process_watcher, (void*)(VALUE)pid);
+    VALUE watcher = rb_thread_create(detach_process_watcher, (void*)(VALUE)pid);
+    rb_thread_local_aset(watcher, id_pid(), PIDT2NUM(pid));
+    rb_define_singleton_method(watcher, "pid", detach_process_pid, 0);
+    return watcher;
 }
 
 
@@ -1247,7 +1257,7 @@ enum {
     EXEC_OPTION_DUP2,
     EXEC_OPTION_CLOSE,
     EXEC_OPTION_OPEN,
-    EXEC_OPTION_CLOSE_OTHERS,
+    EXEC_OPTION_CLOSE_OTHERS
 };
 
 static VALUE
@@ -1311,7 +1321,7 @@ check_exec_redirect(VALUE key, VALUE val, VALUE options)
         if (NIL_P(flags))
             flags = INT2NUM(O_RDONLY);
         else if (TYPE(flags) == T_STRING)
-            flags = INT2NUM(rb_io_mode_modenum(StringValueCStr(flags)));
+            flags = INT2NUM(rb_io_modestr_oflags(StringValueCStr(flags)));
         else
             flags = rb_to_int(flags);
         perm = rb_ary_entry(val, 2);
@@ -1945,11 +1955,11 @@ run_exec_dup2(VALUE ary, VALUE save)
             goto fail;
     }
 
+    xfree(pairs);
     return 0;
 
-fail:
-    if (pairs)
-        xfree(pairs);
+  fail:
+    xfree(pairs);
     return -1;
 }
 
@@ -2038,12 +2048,13 @@ run_exec_rlimit(VALUE ary, VALUE save)
         int rtype = NUM2INT(RARRAY_PTR(elt)[0]);
         struct rlimit rlim;
         if (!NIL_P(save)) {
+            VALUE tmp, newary;
             if (getrlimit(rtype, &rlim) == -1)
                 return -1;
-            VALUE tmp = hide_obj(rb_ary_new3(3, RARRAY_PTR(elt)[0],
-                                             RLIM2NUM(rlim.rlim_cur),
-                                             RLIM2NUM(rlim.rlim_max)));
-            VALUE newary = rb_ary_entry(save, EXEC_OPTION_RLIMIT);
+            tmp = hide_obj(rb_ary_new3(3, RARRAY_PTR(elt)[0],
+                                       RLIM2NUM(rlim.rlim_cur),
+                                       RLIM2NUM(rlim.rlim_max)));
+            newary = rb_ary_entry(save, EXEC_OPTION_RLIMIT);
             if (NIL_P(newary)) {
                 newary = hide_obj(rb_ary_new());
                 rb_ary_store(save, EXEC_OPTION_RLIMIT, newary);
@@ -2240,7 +2251,7 @@ static int
 pipe_nocrash(int filedes[2], VALUE fds)
 {
     int ret;
-    ret = pipe(filedes);
+    ret = rb_pipe(filedes);
     if (ret == -1)
         return -1;
     if (RTEST(fds)) {
@@ -2398,7 +2409,7 @@ rb_fork(int *status, int (*chfunc)(void*), void *charg, VALUE fds)
 static VALUE
 rb_f_fork(VALUE obj)
 {
-#if defined(HAVE_FORK) && !defined(__NetBSD__)
+#if defined(HAVE_FORK) && !defined(CANNOT_FORK_WITH_PTHREAD)
     rb_pid_t pid;
 
     rb_secure(2);
@@ -2749,7 +2760,7 @@ rb_f_system(int argc, VALUE *argv)
     if (status < 0) {
 	return Qnil;
     }
-    status = NUM2INT(rb_last_status_get());
+    status = PST2INT(rb_last_status_get());
     if (status == EXIT_SUCCESS) return Qtrue;
     return Qfalse;
 }
@@ -2763,6 +2774,10 @@ rb_f_system(int argc, VALUE *argv)
  *
  *  If a hash is given as +env+, the environment is
  *  updated by +env+ before <code>exec(2)</code> in the child process.
+ *  If a pair in +env+ has nil as the value, the variable is deleted.
+ *
+ *    # set FOO as BAR and unset BAZ.
+ *    pid = spawn({"FOO"=>"BAR", "BAZ"=>nil}, command)
  *
  *  If a hash is given as +options+,
  *  it specifies
@@ -5032,10 +5047,10 @@ rb_proc_times(VALUE obj)
 
     times(&buf);
     return rb_struct_new(rb_cProcessTms,
-			 utime = DOUBLE2NUM(buf.tms_utime / hertz),
-			 stime = DOUBLE2NUM(buf.tms_stime / hertz),
-			 cutime = DOUBLE2NUM(buf.tms_cutime / hertz),
-			 sctime = DOUBLE2NUM(buf.tms_cstime / hertz));
+			 utime = DBL2NUM(buf.tms_utime / hertz),
+			 stime = DBL2NUM(buf.tms_stime / hertz),
+			 cutime = DBL2NUM(buf.tms_cutime / hertz),
+			 sctime = DBL2NUM(buf.tms_cstime / hertz));
 #else
     rb_notimplement();
 #endif
@@ -5101,7 +5116,6 @@ Init_process(void)
     rb_define_method(rb_cProcessStatus, "&", pst_bitand, 1);
     rb_define_method(rb_cProcessStatus, ">>", pst_rshift, 1);
     rb_define_method(rb_cProcessStatus, "to_i", pst_to_i, 0);
-    rb_define_method(rb_cProcessStatus, "to_int", pst_to_i, 0);
     rb_define_method(rb_cProcessStatus, "to_s", pst_to_s, 0);
     rb_define_method(rb_cProcessStatus, "inspect", pst_inspect, 0);
 
@@ -5139,12 +5153,12 @@ Init_process(void)
     rb_define_module_function(rb_mProcess, "setrlimit", proc_setrlimit, -1);
 #ifdef RLIM2NUM
     {
-        VALUE inf = RLIM2NUM(RLIM_INFINITY), v;
-        rb_define_const(rb_mProcess, "RLIM_INFINITY", inf);
+        VALUE inf = RLIM2NUM(RLIM_INFINITY);
 #ifdef RLIM_SAVED_MAX
-        v = RLIM_INFINITY == RLIM_SAVED_MAX ? inf : RLIM2NUM(RLIM_SAVED_MAX);
+	VALUE v = RLIM_INFINITY == RLIM_SAVED_MAX ? inf : RLIM2NUM(RLIM_SAVED_MAX);
         rb_define_const(rb_mProcess, "RLIM_SAVED_MAX", v);
 #endif
+        rb_define_const(rb_mProcess, "RLIM_INFINITY", inf);
 #ifdef RLIM_SAVED_CUR
         v = RLIM_INFINITY == RLIM_SAVED_CUR ? inf : RLIM2NUM(RLIM_SAVED_CUR);
         rb_define_const(rb_mProcess, "RLIM_SAVED_CUR", v);

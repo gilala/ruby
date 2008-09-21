@@ -287,10 +287,16 @@ module Net
 
     # Disconnects from the server.
     def disconnect
-      if SSL::SSLSocket === @sock
-        @sock.io.shutdown
-      else
-        @sock.shutdown
+      begin
+        begin
+          # try to call SSL::SSLSocket#io.
+          @sock.io.shutdown
+        rescue NoMethodError
+          # @sock is not an SSL::SSLSocket.
+          @sock.shutdown
+        end
+      rescue Errno::ENOTCONN
+        # ignore `Errno::ENOTCONN: Socket is not connected' on some platforms.
       end
       @receiver_thread.join
       @sock.close

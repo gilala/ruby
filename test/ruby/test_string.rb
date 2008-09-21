@@ -427,16 +427,20 @@ class TestString < Test::Unit::TestCase
 
   def test_clone
     for taint in [ false, true ]
-      for frozen in [ false, true ]
-        a = S("Cool")
-        a.taint  if taint
-        a.freeze if frozen
-        b = a.clone
+      for untrust in [ false, true ]
+        for frozen in [ false, true ]
+          a = S("Cool")
+          a.taint  if taint
+          a.untrust  if untrust
+          a.freeze if frozen
+          b = a.clone
 
-        assert_equal(a, b)
-        assert(a.__id__ != b.__id__)
-        assert_equal(a.frozen?, b.frozen?)
-        assert_equal(a.tainted?, b.tainted?)
+          assert_equal(a, b)
+          assert(a.__id__ != b.__id__)
+          assert_equal(a.frozen?, b.frozen?)
+          assert_equal(a.untrusted?, b.untrusted?)
+          assert_equal(a.tainted?, b.tainted?)
+        end
       end
     end
 
@@ -532,16 +536,20 @@ class TestString < Test::Unit::TestCase
 
   def test_dup
     for taint in [ false, true ]
-      for frozen in [ false, true ]
-        a = S("hello")
-        a.taint  if taint
-        a.freeze if frozen
-        b = a.dup 
+      for untrust in [ false, true ]
+        for frozen in [ false, true ]
+          a = S("hello")
+          a.taint  if taint
+          a.untrust  if untrust
+          a.freeze if frozen
+          b = a.dup 
 
-        assert_equal(a, b)
-        assert(a.__id__ != b.__id__)
-        assert(!b.frozen?)
-        assert_equal(a.tainted?, b.tainted?)
+          assert_equal(a, b)
+          assert(a.__id__ != b.__id__)
+          assert(!b.frozen?)
+          assert_equal(a.tainted?, b.tainted?)
+          assert_equal(a.untrusted?, b.untrusted?)
+        end
       end
     end     
   end
@@ -623,7 +631,9 @@ class TestString < Test::Unit::TestCase
 
     a = S("hello")
     a.taint
+    a.untrust
     assert(a.gsub(/./, S('X')).tainted?)
+    assert(a.gsub(/./, S('X')).untrusted?)
 
     assert_equal("z", "abc".gsub(/./, "a" => "z"), "moved from btest/knownbug")
 
@@ -651,8 +661,10 @@ class TestString < Test::Unit::TestCase
 
     r = S('X')
     r.taint
+    r.untrust
     a.gsub!(/./, r)
     assert(a.tainted?) 
+    assert(a.untrusted?) 
 
     a = S("hello")
     assert_nil(a.sub!(S('X'), S('Y')))
@@ -681,6 +693,18 @@ class TestString < Test::Unit::TestCase
   def test_hash
     assert_equal(S("hello").hash, S("hello").hash)
     assert(S("hello").hash != S("helLO").hash)
+  end
+
+  def test_hash_random
+    str = 'abc'
+    a = [str.hash.to_s]
+    3.times {
+      assert_in_out_err(["-e", "print #{str.dump}.hash"], "") do |r, e|
+        a += r
+        assert_equal([], e)
+      end
+    }
+    assert_not_equal([str.hash.to_s], a.uniq)
   end
 
   def test_hex
@@ -811,9 +835,11 @@ class TestString < Test::Unit::TestCase
 
     a = S("foo")
     a.taint
+    a.untrust
     b = a.replace(S("xyz"))
     assert_equal(S("xyz"), b)
     assert(b.tainted?)
+    assert(b.untrusted?)
 
     s = "foo" * 100
     s2 = ("bar" * 100).dup
@@ -1158,7 +1184,10 @@ class TestString < Test::Unit::TestCase
 
     a = S("hello")
     a.taint
-    assert(a.sub(/./, S('X')).tainted?)
+    a.untrust
+    x = a.sub(/./, S('X'))
+    assert(x.tainted?)
+    assert(x.untrusted?)
 
     o = Object.new
     def o.to_str; "bar"; end
@@ -1199,8 +1228,10 @@ class TestString < Test::Unit::TestCase
 
     r = S('X')
     r.taint
+    r.untrust
     a.sub!(/./, r)
     assert(a.tainted?) 
+    assert(a.untrusted?) 
   end
 
   def test_succ
@@ -1210,7 +1241,9 @@ class TestString < Test::Unit::TestCase
 
     assert_equal(S("124"),  S("123").succ)
     assert_equal(S("1000"), S("999").succ)
+    assert_equal(S("2.000"), S("1.999").succ)
 
+    assert_equal(S("No.10"), S("No.9").succ)
     assert_equal(S("2000aaa"),  S("1999zzz").succ)
     assert_equal(S("AAAAA000"), S("ZZZZ999").succ)
     assert_equal(S("*+"), S("**").succ)
@@ -1257,6 +1290,10 @@ class TestString < Test::Unit::TestCase
     a = S("**")
     assert_equal(S("*+"), a.succ!)
     assert_equal(S("*+"), a)
+
+    a = S("No.9")
+    assert_equal(S("No.10"), a.succ!)
+    assert_equal(S("No.10"), a)
 
     assert_equal("aaaaaaaaaaaa", "zzzzzzzzzzz".succ!)
     assert_equal("aaaaaaaaaaaaaaaaaaaaaaaa", "zzzzzzzzzzzzzzzzzzzzzzz".succ!)

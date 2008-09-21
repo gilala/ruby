@@ -132,7 +132,7 @@
 /* stdio buffers */
 struct __sbuf {
 	unsigned char *_base;
-	int	_size;
+	size_t	_size;
 };
 
 
@@ -165,13 +165,13 @@ struct __sbuf {
 typedef	struct __sFILE {
 	unsigned char *_p;	/* current position in (some) buffer */
 #if 0
-	int	_r;		/* read space left for getc() */
+	size_t	_r;		/* read space left for getc() */
 #endif
-	int	_w;		/* write space left for putc() */
+	size_t	_w;		/* write space left for putc() */
 	short	_flags;		/* flags, below; this FILE is free if 0 */
 	short	_file;		/* fileno, if Unix descriptor, else -1 */
 	struct	__sbuf _bf;	/* the buffer (at least 1 byte, if !NULL) */
-	int	_lbfsize;	/* 0 or -_bf._size, for inline putc */
+	size_t	_lbfsize;	/* 0 or -_bf._size, for inline putc */
 	int	(*vwrite)(/* struct __sFILE*, struct __suio * */);
 } FILE;
 
@@ -357,7 +357,7 @@ BSD__sbprintf(register FILE *fp, const char *fmt, va_list ap)
  * use the given digits.
  */
 static char *
-BSD__uqtoa(register u_quad_t val, char *endp, int base, int octzero, char *xdigs)
+BSD__uqtoa(register u_quad_t val, char *endp, int base, int octzero, const char *xdigs)
 {
 	register char *cp = endp;
 	register long sval;
@@ -535,10 +535,10 @@ BSD_vfprintf(FILE *fp, const char *fmt0, va_list ap)
 	char sign;		/* sign prefix (' ', '+', '-', or \0) */
 #ifdef FLOATING_POINT
 	char softsign;		/* temporary negative sign for floats */
-	double _double;		/* double precision arguments %[eEfgG] */
+	double _double = 0;	/* double precision arguments %[eEfgG] */
 	int expt;		/* integer value of exponent */
-	int expsize;		/* character count for expstr */
-	int ndig;		/* actual number of digits returned by cvt */
+	int expsize = 0;	/* character count for expstr */
+	int ndig = 0;		/* actual number of digits returned by cvt */
 	char expstr[7];		/* buffer for exponent string */
 #endif
 	u_long	ulval;		/* integer arguments %[diouxX] */
@@ -564,9 +564,9 @@ BSD_vfprintf(FILE *fp, const char *fmt0, va_list ap)
 	 * below longer.
 	 */
 #define	PADSIZE	16		/* pad chunk size */
-	static char blanks[PADSIZE] =
+	static const char blanks[PADSIZE] =
 	 {' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '};
-	static char zeroes[PADSIZE] =
+	static const char zeroes[PADSIZE] =
 	 {'0','0','0','0','0','0','0','0','0','0','0','0','0','0','0','0'};
 
 	/*
@@ -622,6 +622,7 @@ BSD_vfprintf(FILE *fp, const char *fmt0, va_list ap)
 	uio.uio_resid = 0;
 	uio.uio_iovcnt = 0;
 	ret = 0;
+	xdigs = 0;
 
 	/*
 	 * Scan the format for conversions (`%' character).

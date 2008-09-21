@@ -271,11 +271,13 @@ binding_clone(VALUE self)
     return bindval;
 }
 
+rb_control_frame_t *vm_get_ruby_level_next_cfp(rb_thread_t *th, rb_control_frame_t *cfp);
+
 VALUE
 rb_binding_new(void)
 {
     rb_thread_t *th = GET_THREAD();
-    rb_control_frame_t *cfp = vm_get_ruby_level_caller_cfp(th, th->cfp);
+    rb_control_frame_t *cfp = vm_get_ruby_level_next_cfp(th, th->cfp);
     VALUE bindval = binding_alloc(rb_cBinding);
     rb_binding_t *bind;
 
@@ -358,6 +360,10 @@ proc_new(VALUE klass, int is_lambda)
 
 	    block = GC_GUARDED_PTR_REF(cfp->lfp[0]);
 
+	    if (block->proc) {
+		return block->proc;
+	    }
+
 	    /* TODO: check more (cfp limit, called via cfunc, etc) */
 	    while (cfp->dfp != block->dfp) {
 		cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
@@ -373,11 +379,12 @@ proc_new(VALUE klass, int is_lambda)
 	}
     }
 
-    if (block->proc) {
-	return block->proc;
+    procval = block->proc;
+    if (procval && RBASIC(procval)->klass == klass) {
+	return procval;
     }
 
-    procval = vm_make_proc(th, cfp, block);
+    procval = vm_make_proc(th, cfp, block, klass);
 
     if (is_lambda) {
 	rb_proc_t *proc;
@@ -459,12 +466,14 @@ proc_lambda(void)
  *  call-seq:
  *     prc.call(params,...)   => obj
  *     prc[params,...]        => obj
+ *     prc.(params,...)       => obj
  *  
  *  Invokes the block, setting the block's parameters to the values in
  *  <i>params</i> using something close to method calling semantics.
  *  Generates a warning if multiple values are passed to a proc that
  *  expects just one (previously this silently converted the parameters
- *  to an array).
+ *  to an array).  Note that prc.() invokes prc.call() with the parameters
+ *  given.  It's a syntax sugar to hide "call".
  *
  *  For procs created using <code>Kernel.proc</code>, generates an
  *  error if the wrong number of parameters
@@ -485,6 +494,14 @@ proc_lambda(void)
  *     prog.rb:5: wrong number of arguments (3 for 2) (ArgumentError)
  *     	from prog.rb:4:in `call'
  *     	from prog.rb:5
+ */
+
+/*
+ *  call-seq:
+ *     prc === obj   => obj
+ *  
+ *  Invokes the block, with <i>obj</i> as the block's parameter.  It is
+ *  to allow a proc object to be a target of when clause in the case statement.
  */
 
 static VALUE
@@ -522,15 +539,18 @@ rb_proc_call(VALUE self, VALUE args)
 VALUE
 rb_proc_call_with_block(VALUE self, int argc, VALUE *argv, VALUE pass_procval)
 {
-    rb_proc_t *proc, *pass_proc = 0;
+    rb_proc_t *proc;
+    rb_block_t *block = 0;
     GetProcPtr(self, proc);
 
     if (!NIL_P(pass_procval)) {
+	rb_proc_t *pass_proc;
 	GetProcPtr(pass_procval, pass_proc);
+	block = &pass_proc->block;
     }
 
     return vm_invoke_proc(GET_THREAD(), proc, proc->block.self,
-			  argc, argv, &pass_proc->block);
+			  argc, argv, block);
 }
 
 /*
@@ -1735,6 +1755,7 @@ Init_Proc(void)
     rb_define_singleton_method(rb_cProc, "new", rb_proc_s_new, -1);
     rb_define_method(rb_cProc, "call", proc_call, -1);
     rb_define_method(rb_cProc, "[]", proc_call, -1);
+    rb_define_method(rb_cProc, "===", proc_call, -1);
     rb_define_method(rb_cProc, "yield", proc_call, -1);
     rb_define_method(rb_cProc, "to_proc", proc_to_proc, 0);
     rb_define_method(rb_cProc, "arity", proc_arity, 0);
@@ -1754,9 +1775,10 @@ Init_Proc(void)
     rb_define_method(rb_eLocalJumpError, "reason", localjump_reason, 0);
 
     rb_eSysStackError = rb_define_class("SystemStackError", rb_eException);
-    sysstack_error = rb_exc_new2(rb_eSysStackError, "stack level too deep");
+    sysstack_error = rb_exc_new3(rb_eSysStackError,
+				 rb_obj_freeze(rb_str_new2("stack level too deep")));
     OBJ_TAINT(sysstack_error);
-    rb_register_mark_object(sysstack_error);
+    OBJ_FREEZE(sysstack_error);
 
     /* utility functions */
     rb_define_global_function("proc", rb_block_proc, 0);

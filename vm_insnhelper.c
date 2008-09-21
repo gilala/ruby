@@ -188,7 +188,7 @@ vm_callee_setup_arg_complex(rb_thread_t *th, const rb_iseq_t * iseq,
 	    if (blockptr->proc == 0) {
 		rb_proc_t *proc;
 
-		blockval = vm_make_proc(th, th->cfp, blockptr);
+		blockval = vm_make_proc(th, th->cfp, blockptr, rb_cProc);
 
 		GetProcPtr(blockval, proc);
 		*block = &proc->block;
@@ -221,7 +221,7 @@ caller_setup_args(const rb_thread_t *th, rb_control_frame_t *cfp, VALUE flag,
 	    if (proc != Qnil) {
 		if (!rb_obj_is_proc(proc)) {
 		    VALUE b = rb_check_convert_type(proc, T_DATA, "Proc", "to_proc");
-		    if (NIL_P(b)) {
+		    if (NIL_P(b) || !rb_obj_is_proc(b)) {
 			rb_raise(rb_eTypeError,
 				 "wrong argument type %s (expected Proc)",
 				 rb_obj_classname(proc));
@@ -409,14 +409,15 @@ static inline VALUE
 vm_method_missing(rb_thread_t *th, ID id, VALUE recv,
 		  int num, rb_block_t *blockptr, int opt)
 {
-    rb_control_frame_t * const reg_cfp = th->cfp;
-    VALUE *argv = STACK_ADDR_FROM_TOP(num + 1);
     VALUE val;
+    rb_control_frame_t * const reg_cfp = th->cfp;
+    VALUE *argv = ALLOCA_N(VALUE, num + 1);
+    MEMCPY(argv, STACK_ADDR_FROM_TOP(num + 1), VALUE, num + 1);
     argv[0] = ID2SYM(id);
     th->method_missing_reason = opt;
     th->passed_block = blockptr;
-    val = rb_funcall2(recv, idMethodMissing, num + 1, argv);
     POPN(num + 1);
+    val = rb_funcall2(recv, idMethodMissing, num + 1, argv);
     return val;
 }
 
@@ -518,9 +519,10 @@ vm_call_method(rb_thread_t * const th, rb_control_frame_t * const cfp,
 		break;
 	      }
 	      case NODE_BMETHOD:{
-		VALUE *argv = cfp->sp - num;
-		val = vm_call_bmethod(th, id, node->nd_cval, recv, klass, num, argv, blockptr);
+		VALUE *argv = ALLOCA_N(VALUE, num);
+		MEMCPY(argv, cfp->sp - num, VALUE, num);
 		cfp->sp += - num - 1;
+		val = vm_call_bmethod(th, id, node->nd_cval, recv, klass, num, argv, blockptr);
 		break;
 	      }
 	      case NODE_ZSUPER:{
@@ -662,7 +664,7 @@ vm_yield_with_cfunc(rb_thread_t *th, const rb_block_t *block,
     }
 
     if (blockptr) {
-	blockarg = vm_make_proc(th, th->cfp, blockptr);
+	blockarg = vm_make_proc(th, th->cfp, blockptr, rb_cProc);
     }
     else {
 	blockarg = Qnil;
@@ -704,6 +706,7 @@ vm_yield_setup_args(rb_thread_t * const th, const rb_iseq_t *iseq,
 	int i;
 	int argc = orig_argc;
 	const int m = iseq->argc;
+	VALUE ary;
 
 	th->mark_stack_len = argc;
 
@@ -714,8 +717,7 @@ vm_yield_setup_args(rb_thread_t * const th, const rb_iseq_t *iseq,
 	 */
 	if (!(iseq->arg_simple & 0x02) &&
 	    (m + iseq->arg_post_len) > 0 &&
-	    argc == 1 && TYPE(argv[0]) == T_ARRAY) {
-	    VALUE ary = argv[0];
+	    argc == 1 && !NIL_P(ary = rb_check_array_type(argv[0]))) {
 	    th->mark_stack_len = argc = RARRAY_LEN(ary);
 
 	    CHECK_STACK_OVERFLOW(th->cfp, argc);
@@ -1044,7 +1046,8 @@ vm_get_cvar_base(NODE *cref)
 {
     VALUE klass;
 
-    while (cref && cref->nd_next && (NIL_P(cref->nd_clss) || FL_TEST(cref->nd_clss, FL_SINGLETON))) {
+    while (cref && cref->nd_next &&
+	   (NIL_P(cref->nd_clss) || FL_TEST(cref->nd_clss, FL_SINGLETON))) {
 	cref = cref->nd_next;
 
 	if (!cref->nd_next) {
@@ -1058,46 +1061,6 @@ vm_get_cvar_base(NODE *cref)
 	rb_raise(rb_eTypeError, "no class variables available");
     }
     return klass;
-}
-
-static inline void
-vm_define_method(rb_thread_t *th, VALUE obj, ID id, rb_iseq_t *miseq,
-		 rb_num_t is_singleton, NODE *cref)
-{
-    NODE *newbody;
-    VALUE klass = cref->nd_clss;
-    int noex = cref->nd_visi;
-
-    if (NIL_P(klass)) {
-	rb_raise(rb_eTypeError, "no class/module to add method");
-    }
-
-    if (is_singleton) {
-	if (FIXNUM_P(obj) || SYMBOL_P(obj)) {
-	    rb_raise(rb_eTypeError,
-		     "can't define singleton method \"%s\" for %s",
-		     rb_id2name(id), rb_obj_classname(obj));
-	}
-
-	if (OBJ_FROZEN(obj)) {
-	    rb_error_frozen("object");
-	}
-
-	klass = rb_singleton_class(obj);
-	noex = NOEX_PUBLIC;
-    }
-
-    /* dup */
-    COPY_CREF(miseq->cref_stack, cref);
-    miseq->klass = klass;
-    miseq->defined_method_id = id;
-    newbody = NEW_NODE(RUBY_VM_METHOD_NODE, 0, miseq->self, 0);
-    rb_add_method(klass, id, newbody, noex);
-
-    if (!is_singleton && noex == NOEX_MODFUNC) {
-	rb_add_method(rb_singleton_class(klass), id, newbody, NOEX_PUBLIC);
-    }
-    INC_VM_STATE_VERSION();
 }
 
 static inline NODE *
@@ -1221,7 +1184,7 @@ vm_throw(rb_thread_t *th, rb_control_frame_t *reg_cfp,
 			if (cfp->dfp == dfp) {
 			    goto search_parent;
 			}
-			cfp++;
+			cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
 		    }
 		    rb_bug("VM (throw): can't find break base.");
 		}
@@ -1229,7 +1192,7 @@ vm_throw(rb_thread_t *th, rb_control_frame_t *reg_cfp,
 		if (VM_FRAME_TYPE(cfp) == VM_FRAME_MAGIC_LAMBDA) {
 		    /* lambda{... break ...} */
 		    is_orphan = 0;
-		    pt = GET_LFP();
+		    pt = cfp->dfp;
 		    state = TAG_RETURN;
 		}
 		else {
@@ -1261,7 +1224,7 @@ vm_throw(rb_thread_t *th, rb_control_frame_t *reg_cfp,
 			    is_orphan = 0;
 			    break;
 			}
-			cfp++;
+			cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
 		    }
 		}
 
@@ -1278,32 +1241,37 @@ vm_throw(rb_thread_t *th, rb_control_frame_t *reg_cfp,
 	    else if (state == TAG_RETURN) {
 		rb_control_frame_t *cfp = GET_CFP();
 		VALUE *dfp = GET_DFP();
-		int is_orphan = 1;
+		VALUE * const lfp = GET_LFP();
 
-		/**
-		 * check orphan:
-		 */
+		/* check orphan and get dfp */
 		while ((VALUE *) cfp < th->stack + th->stack_size) {
-		    if (GET_DFP() == dfp) {
+		    if (cfp->lfp == lfp) {
 			if (VM_FRAME_TYPE(cfp) == VM_FRAME_MAGIC_LAMBDA) {
-			    /* in lambda */
-			    is_orphan = 0;
-			    break;
+			    VALUE *tdfp = dfp;
+
+			    while (lfp != tdfp) {
+				if (cfp->dfp == tdfp) {
+				    /* in lambda */
+				    dfp = cfp->dfp;
+				    goto valid_return;
+				}
+				tdfp = GC_GUARDED_PTR_REF((VALUE *)*dfp);
+			    }
 			}
 		    }
-		    if (GET_LFP() == cfp->lfp &&
-			cfp->iseq->type == ISEQ_TYPE_METHOD) {
-			is_orphan = 0;
-			break;
+
+		    if (cfp->dfp == lfp && cfp->iseq->type == ISEQ_TYPE_METHOD) {
+			dfp = lfp;
+			goto valid_return;
 		    }
-		    cfp++;
+
+		    cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
 		}
 
-		if (is_orphan) {
-		    vm_localjump_error("unexpected return", throwobj, TAG_RETURN);
-		}
+		vm_localjump_error("unexpected return", throwobj, TAG_RETURN);
 
-		pt = GET_LFP();
+	      valid_return:
+		pt = dfp;
 	    }
 	    else {
 		rb_bug("isns(throw): unsupport throw type");
@@ -1406,7 +1374,11 @@ check_cfunc(const NODE *mn, const void *func)
     }
 }
 
-static inline VALUE
+static
+#ifndef NO_BIG_INLINE
+inline
+#endif
+VALUE
 opt_eq_func(VALUE recv, VALUE obj, IC ic)
 {
     VALUE val = Qundef;

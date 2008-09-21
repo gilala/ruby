@@ -3,7 +3,6 @@ require File.join(File.expand_path(File.dirname(__FILE__)), 'gemutilities')
 require 'rubygems/ext'
 
 class TestGemExtRakeBuilder < RubyGemTestCase
-
   def setup
     super
 
@@ -26,15 +25,17 @@ class TestGemExtRakeBuilder < RubyGemTestCase
     output = []
     realdir = nil # HACK /tmp vs. /private/tmp
 
-    Dir.chdir @ext do
-      realdir = Dir.pwd
-      Gem::Ext::RakeBuilder.build 'mkrf_conf.rb', nil, @dest_path, output
+    build_rake_in do
+      Dir.chdir @ext do
+        realdir = Dir.pwd
+        Gem::Ext::RakeBuilder.build 'mkrf_conf.rb', nil, @dest_path, output
+      end
     end
 
     expected = [
-      "#{Gem.ruby} mkrf_conf.rb",
+      "#{@@ruby} mkrf_conf.rb",
       "",
-      "rake RUBYARCHDIR=#{@dest_path} RUBYLIBDIR=#{@dest_path}",
+      "#{@@rake} RUBYARCHDIR=#{@dest_path} RUBYLIBDIR=#{@dest_path}",
       "(in #{realdir})\n"
     ]
 
@@ -53,17 +54,19 @@ class TestGemExtRakeBuilder < RubyGemTestCase
     output = []
 
     error = assert_raise Gem::InstallError do
-      Dir.chdir @ext do
-        Gem::Ext::RakeBuilder.build "mkrf_conf.rb", nil, @dest_path, output
+      build_rake_in do
+        Dir.chdir @ext do
+          Gem::Ext::RakeBuilder.build "mkrf_conf.rb", nil, @dest_path, output
+        end
       end
     end
 
     expected = <<-EOF.strip
 rake failed:
 
-#{Gem.ruby} mkrf_conf.rb
+#{@@ruby} mkrf_conf.rb
 
-rake RUBYARCHDIR=#{@dest_path} RUBYLIBDIR=#{@dest_path}
+#{@@rake} RUBYARCHDIR=#{@dest_path} RUBYLIBDIR=#{@dest_path}
     EOF
 
     assert_equal expected, error.message.split("\n")[0..4].join("\n")

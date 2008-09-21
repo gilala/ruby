@@ -35,6 +35,7 @@ static const union {
         RUBY_FL_RESERVED    = FL_RESERVED,
         RUBY_FL_FINALIZE    = FL_FINALIZE,
         RUBY_FL_TAINT       = FL_TAINT,
+        RUBY_FL_UNTRUSTED   = FL_UNTRUSTED,
         RUBY_FL_EXIVAR      = FL_EXIVAR,
         RUBY_FL_FREEZE      = FL_FREEZE,
         RUBY_FL_SINGLETON   = FL_SINGLETON,
@@ -57,17 +58,16 @@ static const union {
         RUBY_FL_USER16      = FL_USER16,
         RUBY_FL_USER17      = FL_USER17,
         RUBY_FL_USER18      = FL_USER18,
-        RUBY_FL_USER19      = FL_USER19,
         RUBY_FL_USHIFT      = FL_USHIFT,
         RUBY_NODE_TYPESHIFT = NODE_TYPESHIFT,
         RUBY_NODE_TYPEMASK  = NODE_TYPEMASK,
         RUBY_NODE_LSHIFT    = NODE_LSHIFT,
         RUBY_NODE_LMASK     = NODE_LMASK,
-        RUBY_NODE_FL_NEWLINE   = NODE_FL_NEWLINE,
+        RUBY_NODE_FL_NEWLINE   = NODE_FL_NEWLINE
     } various;
 } dummy_gdb_enums;
 
-const VALUE RUBY_FL_USER20    = FL_USER20;
+const VALUE RUBY_FL_USER19    = FL_USER19;
 
 int
 ruby_debug_print_indent(int level, int debug_level, int indent_level)
@@ -141,13 +141,13 @@ set_debug_option(const char *str, int len, void *arg)
 #define SET_WHEN(name, var) do {	    \
 	if (len == sizeof(name) - 1 &&	    \
 	    strncmp(str, name, len) == 0) { \
-	    extern int ruby_##var;	    \
-	    ruby_##var = 1;		    \
+	    extern int var;	    \
+	    var = 1;		    \
 	    return;			    \
 	}				    \
     } while (0)
-    SET_WHEN("gc_stress", gc_stress);
-    SET_WHEN("core", enable_coredump);
+    SET_WHEN("gc_stress", *ruby_initial_gc_stress_ptr);
+    SET_WHEN("core", ruby_enable_coredump);
     fprintf(stderr, "unexpected debug option: %.*s\n", len, str);
 }
 

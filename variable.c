@@ -245,7 +245,7 @@ rb_path2class(const char *path)
 	}
 	if (!rb_const_defined(c, id)) {
 	  undefined_class:
-	    rb_raise(rb_eArgError, "undefined class/module %.*s", p-path, path);
+	    rb_raise(rb_eArgError, "undefined class/module %.*s", (int)(p-path), path);
 	}
 	c = rb_const_get_at(c, id);
 	switch (TYPE(c)) {
@@ -594,6 +594,7 @@ rb_f_untrace_var(int argc, VALUE *argv)
     struct trace_var *trace;
     st_data_t data;
 
+    rb_secure(4);
     rb_scan_args(argc, argv, "11", &var, &cmd);
     id = rb_to_id(var);
     if (!st_lookup(rb_global_tbl, id, &data)) {
@@ -994,7 +995,7 @@ rb_ivar_set(VALUE obj, ID id, VALUE val)
     long i, len;
     int ivar_extended;
 
-    if (!OBJ_TAINTED(obj) && rb_safe_level() >= 4)
+    if (!OBJ_UNTRUSTED(obj) && rb_safe_level() >= 4)
 	rb_raise(rb_eSecurityError, "Insecure: can't modify instance variable");
     if (OBJ_FROZEN(obj)) rb_error_frozen("object");
     switch (TYPE(obj)) {
@@ -1215,7 +1216,7 @@ rb_obj_remove_instance_variable(VALUE obj, VALUE name)
     struct st_table *iv_index_tbl;
     st_data_t index;
 
-    if (!OBJ_TAINTED(obj) && rb_safe_level() >= 4)
+    if (!OBJ_UNTRUSTED(obj) && rb_safe_level() >= 4)
 	rb_raise(rb_eSecurityError, "Insecure: can't modify instance variable");
     if (OBJ_FROZEN(obj)) rb_error_frozen("object");
     if (!rb_is_instance_id(id)) {
@@ -1504,7 +1505,7 @@ rb_mod_remove_const(VALUE mod, VALUE name)
     if (!rb_is_const_id(id)) {
 	rb_name_error(id, "`%s' is not allowed as a constant name", rb_id2name(id));
     }
-    if (!OBJ_TAINTED(mod) && rb_safe_level() >= 4)
+    if (!OBJ_UNTRUSTED(mod) && rb_safe_level() >= 4)
 	rb_raise(rb_eSecurityError, "Insecure: can't remove constant");
     if (OBJ_FROZEN(mod)) rb_error_frozen("class/module");
 
@@ -1666,7 +1667,7 @@ mod_av_set(VALUE klass, ID id, VALUE val, int isconst)
 {
     const char *dest = isconst ? "constant" : "class variable";
 
-    if (!OBJ_TAINTED(klass) && rb_safe_level() >= 4)
+    if (!OBJ_UNTRUSTED(klass) && rb_safe_level() >= 4)
       rb_raise(rb_eSecurityError, "Insecure: can't set %s", dest);
     if (OBJ_FROZEN(klass)) {
 	if (BUILTIN_TYPE(klass) == T_MODULE) {
@@ -1921,7 +1922,7 @@ rb_mod_remove_cvar(VALUE mod, VALUE name)
     if (!rb_is_class_id(id)) {
 	rb_name_error(id, "wrong class variable name %s", rb_id2name(id));
     }
-    if (!OBJ_TAINTED(mod) && rb_safe_level() >= 4)
+    if (!OBJ_UNTRUSTED(mod) && rb_safe_level() >= 4)
 	rb_raise(rb_eSecurityError, "Insecure: can't remove class variable");
     if (OBJ_FROZEN(mod)) rb_error_frozen("class/module");
 

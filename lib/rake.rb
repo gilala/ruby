@@ -917,7 +917,7 @@ module FileUtils
     if args.length > 1 then
       sh(*([RUBY] + args + [options]), &block)
     else
-      sh("#{RUBY} #{args.first}", options, &block)
+      sh("#{RUBY.sub(/.*\s.*/m, '"\&"')} #{args.first}", options, &block)
     end
   end
 
@@ -1984,13 +1984,18 @@ module Rake
       puts
       puts "Options are ..."
       puts
-      OPTIONS.sort.each do |long, short, mode, desc|
-        if mode == GetoptLong::REQUIRED_ARGUMENT
+      OPTIONS.sort.each do |long, *short, mode, desc|
+        case mode
+        when GetoptLong::REQUIRED_ARGUMENT
           if desc =~ /\b([A-Z]{2,})\b/
             long = long + "=#{$1}"
           end
+        when GetoptLong::OPTIONAL_ARGUMENT
+          if desc =~ /\b([A-Z]{2,})\b/
+            long = long + "[=#{$1}]"
+          end
         end
-        printf "  %-20s (%s)\n", long, short
+        printf "  %-20s (%s)\n", long, short.join(", ")
         printf "      %s\n", desc
       end
     end

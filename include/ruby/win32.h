@@ -70,7 +70,7 @@ extern "C++" {			/* template without extern "C++" */
 #endif
 #include <io.h>
 #include <malloc.h>
-#ifdef __MINGW32__
+#if defined __MINGW32__ || __BORLANDC__ >= 0x0580
 # include <stdint.h>
 #else
 # if !defined(_INTPTR_T_DEFINED)
@@ -134,12 +134,14 @@ extern DWORD rb_w32_osid(void);
 #define utime(_p, _t)		rb_w32_utime(_p, _t)
 #define lseek(_f, _o, _w)	_lseeki64(_f, _o, _w)
 
-#define pipe(p)			_pipe(p, 2048L, O_BINARY)
+#define pipe(p)			rb_w32_pipe(p)
+#define open			rb_w32_open
 #define close(h)		rb_w32_close(h)
 #define fclose(f)		rb_w32_fclose(f)
 #define read(f, b, s)		rb_w32_read(f, b, s)
 #define write(f, b, s)		rb_w32_write(f, b, s)
 #define getpid()		rb_w32_getpid()
+#define getppid()		rb_w32_getppid()
 #define sleep(x)		rb_w32_Sleep((x)*1000)
 #define Sleep(msec)		(void)rb_w32_Sleep(msec)
 #define fstat(fd,st)		_fstati64(fd,st)
@@ -262,6 +264,7 @@ extern rb_pid_t rb_w32_aspawn(int, const char *, char *const *);
 extern int kill(int, int);
 extern int fcntl(int, int, ...);
 extern rb_pid_t rb_w32_getpid(void);
+extern rb_pid_t rb_w32_getppid(void);
 #if !defined(__BORLANDC__) && !defined(_WIN32_WCE)
 extern int rb_w32_isatty(int);
 #endif
@@ -541,8 +544,10 @@ HANDLE GetCurrentThreadHandle(void);
 int  rb_w32_sleep(unsigned long msec);
 int  rb_w32_putc(int, FILE*);
 int  rb_w32_getc(FILE*);
+int  rb_w32_open(const char *, int, ...);
 int  rb_w32_close(int);
 int  rb_w32_fclose(FILE*);
+int  rb_w32_pipe(int[2]);
 size_t rb_w32_read(int, void *, size_t);
 size_t rb_w32_write(int, const void *, size_t);
 int  rb_w32_utime(const char *, const struct utimbuf *);

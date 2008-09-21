@@ -24,6 +24,7 @@
 #include <olectl.h>
 #include <ole2.h>
 #include <stdlib.h>
+#include <math.h>
 #ifdef HAVE_STDARG_PROTOTYPES
 #include <stdarg.h>
 #define va_init_list(a,b) va_start(a,b)
@@ -31,6 +32,7 @@
 #include <varargs.h>
 #define va_init_list(a,b) va_start(a)
 #endif
+#include <objidl.h>
 
 #define DOUT fprintf(stderr,"[%d]\n",__LINE__)
 #define DOUTS(x) fprintf(stderr,"[%d]:" #x "=%s\n",__LINE__,x)
@@ -116,7 +118,7 @@
 
 #define WC2VSTR(x) ole_wc2vstr((x), TRUE)
 
-#define WIN32OLE_VERSION "1.1.4"
+#define WIN32OLE_VERSION "1.3.1"
 
 typedef HRESULT (STDAPICALLTYPE FNCOCREATEINSTANCEEX)
     (REFCLSID, IUnknown*, DWORD, COSERVERINFO*, DWORD, MULTI_QI*);
@@ -201,6 +203,10 @@ static rb_encoding *cWIN32OLE_enc;
 static UINT g_cp_to_check = CP_ACP;
 static char g_lcid_to_check[8 + 1];
 static VARTYPE g_nil_to = VT_ERROR;
+static st_table *enc2cp_table;
+static IMessageFilterVtbl message_filter;
+static IMessageFilter imessage_filter = { &message_filter };
+static IMessageFilter* previous_filter;
 
 struct oledata {
     IDispatch *pDispatch;
@@ -264,6 +270,7 @@ static UINT ole_encoding2cp(rb_encoding *enc);
 static UINT ole_init_cp();
 static char *ole_wc2mb(LPWSTR pw);
 static VALUE ole_hresult2msg(HRESULT hr);
+static void ole_freeexceptinfo(EXCEPINFO *pExInfo);
 static VALUE ole_excepinfo2msg(EXCEPINFO *pExInfo);
 static void ole_raise(HRESULT hr, VALUE ecs, const char *fmt, ...);
 static void ole_initialize();
@@ -273,6 +280,7 @@ static void oletype_free(struct oletypedata *poletype);
 static void olemethod_free(struct olemethoddata *polemethod);
 static void olevariable_free(struct olevariabledata *polevar);
 static void oleparam_free(struct oleparamdata *pole);
+static LPWSTR ole_vstr2wc(VALUE vstr);
 static LPWSTR ole_mb2wc(char *pm, int len);
 static VALUE ole_wc2vstr(LPWSTR pw, BOOL isfree);
 static VALUE ole_ary_m_entry(VALUE val, long *pid);
@@ -360,6 +368,7 @@ static VALUE ole_typelib_from_itypelib(ITypeLib *pTypeLib);
 static VALUE ole_typelib_from_itypeinfo(ITypeInfo *pTypeInfo);
 static VALUE fole_typelib(VALUE self);
 static VALUE fole_query_interface(VALUE self, VALUE str_iid);
+static VALUE fole_respond_to(VALUE self, VALUE method);
 static HRESULT ole_docinfo_from_type(ITypeInfo *pTypeInfo, BSTR *name, BSTR *helpstr, DWORD *helpcontext, BSTR *helpfile);
 static VALUE ole_usertype2val(ITypeInfo *pTypeInfo, TYPEDESC *pTypeDesc, VALUE typedetails);
 static VALUE ole_ptrtype2val(ITypeInfo *pTypeInfo, TYPEDESC *pTypeDesc, VALUE typedetails);
@@ -415,8 +424,11 @@ static VALUE foletype_helpfile(VALUE self);
 static VALUE ole_type_helpcontext(ITypeInfo *pTypeInfo);
 static VALUE foletype_helpcontext(VALUE self);
 static VALUE foletype_ole_typelib(VALUE self);
-static VALUE ole_type_impl_ole_types(ITypeInfo *pTypeInfo);
+static VALUE ole_type_impl_ole_types(ITypeInfo *pTypeInfo, int implflags);
 static VALUE foletype_impl_ole_types(VALUE self);
+static VALUE foletype_source_ole_types(VALUE self);
+static VALUE foletype_default_event_sources(VALUE self);
+static VALUE foletype_default_ole_types(VALUE self);
 static VALUE foletype_inspect(VALUE self);
 static VALUE ole_variables(ITypeInfo *pTypeInfo);
 static VALUE foletype_variables(VALUE self);
@@ -487,8 +499,16 @@ static VALUE foleparam_default(VALUE self);
 static VALUE foleparam_inspect(VALUE self);
 static long ole_search_event_at(VALUE ary, VALUE ev);
 static VALUE ole_search_event(VALUE ary, VALUE ev, BOOL  *is_default);
+static VALUE ole_search_handler_method(VALUE handler, VALUE ev, BOOL *is_default_handler);
+static void ole_delete_event(VALUE ary, VALUE ev);
+static void hash2ptr_dispparams(VALUE hash, ITypeInfo *pTypeInfo, DISPID dispid, DISPPARAMS *pdispparams);
+static VALUE hash2result(VALUE hash);
 static void ary2ptr_dispparams(VALUE ary, DISPPARAMS *pdispparams);
+static VALUE exec_callback(VALUE arg);
+static VALUE rescue_callback(VALUE arg);
 static HRESULT find_iid(VALUE ole, char *pitf, IID *piid, ITypeInfo **ppTypeInfo);
+static HRESULT find_coclass(ITypeInfo *pTypeInfo, TYPEATTR *pTypeAttr, ITypeInfo **pTypeInfo2, TYPEATTR **pTypeAttr2);
+static HRESULT find_default_source_from_typeinfo(ITypeInfo *pTypeInfo, TYPEATTR *pTypeAttr, ITypeInfo **ppTypeInfo);
 static HRESULT find_default_source(VALUE ole, IID *piid, ITypeInfo **ppTypeInfo);
 static void ole_event_free(struct oleeventdata *poleev);
 static VALUE fev_s_allocate(VALUE klass);
@@ -499,7 +519,10 @@ static void add_event_call_back(VALUE obj, VALUE event, VALUE data);
 static VALUE ev_on_event(int argc, VALUE *argv, VALUE self, VALUE is_ary_arg);
 static VALUE fev_on_event(int argc, VALUE *argv, VALUE self);
 static VALUE fev_on_event_with_outargs(int argc, VALUE *argv, VALUE self);
+static VALUE fev_off_event(int argc, VALUE *argv, VALUE self);
 static VALUE fev_unadvise(VALUE self);
+static VALUE fev_set_handler(VALUE self, VALUE val);
+static VALUE fev_get_handler(VALUE self);
 static VALUE evs_push(VALUE ev);
 static VALUE evs_delete(long i);
 static VALUE evs_entry(long i);
@@ -517,7 +540,104 @@ static VALUE folevariant_ary_aset(int argc, VALUE *argv, VALUE self);
 static VALUE folevariant_value(VALUE self);
 static VALUE folevariant_vartype(VALUE self);
 static VALUE folevariant_set_value(VALUE self, VALUE val);
+static void init_enc2cp();
+static void free_enc2cp();
   
+static HRESULT (STDMETHODCALLTYPE mf_QueryInterface)(
+    IMessageFilter __RPC_FAR * This,
+    /* [in] */ REFIID riid,
+    /* [iid_is][out] */ void __RPC_FAR *__RPC_FAR *ppvObject)
+{
+    if (MEMCMP(riid, &IID_IUnknown, GUID, 1) == 0
+        || MEMCMP(riid, &IID_IMessageFilter, GUID, 1) == 0)
+    {
+        *ppvObject = &message_filter;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+
+static ULONG (STDMETHODCALLTYPE mf_AddRef)( 
+    IMessageFilter __RPC_FAR * This)
+{
+    return 1;
+}
+        
+static ULONG (STDMETHODCALLTYPE mf_Release)( 
+    IMessageFilter __RPC_FAR * This)
+{
+    return 1;
+}
+
+static DWORD (STDMETHODCALLTYPE mf_HandleInComingCall)(
+    IMessageFilter __RPC_FAR * pThis,
+    DWORD dwCallType,      //Type of incoming call
+    HTASK threadIDCaller,  //Task handle calling this task
+    DWORD dwTickCount,     //Elapsed tick count
+    LPINTERFACEINFO lpInterfaceInfo //Pointer to INTERFACEINFO structure
+    )
+{
+#ifdef DEBUG_MESSAGEFILTER
+    printf("incoming %08X, %08X, %d\n", dwCallType, threadIDCaller, dwTickCount);
+    fflush(stdout);
+#endif
+    switch (dwCallType)
+    {
+    case CALLTYPE_ASYNC:
+    case CALLTYPE_TOPLEVEL_CALLPENDING:
+    case CALLTYPE_ASYNC_CALLPENDING:
+        if (rb_during_gc()) {
+            return SERVERCALL_RETRYLATER;
+        }
+        break;
+    default:
+        break;
+    }
+    if (previous_filter) {
+        return previous_filter->lpVtbl->HandleInComingCall(previous_filter,
+                                                   dwCallType,
+                                                   threadIDCaller,
+                                                   dwTickCount,
+                                                   lpInterfaceInfo);
+    }
+    return SERVERCALL_ISHANDLED;
+}
+
+static DWORD (STDMETHODCALLTYPE mf_RetryRejectedCall)(
+    IMessageFilter* pThis,
+    HTASK threadIDCallee,  //Server task handle
+    DWORD dwTickCount,     //Elapsed tick count
+    DWORD dwRejectType     //Returned rejection message
+    )
+{
+    if (previous_filter) {
+        return previous_filter->lpVtbl->RetryRejectedCall(previous_filter,
+                                                  threadIDCallee,
+                                                  dwTickCount,
+                                                  dwRejectType);
+    }
+    return 1000;
+}
+
+static DWORD (STDMETHODCALLTYPE mf_MessagePending)(
+    IMessageFilter* pThis,
+    HTASK threadIDCallee,  //Called applications task handle
+    DWORD dwTickCount,     //Elapsed tick count
+    DWORD dwPendingType    //Call type
+    )
+{
+    if (rb_during_gc()) {
+        return PENDINGMSG_WAITNOPROCESS;
+    }
+    if (previous_filter) {
+        return previous_filter->lpVtbl->MessagePending(previous_filter,
+                                               threadIDCallee,
+                                               dwTickCount,
+                                               dwPendingType);
+    }
+    return PENDINGMSG_WAITNOPROCESS;
+}
+    
 typedef struct _Win32OLEIDispatch
 {
     IDispatch dispatch;
@@ -659,7 +779,7 @@ d2time(double v, int *hh, int *mm, int *ss)
     double d_hh, d_mm, d_ss;
     int    i_hh, i_mm, i_ss;
 
-    double d = v * 86400.0;
+    double d = fabs(v * 86400.0);
 
     d_hh = d / 3600.0;
     i_hh = (int)d_hh;
@@ -763,12 +883,10 @@ static VALUE
 date2time_str(double date)
 {
     int y, m, d, hh, mm, ss;
-    char szTime[20];
     double2time(date, &y, &m, &d, &hh, &mm, &ss);
-    sprintf(szTime,
+    return rb_sprintf(
             "%04d/%02d/%02d %02d:%02d:%02d",
             y, m, d, hh, mm, ss);
-    return rb_str_new2(szTime);
 }
 
 #define ENC_MACHING_CP(enc,encname,cp) if(strcasecmp(rb_enc_name((enc)),(encname)) == 0) return cp
@@ -880,7 +998,7 @@ ole_cp2encoding(UINT cp)
 	  case CP_MACCP:
 	  case CP_THREAD_ACP:
 	    if (!pGetCPInfoEx) {
-		pGetCPInfoEx = (BOOL (*)(UINT, DWORD, LPVOID))
+		pGetCPInfoEx = (BOOL (*)(UINT, DWORD, struct myCPINFOEX *))
 		    GetProcAddress(GetModuleHandle("kernel32"), "GetCPInfoEx");
 		if (!pGetCPInfoEx) {
 		    pGetCPInfoEx = (void*)-1;
@@ -963,6 +1081,14 @@ ole_hresult2msg(HRESULT hr)
     return msg;
 }
 
+static void
+ole_freeexceptinfo(EXCEPINFO *pExInfo)
+{
+    SysFreeString(pExInfo->bstrDescription);
+    SysFreeString(pExInfo->bstrSource);
+    SysFreeString(pExInfo->bstrHelpFile);
+}
+
 static VALUE
 ole_excepinfo2msg(EXCEPINFO *pExInfo)
 {
@@ -1001,9 +1127,7 @@ ole_excepinfo2msg(EXCEPINFO *pExInfo)
     }
     if(pSource) free(pSource);
     if(pDescription) free(pDescription);
-    SysFreeString(pExInfo->bstrDescription);
-    SysFreeString(pExInfo->bstrSource);
-    SysFreeString(pExInfo->bstrHelpFile);
+    ole_freeexceptinfo(pExInfo);
     return error_msg;
 }
 
@@ -1050,6 +1174,11 @@ ole_initialize()
         /*
         atexit((void (*)(void))ole_uninitialize);
         */
+        hr = CoRegisterMessageFilter(&imessage_filter, &previous_filter);
+        if(FAILED(hr)) {
+            previous_filter = NULL;
+            ole_raise(hr, rb_eRuntimeError, "fail: install OLE MessageFilter");
+        }
     }
 }
 
@@ -1099,6 +1228,38 @@ oleparam_free(struct oleparamdata *pole)
 }
 
 static LPWSTR
+ole_vstr2wc(VALUE vstr)
+{
+    rb_encoding *enc;
+    int cp;
+    int size;
+    LPWSTR pw;
+    st_data_t data;
+    enc = rb_enc_get(vstr);
+    if (st_lookup(enc2cp_table, (st_data_t)enc, &data)) {
+        cp = data;
+    } else {
+        cp = ole_encoding2cp(enc);
+        if (code_page_installed(cp) ||
+            cp == CP_ACP ||
+            cp == CP_OEMCP ||
+            cp == CP_MACCP ||
+            cp == CP_THREAD_ACP ||
+            cp == CP_SYMBOL ||
+            cp == CP_UTF7 ||
+            cp == CP_UTF8 ) {
+            st_insert(enc2cp_table, (st_data_t)enc, (st_data_t)cp);
+        } else {
+            rb_raise(eWIN32OLERuntimeError, "not installed Windows codepage(%d) according to `%s'", cp, rb_enc_name(enc));
+        }
+    }
+    size = MultiByteToWideChar(cp, 0, StringValuePtr(vstr), -1, NULL, 0);
+    pw = SysAllocStringLen(NULL, size - 1);
+    MultiByteToWideChar(cp, 0, StringValuePtr(vstr), -1, pw, size);
+    return pw;
+}
+
+static LPWSTR
 ole_mb2wc(char *pm, int len)
 {
     int size;
@@ -1133,7 +1294,8 @@ ole_ary_m_entry(VALUE val, long *pid)
     return obj;
 }
 
-static void * get_ptr_of_variant(VARIANT *pvar)
+static void *
+get_ptr_of_variant(VARIANT *pvar)
 {
     switch(V_VT(pvar)) {
     case VT_UI1:
@@ -1380,7 +1542,7 @@ ole_val2variant(VALUE val, VARIANT *var)
         break;
     case T_STRING:
         V_VT(var) = VT_BSTR;
-        V_BSTR(var) = ole_mb2wc(StringValuePtr(val), -1);
+        V_BSTR(var) = ole_vstr2wc(val);
         break;
     case T_FIXNUM:
         V_VT(var) = VT_I4;
@@ -1458,7 +1620,7 @@ ole_val2ptr_variant(VALUE val, VARIANT *var)
     switch (TYPE(val)) {
     case T_STRING:
         if (V_VT(var) == (VT_BSTR | VT_BYREF)) {
-            *V_BSTRREF(var) = ole_mb2wc(StringValuePtr(val), -1);
+            *V_BSTRREF(var) = ole_vstr2wc(val);
         }
         break;
     case T_FIXNUM:
@@ -1610,13 +1772,13 @@ ole_val2olevariantdata(VALUE val, VARTYPE vt, struct olevariantdata *pvar)
 
     if (((vt & ~VT_BYREF) ==  (VT_ARRAY | VT_UI1)) && TYPE(val) == T_STRING) {
         long len = RSTRING_LEN(val);
-        char *pdest = NULL;
+        void *pdest = NULL;
         SAFEARRAY *p = NULL;
         SAFEARRAY *psa = SafeArrayCreateVector(VT_UI1, 0, len);
         if (!psa) {
             rb_raise(rb_eRuntimeError, "fail to SafeArrayCreateVector");
         }
-        hr = SafeArrayAccessData(psa, (void **)&pdest);
+        hr = SafeArrayAccessData(psa, &pdest);
         if (SUCCEEDED(hr)) {
             memcpy(pdest, RSTRING_PTR(val), len);
             SafeArrayUnaccessData(psa);
@@ -1994,10 +2156,10 @@ ole_variant2val(VARIANT *pvar)
 
     case VT_UNKNOWN:
     {
-
         /* get IDispatch interface from IUnknown interface */
         IUnknown *punk;
         IDispatch *pDispatch;
+        void *p;
         HRESULT hr;
 
         if (V_ISBYREF(pvar))
@@ -2006,9 +2168,9 @@ ole_variant2val(VARIANT *pvar)
             punk = V_UNKNOWN(pvar);
 
         if(punk != NULL) {
-           hr = punk->lpVtbl->QueryInterface(punk, &IID_IDispatch,
-                                             (void **)&pDispatch);
+           hr = punk->lpVtbl->QueryInterface(punk, &IID_IDispatch, &p);
            if(SUCCEEDED(hr)) {
+               pDispatch = p;
                obj = create_win32ole_object(cWIN32OLE, pDispatch, 0, 0);
            }
         }
@@ -2340,7 +2502,7 @@ ole_create_dcom(int argc, VALUE *argv, VALUE self)
         rb_raise(rb_eRuntimeError, "CoCreateInstanceEx is not supported in this environment");
     rb_scan_args(argc, argv, "2*", &ole, &host, &others);
 
-    pbuf  = ole_mb2wc(StringValuePtr(ole), -1);
+    pbuf  = ole_vstr2wc(ole);
     hr = CLSIDFromProgID(pbuf, &clsid);
     if (FAILED(hr))
         hr = clsid_from_remote(host, ole, &clsid);
@@ -2352,7 +2514,7 @@ ole_create_dcom(int argc, VALUE *argv, VALUE self)
                   "unknown OLE server: `%s'",
                   StringValuePtr(ole));
     memset(&serverinfo, 0, sizeof(COSERVERINFO));    
-    serverinfo.pwszName = ole_mb2wc(StringValuePtr(host), -1);
+    serverinfo.pwszName = ole_vstr2wc(host);
     memset(&multi_qi, 0, sizeof(MULTI_QI));
     multi_qi.pIID = &IID_IDispatch;
     hr = gCoCreateInstanceEx(&clsid, NULL, clsctx, &serverinfo, 1, &multi_qi);
@@ -2373,6 +2535,7 @@ ole_bind_obj(VALUE moniker, int argc, VALUE *argv, VALUE self)
     IBindCtx *pBindCtx;
     IMoniker *pMoniker;
     IDispatch *pDispatch;
+    void *p;
     HRESULT hr;
     OLECHAR *pbuf;
     ULONG eaten = 0;
@@ -2385,7 +2548,7 @@ ole_bind_obj(VALUE moniker, int argc, VALUE *argv, VALUE self)
                   "failed to create bind context");
     }
 
-    pbuf  = ole_mb2wc(StringValuePtr(moniker), -1);
+    pbuf  = ole_vstr2wc(moniker);
     hr = MkParseDisplayName(pBindCtx, pbuf, &eaten, &pMoniker);
     SysFreeString(pbuf);
     if(FAILED(hr)) {
@@ -2395,8 +2558,8 @@ ole_bind_obj(VALUE moniker, int argc, VALUE *argv, VALUE self)
                   StringValuePtr(moniker));
     }
     hr = pMoniker->lpVtbl->BindToObject(pMoniker, pBindCtx, NULL, 
-                                        &IID_IDispatch,
-                                        (void**)&pDispatch);
+                                        &IID_IDispatch, &p);
+    pDispatch = p;
     OLE_RELEASE(pMoniker);
     OLE_RELEASE(pBindCtx);
 
@@ -2426,6 +2589,7 @@ fole_s_connect(int argc, VALUE *argv, VALUE self)
     CLSID   clsid;
     OLECHAR *pBuf;
     IDispatch *pDispatch;
+    void *p;
     IUnknown *pUnknown;
 
     rb_secure(4);
@@ -2439,7 +2603,7 @@ fole_s_connect(int argc, VALUE *argv, VALUE self)
     }
 
     /* get CLSID from OLE server name */
-    pBuf  = ole_mb2wc(StringValuePtr(svr_name), -1);
+    pBuf = ole_vstr2wc(svr_name);
     hr = CLSIDFromProgID(pBuf, &clsid);
     if(FAILED(hr)) {
         hr = CLSIDFromString(pBuf, &clsid);
@@ -2454,8 +2618,8 @@ fole_s_connect(int argc, VALUE *argv, VALUE self)
         ole_raise(hr, eWIN32OLERuntimeError, 
                   "OLE server `%s' not running", StringValuePtr(svr_name));
     }
-    hr = pUnknown->lpVtbl->QueryInterface(pUnknown, &IID_IDispatch,
-                                             (void **)&pDispatch);
+    hr = pUnknown->lpVtbl->QueryInterface(pUnknown, &IID_IDispatch, &p);
+    pDispatch = p;
     if(FAILED(hr)) {
         OLE_RELEASE(pUnknown);
         ole_raise(hr, eWIN32OLERuntimeError, 
@@ -2544,7 +2708,7 @@ fole_s_const_load(int argc, VALUE *argv, VALUE self)
         if (file == Qnil) {
             file = ole;
         }
-        pBuf = ole_mb2wc(StringValuePtr(file), -1);
+        pBuf = ole_vstr2wc(file);
         hr = LoadTypeLibEx(pBuf, REGKIND_NONE, &pTypeLib);
         SysFreeString(pBuf);
         if (FAILED(hr))
@@ -2929,6 +3093,7 @@ fole_initialize(int argc, VALUE *argv, VALUE self)
     CLSID   clsid;
     OLECHAR *pBuf;
     IDispatch *pDispatch;
+    void *p;
 
     rb_secure(4);
     rb_call_super(0, 0);
@@ -2947,7 +3112,7 @@ fole_initialize(int argc, VALUE *argv, VALUE self)
     }
 
     /* get CLSID from OLE server name */
-    pBuf  = ole_mb2wc(StringValuePtr(svr_name), -1);
+    pBuf  = ole_vstr2wc(svr_name);
     hr = CLSIDFromProgID(pBuf, &clsid);
     if(FAILED(hr)) {
         hr = CLSIDFromString(pBuf, &clsid);
@@ -2961,13 +3126,14 @@ fole_initialize(int argc, VALUE *argv, VALUE self)
 
     /* get IDispatch interface */
     hr = CoCreateInstance(&clsid, NULL, CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER,
-                          &IID_IDispatch, (void**)&pDispatch);
+                          &IID_IDispatch, &p);
+    pDispatch = p;
     if(FAILED(hr)) {
         ole_raise(hr, eWIN32OLERuntimeError,
                   "failed to create WIN32OLE object from `%s'",
                   StringValuePtr(svr_name));
     }
-    
+
     ole_set_member(self, pDispatch);
     return self;
 }
@@ -2996,11 +3162,11 @@ hash2named_arg(VALUE pair, struct oleparam* pOp)
         rb_raise(rb_eTypeError, "wrong argument type (expected String or Symbol)");
     }
     if (TYPE(key) == T_SYMBOL) {
-        key = rb_str_new2(rb_id2name(SYM2ID(key)));
+	key = rb_sym_to_s(key);
     }
 
     /* pNamedArgs[0] is <method name>, so "index + 1" */
-    pOp->pNamedArgs[index + 1] = ole_mb2wc(StringValuePtr(key), -1);
+    pOp->pNamedArgs[index + 1] = ole_vstr2wc(key);
 
     value = rb_ary_entry(pair, 1);
     VariantInit(&(pOp->dp.rgvarg[index]));
@@ -3059,6 +3225,12 @@ ole_invoke(int argc, VALUE *argv, VALUE self, USHORT wFlags, BOOL is_bracket)
     op.dp.cArgs = 0;
 
     rb_scan_args(argc, argv, "1*", &cmd, &paramS);
+    if(TYPE(cmd) != T_STRING && TYPE(cmd) != T_SYMBOL && !is_bracket) {
+	rb_raise(rb_eTypeError, "method is wrong type (expected String or Symbol)");
+    }
+    if (TYPE(cmd) == T_SYMBOL) {
+	cmd = rb_sym_to_s(cmd);
+    }
     OLEData_Get_Struct(self, pole);
     if(!pole->pDispatch) {
         rb_raise(rb_eRuntimeError, "failed to get dispatch interface");
@@ -3066,9 +3238,9 @@ ole_invoke(int argc, VALUE *argv, VALUE self, USHORT wFlags, BOOL is_bracket)
     if (is_bracket) {
         DispID = DISPID_VALUE;
         argc += 1;
-        rb_funcall(paramS, rb_intern("unshift"), 1, cmd);
+	rb_ary_unshift(paramS, cmd);
     } else {
-        wcmdname = ole_mb2wc(StringValuePtr(cmd), -1);
+        wcmdname = ole_vstr2wc(cmd);
         hr = pole->pDispatch->lpVtbl->GetIDsOfNames( pole->pDispatch, &IID_NULL,
                 &wcmdname, 1, lcid, &DispID);
         SysFreeString(wcmdname);
@@ -3096,7 +3268,7 @@ ole_invoke(int argc, VALUE *argv, VALUE self, USHORT wFlags, BOOL is_bracket)
         rb_block_call(param, rb_intern("each"), 0, 0, hash2named_arg, (VALUE)&op);
 
         pDispID = ALLOCA_N(DISPID, cNamedArgs + 1);
-        op.pNamedArgs[0] = ole_mb2wc(StringValuePtr(cmd), -1);
+        op.pNamedArgs[0] = ole_vstr2wc(cmd);
         hr = pole->pDispatch->lpVtbl->GetIDsOfNames(pole->pDispatch,
                                                     &IID_NULL,
                                                     op.pNamedArgs,
@@ -3167,6 +3339,9 @@ ole_invoke(int argc, VALUE *argv, VALUE self, USHORT wFlags, BOOL is_bracket)
                 param = rb_ary_entry(paramS, i-cNamedArgs);
                 ole_val2variant(param, &op.dp.rgvarg[n]);
             }
+            if (hr == DISP_E_EXCEPTION) {
+                ole_freeexceptinfo(&excepinfo);
+            }
             memset(&excepinfo, 0, sizeof(EXCEPINFO));
             VariantInit(&result);
             hr = pole->pDispatch->lpVtbl->Invoke(pole->pDispatch, DispID, 
@@ -3179,6 +3354,9 @@ ole_invoke(int argc, VALUE *argv, VALUE self, USHORT wFlags, BOOL is_bracket)
              * hResult == DISP_E_EXCEPTION. this only happens on
              * functions whose DISPID > 0x8000 */
             if ((hr == DISP_E_EXCEPTION || hr == DISP_E_MEMBERNOTFOUND) && DispID > 0x8000) {
+                if (hr == DISP_E_EXCEPTION) {
+                    ole_freeexceptinfo(&excepinfo);
+                }
                 memset(&excepinfo, 0, sizeof(EXCEPINFO));
                 hr = pole->pDispatch->lpVtbl->Invoke(pole->pDispatch, DispID, 
                         &IID_NULL, lcid, wFlags,
@@ -3199,6 +3377,9 @@ ole_invoke(int argc, VALUE *argv, VALUE self, USHORT wFlags, BOOL is_bracket)
                     n = op.dp.cArgs - i + cNamedArgs - 1;
                     param = rb_ary_entry(paramS, i-cNamedArgs);
                     ole_val2variant2(param, &op.dp.rgvarg[n]);
+                }
+                if (hr == DISP_E_EXCEPTION) {
+                    ole_freeexceptinfo(&excepinfo);
                 }
                 memset(&excepinfo, 0, sizeof(EXCEPINFO));
                 VariantInit(&result);
@@ -3598,7 +3779,7 @@ ole_propertyput(VALUE self, VALUE property, VALUE value)
     OLEData_Get_Struct(self, pole);
 
     /* get ID from property name */
-    pBuf[0]  = ole_mb2wc(StringValuePtr(property), -1);
+    pBuf[0]  = ole_vstr2wc(property);
     hr = pole->pDispatch->lpVtbl->GetIDsOfNames(pole->pDispatch, &IID_NULL,
                                                 pBuf, 1, lcid, &dispID);
     SysFreeString(pBuf[0]);
@@ -3698,6 +3879,7 @@ fole_each(VALUE self)
     VARIANT result;
     HRESULT hr;
     IEnumVARIANT *pEnum = NULL;
+    void *p;
 
     RETURN_ENUMERATOR(self, 0, 0);
 
@@ -3720,14 +3902,17 @@ fole_each(VALUE self)
         ole_raise(hr, eWIN32OLERuntimeError, "failed to get IEnum Interface");
     }
 
-    if (V_VT(&result) == VT_UNKNOWN)
+    if (V_VT(&result) == VT_UNKNOWN) {
         hr = V_UNKNOWN(&result)->lpVtbl->QueryInterface(V_UNKNOWN(&result),
                                                         &IID_IEnumVARIANT,
-                                                        (void**)&pEnum);
-    else if (V_VT(&result) == VT_DISPATCH)
+                                                        &p);
+        pEnum = p;
+    } else if (V_VT(&result) == VT_DISPATCH) {
         hr = V_DISPATCH(&result)->lpVtbl->QueryInterface(V_DISPATCH(&result),
                                                          &IID_IEnumVARIANT,
-                                                         (void**)&pEnum);
+                                                         &p);
+        pEnum = p;
+    }
     if (FAILED(hr) || !pEnum) {
         VariantClear(&result);
         ole_raise(hr, rb_eRuntimeError, "failed to get IEnum Interface");
@@ -4193,8 +4378,9 @@ fole_query_interface(VALUE self, VALUE str_iid)
     IID iid;
     struct oledata *pole;
     IDispatch *pDispatch;
+    void *p;
          
-    pBuf  = ole_mb2wc(StringValuePtr(str_iid), -1);
+    pBuf  = ole_vstr2wc(str_iid);
     hr = CLSIDFromString(pBuf, &iid);
     SysFreeString(pBuf);
     if(FAILED(hr)) {
@@ -4209,14 +4395,46 @@ fole_query_interface(VALUE self, VALUE str_iid)
     }
 
     hr = pole->pDispatch->lpVtbl->QueryInterface(pole->pDispatch, &iid,
-                                                 (void **)&pDispatch);
+                                                 &p);
     if(FAILED(hr)) {
         ole_raise(hr, eWIN32OLERuntimeError, 
                   "failed to get interface `%s'", 
                   StringValuePtr(str_iid));
     }
 
+    pDispatch = p;
     return create_win32ole_object(cWIN32OLE, pDispatch, 0, 0);
+}
+
+/*
+ *  call-seq:
+ *     WIN32OLE#ole_respond_to?(method) -> true or false
+ * 
+ *  Returns true when OLE object has OLE method, otherwise returns false.
+ *
+ *      ie = WIN32OLE.new('InternetExplorer.Application')
+ *      ie.ole_respond_to?("gohome") => true
+ */
+static VALUE
+fole_respond_to(VALUE self, VALUE method)
+{
+    struct oledata *pole;
+    BSTR wcmdname;
+    DISPID DispID;
+    HRESULT hr;
+    rb_secure(4);
+    if(TYPE(method) != T_STRING && TYPE(method) != T_SYMBOL) {
+	rb_raise(rb_eTypeError, "wrong argument type (expected String or Symbol)");
+    }
+    if (TYPE(method) == T_SYMBOL) {
+	method = rb_sym_to_s(method);
+    }
+    OLEData_Get_Struct(self, pole);
+    wcmdname = ole_vstr2wc(method);
+    hr = pole->pDispatch->lpVtbl->GetIDsOfNames( pole->pDispatch, &IID_NULL,
+	    &wcmdname, 1, cWIN32OLE_lcid, &DispID);
+    SysFreeString(wcmdname);
+    return SUCCEEDED(hr) ? Qtrue : Qfalse;
 }
 
 static HRESULT
@@ -4439,7 +4657,7 @@ fole_method_help(VALUE self, VALUE cmdname)
  *  created with MFC should be initialized by calling 
  *  IPersistXXX::InitNew.
  *
- *  If and only if you recieved the exception "HRESULT error code:
+ *  If and only if you received the exception "HRESULT error code:
  *  0x8000ffff catastrophic failure", try this method before
  *  invoking any ole_method.
  *
@@ -4453,13 +4671,14 @@ fole_activex_initialize(VALUE self)
 {
     struct oledata *pole;
     IPersistMemory *pPersistMemory;
+    void *p;
 
     HRESULT hr = S_OK;
 
     OLEData_Get_Struct(self, pole);
 
-    hr = pole->pDispatch->lpVtbl->QueryInterface(pole->pDispatch, &IID_IPersistMemory,
-                                                 (void **)&pPersistMemory);
+    hr = pole->pDispatch->lpVtbl->QueryInterface(pole->pDispatch, &IID_IPersistMemory, &p);
+    pPersistMemory = p;
     if (SUCCEEDED(hr)) {
         hr = pPersistMemory->lpVtbl->InitNew(pPersistMemory);
         OLE_RELEASE(pPersistMemory);
@@ -4852,7 +5071,7 @@ foletypelib_initialize(VALUE self, VALUE args)
         found = oletypelib_search_registry2(self, args);
     }
     if (found == Qfalse) {
-        pbuf = ole_mb2wc(StringValuePtr(typelib), -1);
+        pbuf = ole_vstr2wc(typelib);
         hr = LoadTypeLibEx(pbuf, REGKIND_NONE, &pTypeLib);
         SysFreeString(pbuf);
         if (SUCCEEDED(hr)) {
@@ -5013,7 +5232,7 @@ oletypelib2itypelib(VALUE self, ITypeLib **ppTypeLib)
     HRESULT hr = S_OK;
     path = rb_funcall(self, rb_intern("path"), 0);
     if (path != Qnil) {
-        pbuf = ole_mb2wc(StringValuePtr(path), -1);
+        pbuf = ole_vstr2wc(path);
         hr = LoadTypeLibEx(pbuf, REGKIND_NONE, ppTypeLib);
         SysFreeString(pbuf);
         if (FAILED(hr))
@@ -5113,6 +5332,15 @@ foletypelib_ole_types(VALUE self)
     return classes;
 }
 
+/*
+ *  call-seq:
+ *     WIN32OLE_TYPELIB#inspect -> String
+ *
+ *  Returns the type library name with class name.
+ *
+ *     tlib = WIN32OLE_TYPELIB.new('Microsoft Excel 9.0 Object Library')
+ *     tlib.inspect # => "<#WIN32OLE_TYPELIB:Microsoft Excel 9.0 Object Library>"
+ */
 static VALUE
 foletypelib_inspect(VALUE self)
 {
@@ -5150,7 +5378,7 @@ foletype_initialize(VALUE self, VALUE typelib, VALUE oleclass)
     if (file == Qnil) {
         file = typelib;
     }
-    pbuf = ole_mb2wc(StringValuePtr(file), -1);
+    pbuf = ole_vstr2wc(file);
     hr = LoadTypeLibEx(pbuf, REGKIND_NONE, &pTypeLib);
     if (FAILED(hr))
         ole_raise(hr, eWIN32OLERuntimeError, "failed to LoadTypeLibEx");
@@ -5574,7 +5802,7 @@ foletype_ole_typelib(VALUE self)
 }
 
 static VALUE
-ole_type_impl_ole_types(ITypeInfo *pTypeInfo)
+ole_type_impl_ole_types(ITypeInfo *pTypeInfo, int implflags)
 {
     HRESULT hr;
     ITypeInfo *pRefTypeInfo;
@@ -5600,9 +5828,12 @@ ole_type_impl_ole_types(ITypeInfo *pTypeInfo)
         hr = pTypeInfo->lpVtbl->GetRefTypeInfo(pTypeInfo, href, &pRefTypeInfo);
         if (FAILED(hr)) 
             continue;
-        type = ole_type_from_itypeinfo(pRefTypeInfo);
-        if (type != Qnil) {
-            rb_ary_push(types, type);
+
+        if ((flags & implflags) == implflags) {
+            type = ole_type_from_itypeinfo(pRefTypeInfo);
+            if (type != Qnil) {
+                rb_ary_push(types, type);
+            }
         }
 
         OLE_RELEASE(pRefTypeInfo);
@@ -5625,9 +5856,71 @@ foletype_impl_ole_types(VALUE self)
 {
     struct oletypedata *ptype;
     Data_Get_Struct(self, struct oletypedata, ptype);
-    return ole_type_impl_ole_types(ptype->pTypeInfo);
+    return ole_type_impl_ole_types(ptype->pTypeInfo, 0);
 }
 
+/*
+ *  call-seq:
+ *     WIN32OLE_TYPE#source_ole_types
+ * 
+ *  Returns the array of WIN32OLE_TYPE object which is implemented by the WIN32OLE_TYPE 
+ *  object and having IMPLTYPEFLAG_FSOURCE. 
+ *     tobj = WIN32OLE_TYPE.new('Microsoft Internet Controls', "InternetExplorer") 
+ *     p tobj.source_ole_types
+ *     # => [#<WIN32OLE_TYPE:DWebBrowserEvents2>, #<WIN32OLE_TYPE:DWebBrowserEvents>]
+ */
+static VALUE
+foletype_source_ole_types(VALUE self)
+{
+    struct oletypedata *ptype;
+    Data_Get_Struct(self, struct oletypedata, ptype);
+    return ole_type_impl_ole_types(ptype->pTypeInfo, IMPLTYPEFLAG_FSOURCE);
+}
+
+/*
+ *  call-seq:
+ *     WIN32OLE_TYPE#default_event_sources
+ * 
+ *  Returns the array of WIN32OLE_TYPE object which is implemented by the WIN32OLE_TYPE 
+ *  object and having IMPLTYPEFLAG_FSOURCE and IMPLTYPEFLAG_FDEFAULT. 
+ *     tobj = WIN32OLE_TYPE.new('Microsoft Internet Controls', "InternetExplorer") 
+ *     p tobj.default_event_sources  # => [#<WIN32OLE_TYPE:DWebBrowserEvents2>]
+ */
+static VALUE
+foletype_default_event_sources(VALUE self)
+{
+    struct oletypedata *ptype;
+    Data_Get_Struct(self, struct oletypedata, ptype);
+    return ole_type_impl_ole_types(ptype->pTypeInfo, IMPLTYPEFLAG_FSOURCE|IMPLTYPEFLAG_FDEFAULT);
+}
+
+/*
+ *  call-seq:
+ *     WIN32OLE_TYPE#default_ole_types
+ * 
+ *  Returns the array of WIN32OLE_TYPE object which is implemented by the WIN32OLE_TYPE 
+ *  object and having IMPLTYPEFLAG_FDEFAULT.
+ *     tobj = WIN32OLE_TYPE.new('Microsoft Internet Controls', "InternetExplorer") 
+ *     p tobj.default_ole_types
+ *     # => [#<WIN32OLE_TYPE:IWebBrowser2>, #<WIN32OLE_TYPE:DWebBrowserEvents2>]
+ */
+static VALUE
+foletype_default_ole_types(VALUE self)
+{
+    struct oletypedata *ptype;
+    Data_Get_Struct(self, struct oletypedata, ptype);
+    return ole_type_impl_ole_types(ptype->pTypeInfo, IMPLTYPEFLAG_FDEFAULT);
+}
+
+/*
+ *  call-seq:
+ *     WIN32OLE_TYPE#inspect -> String
+ *
+ *  Returns the type name with class name.
+ *
+ *     ie = WIN32OLE.new('InternetExplorer.Application')
+ *     ie.ole_type.inspect => #<WIN32OLE_TYPE:IWebBrowser2>
+ */
 static VALUE
 foletype_inspect(VALUE self)
 {
@@ -6020,6 +6313,13 @@ folevariable_varkind(VALUE self)
     return ole_variable_varkind(pvar->pTypeInfo, pvar->index);
 }
 
+/*
+ *  call-seq:
+ *     WIN32OLE_VARIABLE#inspect -> String
+ *
+ *  Returns the OLE variable name and the value with class name. 
+ *
+ */
 static VALUE
 folevariable_inspect(VALUE self)
 {
@@ -6732,6 +7032,13 @@ folemethod_params(VALUE self)
     return ole_method_params(pmethod->pTypeInfo, pmethod->index);
 }
 
+/*
+ *  call-seq:
+ *     WIN32OLE_METHOD#inspect -> String
+ *
+ *  Returns the method name with class name.
+ *
+ */
 static VALUE
 folemethod_inspect(VALUE self)
 {
@@ -6986,6 +7293,14 @@ static VALUE foleparam_default(VALUE self)
                              pparam->index);
 }
 
+/*
+ *  call-seq:
+ *     WIN32OLE_PARAM#inspect -> String
+ *
+ *  Returns the parameter name with class name. If the parameter has default value,
+ *  then returns name=value string with class name.
+ *
+ */
 static VALUE
 foleparam_inspect(VALUE self)
 {
@@ -7066,13 +7381,19 @@ STDMETHODIMP EVENTSINK_GetTypeInfo(
 }
 
 STDMETHODIMP EVENTSINK_GetIDsOfNames(
-    PEVENTSINK pEV,
+    PEVENTSINK pEventSink,
     REFIID riid,
     OLECHAR **szNames,
     UINT cNames,
     LCID lcid,
     DISPID *pDispID
     ) {
+    ITypeInfo *pTypeInfo;
+    PIEVENTSINKOBJ pEV = (PIEVENTSINKOBJ)pEventSink;
+    pTypeInfo = pEV->pTypeInfo;
+    if (pTypeInfo) {
+	return pTypeInfo->lpVtbl->GetIDsOfNames(pTypeInfo, szNames, cNames, pDispID);
+    }
     return DISP_E_UNKNOWNNAME;
 }
 
@@ -7127,7 +7448,72 @@ ole_search_event(VALUE ary, VALUE ev, BOOL  *is_default)
     }
     return def_event;
 }
+static VALUE
+ole_search_handler_method(VALUE handler, VALUE ev, BOOL *is_default_handler)
+{
+    VALUE mid;
 
+    *is_default_handler = FALSE;
+    mid = rb_to_id(rb_sprintf("on%s", StringValuePtr(ev)));
+    if (rb_respond_to(handler, mid)) {
+	return mid;
+    }
+    mid = rb_intern("method_missing");
+    if (rb_respond_to(handler, mid)) {
+	*is_default_handler = TRUE;
+	return mid;
+    }
+    return Qnil;
+}
+
+static void
+ole_delete_event(VALUE ary, VALUE ev)
+{
+    long at = -1;
+    at = ole_search_event_at(ary, ev);
+    if (at >= 0) {
+        rb_ary_delete_at(ary, at);
+    }
+}
+
+static void 
+hash2ptr_dispparams(VALUE hash, ITypeInfo *pTypeInfo, DISPID dispid, DISPPARAMS *pdispparams)
+{
+    BSTR *bstrs;
+    HRESULT hr;
+    UINT len, i;
+    VARIANT *pvar;
+    VALUE val;
+    VALUE key;
+    len = 0;
+    bstrs = ALLOCA_N(BSTR, pdispparams->cArgs + 1);
+    hr = pTypeInfo->lpVtbl->GetNames(pTypeInfo, dispid, 
+                                     bstrs, pdispparams->cArgs + 1,
+                                     &len);
+    if (FAILED(hr))
+	return;
+
+    for (i = 0; i < len - 1; i++) {
+	key = WC2VSTR(bstrs[i + 1]);
+        val = rb_hash_aref(hash, INT2FIX(i));
+	if (val == Qnil) 
+	    val = rb_hash_aref(hash, key);
+	if (val == Qnil)
+	    val = rb_hash_aref(hash, rb_str_intern(key));
+        pvar = &pdispparams->rgvarg[pdispparams->cArgs-i-1];
+        ole_val2ptr_variant(val, pvar);
+    }
+}
+
+static VALUE 
+hash2result(VALUE hash)
+{
+    VALUE ret = Qnil;
+    ret = rb_hash_aref(hash, rb_str_new2("return"));
+    if (ret == Qnil)
+	ret = rb_hash_aref(hash, rb_str_intern(rb_str_new2("return")));
+    return ret;
+}
 
 static void
 ary2ptr_dispparams(VALUE ary, DISPPARAMS *pdispparams)
@@ -7140,6 +7526,32 @@ ary2ptr_dispparams(VALUE ary, DISPPARAMS *pdispparams)
         pvar = &pdispparams->rgvarg[pdispparams->cArgs-i-1];
         ole_val2ptr_variant(v, pvar);
     }
+}
+
+static VALUE
+exec_callback(VALUE arg)
+{
+    VALUE *parg = (VALUE *)arg;
+    VALUE handler = parg[0];
+    VALUE mid = parg[1];
+    VALUE args = parg[2];
+    return rb_apply(handler, mid, args);
+}
+
+static VALUE
+rescue_callback(VALUE arg)
+{
+    
+    VALUE e = rb_errinfo();
+    VALUE bt = rb_funcall(e, rb_intern("backtrace"), 0);
+    VALUE msg = rb_funcall(e, rb_intern("message"), 0);
+    bt = rb_ary_entry(bt, 0);
+    fprintf(stdout, "%s: %s (%s)\n", StringValuePtr(bt), StringValuePtr(msg), rb_obj_classname(e));
+    rb_backtrace();
+    ruby_finalize();
+    exit(-1);
+    
+    return Qnil;
 }
 
 STDMETHODIMP EVENTSINK_Invoke(
@@ -7160,8 +7572,13 @@ STDMETHODIMP EVENTSINK_Invoke(
     unsigned int i;
     ITypeInfo *pTypeInfo;
     VARIANT *pvar;
-    VALUE ary, obj, event, handler, args, argv, ev, result;
+    VALUE ary, obj, event, args, outargv, ev, result;
+    VALUE handler = Qnil;
+    VALUE arg[3];
+    VALUE mid;
+    VALUE is_outarg = Qfalse;
     BOOL is_default_handler = FALSE;
+    int state;
 
     PIEVENTSINKOBJ pEV = (PIEVENTSINKOBJ)pEventSink;
     pTypeInfo = pEV->pTypeInfo;
@@ -7181,9 +7598,21 @@ STDMETHODIMP EVENTSINK_Invoke(
     }
     ev = WC2VSTR(bstr);
     event = ole_search_event(ary, ev, &is_default_handler);
-    if (NIL_P(event)) {
-        return NOERROR;
+    if (TYPE(event) == T_ARRAY) {
+	handler = rb_ary_entry(event, 0);
+	mid = rb_intern("call");
+	is_outarg = rb_ary_entry(event, 3);
+    } else {
+	handler = rb_ivar_get(obj, rb_intern("handler"));
+	if (handler == Qnil) {
+	    return NOERROR;
+	}
+	mid = ole_search_handler_method(handler, ev, &is_default_handler);
     }
+    if (handler == Qnil || mid == Qnil) {
+	return NOERROR;
+    }
+
     args = rb_ary_new();
     if (is_default_handler) {
         rb_ary_push(args, ev);
@@ -7194,17 +7623,33 @@ STDMETHODIMP EVENTSINK_Invoke(
         pvar = &pdispparams->rgvarg[pdispparams->cArgs-i-1];
         rb_ary_push(args, ole_variant2val(pvar));
     }
-    handler = rb_ary_entry(event, 0);
+    outargv = Qnil;
+    if (is_outarg == Qtrue) {
+	outargv = rb_ary_new();
+        rb_ary_push(args, outargv);
+    }
 
-    if (rb_ary_entry(event, 3) == Qtrue) {
-        argv = rb_ary_new();
-        rb_ary_push(args, argv);
-        result = rb_apply(handler, rb_intern("call"), args);
-        ary2ptr_dispparams(argv, pdispparams);
+    /*
+     * if exception raised in event callback,
+     * then you receive cfp consistency error. 
+     * to avoid this error we use begin rescue end.
+     * and the exception raised then error message print
+     * and exit ruby process by Win32OLE itself.
+     */
+    arg[0] = handler;
+    arg[1] = mid;
+    arg[2] = args;
+    result = rb_protect(exec_callback, (VALUE)arg, &state);
+    if (state != 0) {
+	rescue_callback(Qnil);
     }
-    else {
-        result = rb_apply(handler, rb_intern("call"), args);
+    if(TYPE(result) == T_HASH) {
+	hash2ptr_dispparams(result, pTypeInfo, dispid, pdispparams);
+	result = hash2result(result);
+    }else if (is_outarg == Qtrue && TYPE(outargv) == T_ARRAY) {
+	ary2ptr_dispparams(outargv, pdispparams);
     }
+
     if (pvarResult) {
         ole_val2variant(result, pvarResult);
     }
@@ -7356,54 +7801,94 @@ find_iid(VALUE ole, char *pitf, IID *piid, ITypeInfo **ppTypeInfo)
     return hr;
 }
 
-static HRESULT
-find_default_source(VALUE ole, IID *piid, ITypeInfo **ppTypeInfo)
+static HRESULT 
+find_coclass(
+    ITypeInfo *pTypeInfo, 
+    TYPEATTR *pTypeAttr, 
+    ITypeInfo **pCOTypeInfo, 
+    TYPEATTR **pCOTypeAttr)
 {
-    HRESULT hr;
-    IProvideClassInfo2 *pProvideClassInfo2;
-    IProvideClassInfo *pProvideClassInfo;
+    HRESULT hr = E_NOINTERFACE;
+    ITypeLib *pTypeLib;
+    int count;
+    BOOL found = FALSE;
+    ITypeInfo *pTypeInfo2;
+    TYPEATTR *pTypeAttr2;
+    int flags;
+    int i,j;
+    HREFTYPE href;
+    ITypeInfo *pRefTypeInfo;
+    TYPEATTR *pRefTypeAttr;
 
-    IDispatch *pDispatch;
-    ITypeInfo *pTypeInfo;
-    TYPEATTR *pTypeAttr;
-    int i;
-    int iFlags;
-    HREFTYPE hRefType;
-
-    struct oledata *pole;
-
-    OLEData_Get_Struct(ole, pole);
-    pDispatch = pole->pDispatch;
-    hr = pDispatch->lpVtbl->QueryInterface(pDispatch,
-                                           &IID_IProvideClassInfo2,
-                                           (void**)&pProvideClassInfo2);
-    if (SUCCEEDED(hr)) {
-        hr = pProvideClassInfo2->lpVtbl->GetGUID(pProvideClassInfo2,
-                                                 GUIDKIND_DEFAULT_SOURCE_DISP_IID,
-                                                 piid);
-        OLE_RELEASE(pProvideClassInfo2);
-        return find_iid(ole, NULL, piid, ppTypeInfo);
-    }
-    hr = pDispatch->lpVtbl->QueryInterface(pDispatch,
-                                           &IID_IProvideClassInfo,
-                                           (void**)&pProvideClassInfo);
-    if (FAILED(hr))
-        return hr;
-
-    hr = pProvideClassInfo->lpVtbl->GetClassInfo(pProvideClassInfo,
-                                                 &pTypeInfo);
-    OLE_RELEASE(pProvideClassInfo);
-    if (FAILED(hr))
-        return hr;
-
-    hr = OLE_GET_TYPEATTR(pTypeInfo, &pTypeAttr);
+    hr = pTypeInfo->lpVtbl->GetContainingTypeLib(pTypeInfo, &pTypeLib, NULL);
     if (FAILED(hr)) {
-        OLE_RELEASE(pTypeInfo);
-        return hr;
+	return hr;
     }
+    count = pTypeLib->lpVtbl->GetTypeInfoCount(pTypeLib);
+    for (i = 0; i < count && !found; i++) {
+	hr = pTypeLib->lpVtbl->GetTypeInfo(pTypeLib, i, &pTypeInfo2);
+	if (FAILED(hr))
+	    continue;
+	hr = OLE_GET_TYPEATTR(pTypeInfo2, &pTypeAttr2);
+	if (FAILED(hr)) {
+	    OLE_RELEASE(pTypeInfo2);
+	    continue;
+	}
+	if (pTypeAttr2->typekind != TKIND_COCLASS) {
+	    OLE_RELEASE_TYPEATTR(pTypeInfo2, pTypeAttr2);
+	    OLE_RELEASE(pTypeInfo2);
+	    continue;
+	}
+	for (j = 0; j < pTypeAttr2->cImplTypes && !found; j++) {
+	    hr = pTypeInfo2->lpVtbl->GetImplTypeFlags(pTypeInfo2, j, &flags);
+	    if (FAILED(hr))
+		continue;
+	    if (!(flags & IMPLTYPEFLAG_FDEFAULT)) 
+		continue;
+	    hr = pTypeInfo2->lpVtbl->GetRefTypeOfImplType(pTypeInfo2, j, &href);
+	    if (FAILED(hr))
+		continue;
+	    hr = pTypeInfo2->lpVtbl->GetRefTypeInfo(pTypeInfo2, href, &pRefTypeInfo);
+	    if (FAILED(hr)) 
+		continue;
+	    hr = OLE_GET_TYPEATTR(pRefTypeInfo, &pRefTypeAttr);
+	    if (FAILED(hr))  {
+		OLE_RELEASE(pRefTypeInfo);
+		continue;
+	    }
+	    if (IsEqualGUID(&(pTypeAttr->guid), &(pRefTypeAttr->guid))) {
+		found = TRUE;
+	    }
+	}
+	if (!found) {
+	    OLE_RELEASE_TYPEATTR(pTypeInfo2, pTypeAttr2);
+	    OLE_RELEASE(pTypeInfo2);
+	}
+    }
+    OLE_RELEASE(pTypeLib);
+    if (found) {
+	*pCOTypeInfo = pTypeInfo2;
+	*pCOTypeAttr = pTypeAttr2;
+	hr = S_OK;
+    } else {
+	hr = E_NOINTERFACE;
+    }
+    return hr;
+}
+
+static HRESULT
+find_default_source_from_typeinfo(
+    ITypeInfo *pTypeInfo, 
+    TYPEATTR *pTypeAttr, 
+    ITypeInfo **ppTypeInfo)
+{
+    int i = 0;
+    HRESULT hr = E_NOINTERFACE;
+    int flags;
+    HREFTYPE hRefType;
     /* Enumerate all implemented types of the COCLASS */
     for (i = 0; i < pTypeAttr->cImplTypes; i++) {
-        hr = pTypeInfo->lpVtbl->GetImplTypeFlags(pTypeInfo, i, &iFlags);
+        hr = pTypeInfo->lpVtbl->GetImplTypeFlags(pTypeInfo, i, &flags);
         if (FAILED(hr))
             continue;
 
@@ -7411,8 +7896,8 @@ find_default_source(VALUE ole, IID *piid, ITypeInfo **ppTypeInfo)
            looking for the [default] [source]
            we just hope that it is a dispinterface :-)
         */
-        if ((iFlags & IMPLTYPEFLAG_FDEFAULT) &&
-            (iFlags & IMPLTYPEFLAG_FSOURCE)) {
+        if ((flags & IMPLTYPEFLAG_FDEFAULT) &&
+            (flags & IMPLTYPEFLAG_FSOURCE)) {
 
             hr = pTypeInfo->lpVtbl->GetRefTypeOfImplType(pTypeInfo,
                                                          i, &hRefType);
@@ -7424,10 +7909,75 @@ find_default_source(VALUE ole, IID *piid, ITypeInfo **ppTypeInfo)
                 break;
         }
     }
+    return hr;
+}
 
+static HRESULT
+find_default_source(VALUE ole, IID *piid, ITypeInfo **ppTypeInfo)
+{
+    HRESULT hr;
+    IProvideClassInfo2 *pProvideClassInfo2;
+    IProvideClassInfo *pProvideClassInfo;
+    void *p;
+
+    IDispatch *pDispatch;
+    ITypeInfo *pTypeInfo;
+    ITypeInfo *pTypeInfo2 = NULL;
+    TYPEATTR *pTypeAttr;
+    TYPEATTR *pTypeAttr2 = NULL;
+
+    struct oledata *pole;
+
+    OLEData_Get_Struct(ole, pole);
+    pDispatch = pole->pDispatch;
+    hr = pDispatch->lpVtbl->QueryInterface(pDispatch,
+                                           &IID_IProvideClassInfo2,
+                                           &p);
+    if (SUCCEEDED(hr)) {
+        pProvideClassInfo2 = p;
+        hr = pProvideClassInfo2->lpVtbl->GetGUID(pProvideClassInfo2,
+                                                 GUIDKIND_DEFAULT_SOURCE_DISP_IID,
+                                                 piid);
+        OLE_RELEASE(pProvideClassInfo2);
+        if (SUCCEEDED(hr)) {
+            hr = find_iid(ole, NULL, piid, ppTypeInfo);
+        }
+    }
+    if (SUCCEEDED(hr)) {
+        return hr;
+    }
+    hr = pDispatch->lpVtbl->QueryInterface(pDispatch,
+                                           &IID_IProvideClassInfo,
+					   &p);
+    if (SUCCEEDED(hr)) {
+        pProvideClassInfo = p;
+        hr = pProvideClassInfo->lpVtbl->GetClassInfo(pProvideClassInfo,
+                                                     &pTypeInfo);
+        OLE_RELEASE(pProvideClassInfo);
+    }
+    if (FAILED(hr)) {
+        hr = pDispatch->lpVtbl->GetTypeInfo(pDispatch, 0, cWIN32OLE_lcid, &pTypeInfo );
+    }
+    if (FAILED(hr))
+        return hr;
+    hr = OLE_GET_TYPEATTR(pTypeInfo, &pTypeAttr);
+    if (FAILED(hr)) {
+        OLE_RELEASE(pTypeInfo);
+        return hr;
+    }
+
+    *ppTypeInfo = 0;
+    hr = find_default_source_from_typeinfo(pTypeInfo, pTypeAttr, ppTypeInfo);
+    if (!*ppTypeInfo) {
+	hr = find_coclass(pTypeInfo, pTypeAttr, &pTypeInfo2, &pTypeAttr2);
+	if (SUCCEEDED(hr)) {
+	    hr = find_default_source_from_typeinfo(pTypeInfo2, pTypeAttr2, ppTypeInfo);
+	    OLE_RELEASE_TYPEATTR(pTypeInfo2, pTypeAttr2);
+	    OLE_RELEASE(pTypeInfo2);
+	}
+    }
     OLE_RELEASE_TYPEATTR(pTypeInfo, pTypeAttr);
     OLE_RELEASE(pTypeInfo);
-
     /* Now that would be a bad surprise, if we didn't find it, wouldn't it? */
     if (!*ppTypeInfo) {
         if (SUCCEEDED(hr))
@@ -7476,14 +8026,14 @@ ev_advise(int argc, VALUE *argv, VALUE self)
     char *pitf;
     HRESULT hr;
     IID iid;
-    ITypeInfo *pTypeInfo;
+    ITypeInfo *pTypeInfo = 0;
     IDispatch *pDispatch;
     IConnectionPointContainer *pContainer;
     IConnectionPoint *pConnectionPoint;
     IEVENTSINKOBJ *pIEV;
     DWORD dwCookie;
     struct oleeventdata *poleev;
-    VALUE events = Qnil;
+    void *p;
 
     rb_secure(4);
     rb_scan_args(argc, argv, "11", &ole, &itf);
@@ -7512,12 +8062,13 @@ ev_advise(int argc, VALUE *argv, VALUE self)
     pDispatch = pole->pDispatch;
     hr = pDispatch->lpVtbl->QueryInterface(pDispatch,
                                            &IID_IConnectionPointContainer,
-                                           (void **)&pContainer);
+                                           &p);
     if (FAILED(hr)) {
         OLE_RELEASE(pTypeInfo);
         ole_raise(hr, rb_eRuntimeError,
                   "failed to query IConnectionPointContainer");
     }
+    pContainer = p;
 
     hr = pContainer->lpVtbl->FindConnectionPoint(pContainer,
                                                  &iid,
@@ -7583,16 +8134,12 @@ fev_s_msg_loop(VALUE klass)
 static void
 add_event_call_back(VALUE obj, VALUE event, VALUE data)
 {
-    long at = -1;
     VALUE events = rb_ivar_get(obj, id_events);
     if (NIL_P(events) || TYPE(events) != T_ARRAY) {
         events = rb_ary_new();
         rb_ivar_set(obj, id_events, events);
     }
-    at = ole_search_event_at(events, event);
-    if (at >= 0) {
-        rb_ary_delete_at(events, at);
-    }
+    ole_delete_event(events, event);
     rb_ary_push(events, data);
 }
 
@@ -7607,7 +8154,12 @@ ev_on_event(int argc, VALUE *argv, VALUE self, VALUE is_ary_arg)
     }
     rb_scan_args(argc, argv, "01*", &event, &args);
     if(!NIL_P(event)) {
-        Check_SafeStr(event);
+	if(TYPE(event) != T_STRING && TYPE(event) != T_SYMBOL) {
+	    rb_raise(rb_eTypeError, "wrong argument type (expected String or Symbol)");
+	}
+	if (TYPE(event) == T_SYMBOL) {
+	    event = rb_sym_to_s(event);
+	}
     }
     data = rb_ary_new3(4, rb_block_proc(), event, args, is_ary_arg);
     add_event_call_back(self, event, data);
@@ -7620,9 +8172,28 @@ ev_on_event(int argc, VALUE *argv, VALUE self, VALUE is_ary_arg)
  * 
  *  Defines the callback event.
  *  If argument is omitted, this method defines the callback of all events.
+ *  If you want to modify reference argument in callback, return hash in
+ *  callback. If you want to return value to OLE server as result of callback
+ *  use `return' or :return.
+ *
  *    ie = WIN32OLE.new('InternetExplorer.Application')
- *    ev = WIN32OLE_EVENT.new(ie, 'DWebBrowserEvents')
+ *    ev = WIN32OLE_EVENT.new(ie)
  *    ev.on_event("NavigateComplete") {|url| puts url}
+ *    ev.on_event() {|ev, *args| puts "#{ev} fired"} 
+ *
+ *    ev.on_event("BeforeNavigate2") {|*args| 
+ *      ...
+ *      # set true to BeforeNavigate reference argument `Cancel'.
+ *      # Cancel is 7-th argument of BeforeNavigate,
+ *      # so you can use 6 as key of hash instead of 'Cancel'.
+ *      # The argument is counted from 0. 
+ *      # The hash key of 0 means first argument.)
+ *      {:Cancel => true}  # or {'Cancel' => true} or {6 => true}
+ *    }
+ *
+ *    ev.on_event(...) {|*args|
+ *      {:return => 1, :xxx => yyy}
+ *    }
  */
 static VALUE
 fev_on_event(int argc, VALUE *argv, VALUE self)
@@ -7636,7 +8207,13 @@ fev_on_event(int argc, VALUE *argv, VALUE self)
  * 
  *  Defines the callback of event.
  *  If you want modify argument in callback, 
- *  you should use this method instead of WIN32OLE_EVENT#on_event.
+ *  you could use this method instead of WIN32OLE_EVENT#on_event.
+ *
+ *    ie = WIN32OLE.new('InternetExplorer.Application')
+ *    ev = WIN32OLE_EVENT.new(ie)
+ *    ev.on_event_with_outargs('BeforeNavigate2') {|*args|
+ *      args.last[6] = true
+ *    }
  */
 static VALUE
 fev_on_event_with_outargs(int argc, VALUE *argv, VALUE self)
@@ -7644,6 +8221,60 @@ fev_on_event_with_outargs(int argc, VALUE *argv, VALUE self)
     return ev_on_event(argc, argv, self, Qtrue);
 }
 
+/*
+ *  call-seq:
+ *     WIN32OLE_EVENT#off_event([event])
+ * 
+ *  removes the callback of event.
+ *
+ *    ie = WIN32OLE.new('InternetExplorer.Application')
+ *    ev = WIN32OLE_EVENT.new(ie)
+ *    ev.on_event('BeforeNavigate2') {|*args|
+ *      args.last[6] = true
+ *    }
+ *      ...
+ *    ev.off_event('BeforeNavigate2')
+ *      ...
+ */
+static VALUE
+fev_off_event(int argc, VALUE *argv, VALUE self)
+{
+    VALUE event = Qnil;
+    VALUE events;
+
+    rb_secure(4);
+    rb_scan_args(argc, argv, "01", &event);
+    if(!NIL_P(event)) {
+	if(TYPE(event) != T_STRING && TYPE(event) != T_SYMBOL) {
+	    rb_raise(rb_eTypeError, "wrong argument type (expected String or Symbol)");
+	}
+	if (TYPE(event) == T_SYMBOL) {
+	    event = rb_sym_to_s(event);
+	}
+    }
+    events = rb_ivar_get(self, id_events);
+    if (NIL_P(events)) {
+	return Qnil;
+    }
+    ole_delete_event(events, event);
+    return Qnil;
+}
+
+/*
+ *  call-seq:
+ *     WIN32OLE_EVENT#unadvise -> nil
+ *
+ *  disconnects OLE server. If this method called, then the WIN32OLE_EVENT object
+ *  does not receive the OLE server event any more.
+ *  This method is trial implementation.
+ *
+ *      ie = WIN32OLE.new('InternetExplorer.Application')
+ *      ev = WIN32OLE_EVENT.new(ie)
+ *      ev.on_event() {...}
+ *         ...
+ *      ev.unadvise
+ *
+ */
 static VALUE 
 fev_unadvise(VALUE self)
 {
@@ -7682,6 +8313,64 @@ static VALUE
 evs_length()
 {
     return rb_funcall(ary_ole_event, rb_intern("length"), 0);
+}
+
+/*
+ *  call-seq:
+ *     WIN32OLE_EVENT#handler=
+ *
+ *  sets event handler object. If handler object has onXXX
+ *  method according to XXX event, then onXXX method is called 
+ *  when XXX event occurs.
+ *  
+ *  If handler object has method_missing and there is no
+ *  method according to the event, then method_missing
+ *  called and 1-st argument is event name.
+ *
+ *  If handler object has onXXX method and there is block
+ *  defined by WIN32OLE_EVENT#on_event('XXX'){},
+ *  then block is executed but handler object method is not called
+ *  when XXX event occurs.
+ *
+ *      class Handler
+ *        def onStatusTextChange(text)
+ *          puts "StatusTextChanged"
+ *        end
+ *        def onPropertyChange(prop)
+ *          puts "PropertyChanged"
+ *        end
+ *        def method_missing(ev, *arg)
+ *          puts "other event #{ev}"
+ *        end
+ *      end
+ *      
+ *      handler = Handler.new
+ *      ie = WIN32OLE.new('InternetExplorer.Application')
+ *      ev = WIN32OLE_EVENT.new(ie)
+ *      ev.on_event("StatusTextChange") {|*args|
+ *        puts "this block executed."
+ *        puts "handler.onStatusTextChange method is not called."
+ *      }
+ *      ev.handler = handler
+ *
+ */
+static VALUE
+fev_set_handler(VALUE self, VALUE val)
+{
+    return rb_ivar_set(self, rb_intern("handler"), val);
+}
+
+/*
+ *  call-seq:
+ *     WIN32OLE_EVENT#handler
+ *
+ *  returns handler object. 
+ *  
+ */
+static VALUE
+fev_get_handler(VALUE self)
+{
+    return rb_ivar_get(self, rb_intern("handler"));
 }
 
 static void 
@@ -8092,6 +8781,18 @@ folevariant_set_value(VALUE self, VALUE val)
     return Qnil;
 }
 
+static void 
+init_enc2cp()
+{
+    enc2cp_table = st_init_numtable();
+}
+
+static void
+free_enc2cp()
+{
+    st_free_table(enc2cp_table);
+}
+
 void
 Init_win32ole()
 {
@@ -8106,6 +8807,14 @@ Init_win32ole()
     com_vtbl.GetTypeInfo = GetTypeInfo;
     com_vtbl.GetIDsOfNames = GetIDsOfNames;
     com_vtbl.Invoke = Invoke;
+
+    message_filter.QueryInterface = mf_QueryInterface;
+    message_filter.AddRef = mf_AddRef;
+    message_filter.Release = mf_Release;
+    message_filter.HandleInComingCall = mf_HandleInComingCall;
+    message_filter.RetryRejectedCall = mf_RetryRejectedCall;
+    message_filter.MessagePending = mf_MessagePending;
+ 
     com_hash = Data_Wrap_Struct(rb_cData, rb_mark_hash, st_free_table, st_init_numtable());
     rb_register_mark_object(com_hash);
 
@@ -8156,6 +8865,7 @@ Init_win32ole()
     rb_define_alias(cWIN32OLE, "ole_obj_help", "ole_type");
     rb_define_method(cWIN32OLE, "ole_typelib", fole_typelib, 0);
     rb_define_method(cWIN32OLE, "ole_query_interface", fole_query_interface, 1);
+    rb_define_method(cWIN32OLE, "ole_respond_to?", fole_respond_to, 1);
 
     rb_define_const(cWIN32OLE, "VERSION", rb_str_new2(WIN32OLE_VERSION));
     rb_define_const(cWIN32OLE, "ARGV", rb_ary_new());
@@ -8240,6 +8950,9 @@ Init_win32ole()
     rb_define_method(cWIN32OLE_TYPE, "ole_methods", foletype_methods, 0);
     rb_define_method(cWIN32OLE_TYPE, "ole_typelib", foletype_ole_typelib, 0);
     rb_define_method(cWIN32OLE_TYPE, "implemented_ole_types", foletype_impl_ole_types, 0);
+    rb_define_method(cWIN32OLE_TYPE, "source_ole_types", foletype_source_ole_types, 0);
+    rb_define_method(cWIN32OLE_TYPE, "default_event_sources", foletype_default_event_sources, 0);
+    rb_define_method(cWIN32OLE_TYPE, "default_ole_types", foletype_default_ole_types, 0);
     rb_define_method(cWIN32OLE_TYPE, "inspect", foletype_inspect, 0);
 
     cWIN32OLE_VARIABLE = rb_define_class("WIN32OLE_VARIABLE", rb_cObject);
@@ -8294,7 +9007,10 @@ Init_win32ole()
     rb_define_method(cWIN32OLE_EVENT, "initialize", fev_initialize, -1);
     rb_define_method(cWIN32OLE_EVENT, "on_event", fev_on_event, -1);
     rb_define_method(cWIN32OLE_EVENT, "on_event_with_outargs", fev_on_event_with_outargs, -1);
+    rb_define_method(cWIN32OLE_EVENT, "off_event", fev_off_event, -1);
     rb_define_method(cWIN32OLE_EVENT, "unadvise", fev_unadvise, 0);
+    rb_define_method(cWIN32OLE_EVENT, "handler=", fev_set_handler, 1);
+    rb_define_method(cWIN32OLE_EVENT, "handler", fev_get_handler, 0);
 
     cWIN32OLE_VARIANT = rb_define_class("WIN32OLE_VARIANT", rb_cObject);
     rb_define_alloc_func(cWIN32OLE_VARIANT, folevariant_s_allocate);
@@ -8311,6 +9027,8 @@ Init_win32ole()
 
     eWIN32OLERuntimeError = rb_define_class("WIN32OLERuntimeError", rb_eRuntimeError);
 
+    init_enc2cp();
+    atexit((void (*)(void))free_enc2cp);
     ole_init_cp();
     cWIN32OLE_enc = ole_cp2encoding(cWIN32OLE_cp);
 }

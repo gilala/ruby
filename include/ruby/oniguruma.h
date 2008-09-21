@@ -104,7 +104,7 @@ extern "C" {
 #endif
 
 typedef unsigned char  OnigUChar;
-typedef unsigned long  OnigCodePoint;
+typedef unsigned int  OnigCodePoint;
 typedef unsigned int   OnigCtype;
 typedef unsigned int   OnigDistance;
 
@@ -166,7 +166,6 @@ typedef struct OnigEncodingTypeST {
   int    (*get_ctype_code_range)(OnigCtype ctype, OnigCodePoint* sb_out, const OnigCodePoint* ranges[], struct OnigEncodingTypeST* enc);
   OnigUChar* (*left_adjust_char_head)(const OnigUChar* start, const OnigUChar* p, struct OnigEncodingTypeST* enc);
   int    (*is_allowed_reverse_match)(const OnigUChar* p, const OnigUChar* end, struct OnigEncodingTypeST* enc);
-  void *auxiliary_data;
   int ruby_encoding_index;
 } OnigEncodingType;
 
@@ -364,16 +363,16 @@ typedef struct {
   OnigMetaCharTableType meta_char_table;
 } OnigSyntaxType;
 
-ONIG_EXTERN OnigSyntaxType OnigSyntaxASIS;
-ONIG_EXTERN OnigSyntaxType OnigSyntaxPosixBasic;
-ONIG_EXTERN OnigSyntaxType OnigSyntaxPosixExtended;
-ONIG_EXTERN OnigSyntaxType OnigSyntaxEmacs;
-ONIG_EXTERN OnigSyntaxType OnigSyntaxGrep;
-ONIG_EXTERN OnigSyntaxType OnigSyntaxGnuRegex;
-ONIG_EXTERN OnigSyntaxType OnigSyntaxJava;
-ONIG_EXTERN OnigSyntaxType OnigSyntaxPerl;
-ONIG_EXTERN OnigSyntaxType OnigSyntaxPerl_NG;
-ONIG_EXTERN OnigSyntaxType OnigSyntaxRuby;
+ONIG_EXTERN const OnigSyntaxType OnigSyntaxASIS;
+ONIG_EXTERN const OnigSyntaxType OnigSyntaxPosixBasic;
+ONIG_EXTERN const OnigSyntaxType OnigSyntaxPosixExtended;
+ONIG_EXTERN const OnigSyntaxType OnigSyntaxEmacs;
+ONIG_EXTERN const OnigSyntaxType OnigSyntaxGrep;
+ONIG_EXTERN const OnigSyntaxType OnigSyntaxGnuRegex;
+ONIG_EXTERN const OnigSyntaxType OnigSyntaxJava;
+ONIG_EXTERN const OnigSyntaxType OnigSyntaxPerl;
+ONIG_EXTERN const OnigSyntaxType OnigSyntaxPerl_NG;
+ONIG_EXTERN const OnigSyntaxType OnigSyntaxRuby;
 
 /* predefined syntaxes (see regsyntax.c) */
 #define ONIG_SYNTAX_ASIS               (&OnigSyntaxASIS)
@@ -388,7 +387,7 @@ ONIG_EXTERN OnigSyntaxType OnigSyntaxRuby;
 #define ONIG_SYNTAX_RUBY               (&OnigSyntaxRuby)
 
 /* default syntax */
-ONIG_EXTERN OnigSyntaxType*   OnigDefaultSyntax;
+ONIG_EXTERN const OnigSyntaxType*   OnigDefaultSyntax;
 #define ONIG_SYNTAX_DEFAULT   OnigDefaultSyntax
 
 /* syntax (operators) */
@@ -634,7 +633,7 @@ typedef struct re_pattern_buffer {
 
   OnigEncoding      enc;
   OnigOptionType    options;
-  OnigSyntaxType*   syntax;
+  const OnigSyntaxType* syntax;
   OnigCaseFoldType  case_fold_flag;
   void*             name_table;
 
@@ -683,7 +682,7 @@ void onig_set_warn_func P_((OnigWarnFunc f));
 ONIG_EXTERN
 void onig_set_verb_warn_func P_((OnigWarnFunc f));
 ONIG_EXTERN
-int onig_new P_((OnigRegex*, const OnigUChar* pattern, const OnigUChar* pattern_end, OnigOptionType option, OnigEncoding enc, OnigSyntaxType* syntax, OnigErrorInfo* einfo));
+int onig_new P_((OnigRegex*, const OnigUChar* pattern, const OnigUChar* pattern_end, OnigOptionType option, OnigEncoding enc, const OnigSyntaxType* syntax, OnigErrorInfo* einfo));
 ONIG_EXTERN
 int onig_new_deluxe P_((OnigRegex* reg, const OnigUChar* pattern, const OnigUChar* pattern_end, OnigCompileInfo* ci, OnigErrorInfo* einfo));
 ONIG_EXTERN
@@ -735,11 +734,11 @@ OnigOptionType onig_get_options P_((OnigRegex reg));
 ONIG_EXTERN
 OnigCaseFoldType onig_get_case_fold_flag P_((OnigRegex reg));
 ONIG_EXTERN
-OnigSyntaxType* onig_get_syntax P_((OnigRegex reg));
+const OnigSyntaxType* onig_get_syntax P_((OnigRegex reg));
 ONIG_EXTERN
-int onig_set_default_syntax P_((OnigSyntaxType* syntax));
+int onig_set_default_syntax P_((const OnigSyntaxType* syntax));
 ONIG_EXTERN
-void onig_copy_syntax P_((OnigSyntaxType* to, OnigSyntaxType* from));
+void onig_copy_syntax P_((OnigSyntaxType* to, const OnigSyntaxType* from));
 ONIG_EXTERN
 unsigned int onig_get_syntax_op P_((OnigSyntaxType* syntax));
 ONIG_EXTERN

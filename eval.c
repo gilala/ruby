@@ -20,9 +20,8 @@ NORETURN(void rb_raise_jump(VALUE));
 ID rb_frame_callee(void);
 VALUE rb_eLocalJumpError;
 VALUE rb_eSysStackError;
-VALUE sysstack_error;
 
-static VALUE exception_error;
+#define exception_error GET_VM()->special_exceptions[ruby_error_reenter]
 
 #include "eval_error.c"
 #include "eval_safe.c"
@@ -76,7 +75,6 @@ ruby_init(void)
 #endif
 
 	ruby_prog_init();
-	ALLOW_INTS;
     }
     POP_TAG();
 
@@ -372,6 +370,9 @@ rb_longjmp(int tag, VALUE mesg)
 	at = get_backtrace(mesg);
 	if (NIL_P(at)) {
 	    at = rb_make_backtrace();
+	    if (OBJ_FROZEN(mesg)) {
+		mesg = rb_obj_dup(mesg);
+	    }
 	    set_backtrace(mesg, at);
 	}
     }
@@ -433,8 +434,7 @@ rb_exc_fatal(VALUE mesg)
 void
 rb_interrupt(void)
 {
-    static const char fmt[1] = {'\0'};
-    rb_raise(rb_eInterrupt, fmt);
+    rb_raise(rb_eInterrupt, "%s", "");
 }
 
 static VALUE get_errinfo(void);
@@ -543,7 +543,9 @@ int
 rb_block_given_p(void)
 {
     rb_thread_t *th = GET_THREAD();
-    if (GC_GUARDED_PTR_REF(th->cfp->lfp[0])) {
+
+    if ((th->cfp->lfp[0] & 0x02) == 0 &&
+	GC_GUARDED_PTR_REF(th->cfp->lfp[0])) {
 	return Qtrue;
     }
     else {
@@ -586,7 +588,9 @@ rb_f_block_given_p(void)
     rb_control_frame_t *cfp = th->cfp;
     cfp = vm_get_ruby_level_caller_cfp(th, RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp));
 
-    if (cfp != 0 && GC_GUARDED_PTR_REF(cfp->lfp[0])) {
+    if (cfp != 0 &&
+	(cfp->lfp[0] & 0x02) == 0 &&
+	GC_GUARDED_PTR_REF(cfp->lfp[0])) {
 	return Qtrue;
     }
     else {
@@ -723,31 +727,6 @@ rb_ensure(VALUE (*b_proc)(ANYARGS), VALUE data1, VALUE (*e_proc)(ANYARGS), VALUE
     (*e_proc) (data2);
     if (state)
 	JUMP_TAG(state);
-    return result;
-}
-
-VALUE
-rb_with_disable_interrupt(VALUE (*proc)(ANYARGS), VALUE data)
-{
-    VALUE result = Qnil;	/* OK */
-    int status;
-
-    DEFER_INTS;
-    {
-	int thr_critical = rb_thread_critical;
-
-	rb_thread_critical = Qtrue;
-	PUSH_TAG();
-	if ((status = EXEC_TAG()) == 0) {
-	    result = (*proc) (data);
-	}
-	POP_TAG();
-	rb_thread_critical = thr_critical;
-    }
-    ENABLE_INTS;
-    if (status)
-	JUMP_TAG(status);
-
     return result;
 }
 
@@ -1196,9 +1175,11 @@ Init_eval(void)
 
     rb_define_virtual_variable("$SAFE", safe_getter, safe_setter);
 
-    exception_error = rb_exc_new2(rb_eFatal, "exception reentered");
+    exception_error = rb_exc_new3(rb_eFatal,
+				  rb_obj_freeze(rb_str_new2("exception reentered")));
     rb_ivar_set(exception_error, idThrowState, INT2FIX(TAG_FATAL));
-    rb_register_mark_object(exception_error);
+    OBJ_TAINT(exception_error);
+    OBJ_FREEZE(exception_error);
 }
 
 

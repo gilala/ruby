@@ -18,7 +18,6 @@
 
 #include "ruby/ruby.h"
 #include "ruby/mvm.h"
-#include "ruby/signal.h"
 #include "ruby/st.h"
 #include "ruby/node.h"
 
@@ -39,6 +38,8 @@
 #ifndef NSIG
 # ifdef DJGPP
 #  define NSIG SIGMAX
+# elif defined MACOS_UNUSE_SIGNAL
+#  define NSIG 1
 # else
 #  define NSIG (_SIGMAX + 1)      /* For QNX */
 # endif
@@ -201,6 +202,7 @@ struct rb_iseq_struct {
     VALUE *iseq_encoded; /* encoded iseq */
     unsigned long iseq_size;
     VALUE mark_ary;	/* Array: includes operands which should be GC marked */
+    VALUE coverage;     /* coverage array */
 
     /* insn info, must be freed */
     struct iseq_insn_info_entry *insn_info_table;
@@ -260,6 +262,7 @@ struct rb_iseq_struct {
     /****************/
 
     VALUE self;
+    VALUE orig;			/* non-NULL if its data have origin */
 
     /* block inlining */
     /* 
@@ -281,6 +284,13 @@ struct rb_iseq_struct {
     struct iseq_compile_data *compile_data;
 };
 
+enum ruby_special_exceptions {
+    ruby_error_reenter,
+    ruby_error_nomemory,
+    ruby_error_sysstack,
+    ruby_special_error_count
+};
+
 typedef struct rb_iseq_struct rb_iseq_t;
 
 #define GetVMPtr(obj, ptr) \
@@ -290,21 +300,23 @@ struct rb_vm_struct
 {
     VALUE self;
 
-    rb_thread_lock_t global_interpreter_lock;
+    rb_thread_lock_t global_vm_lock;
 
     struct rb_thread_struct *main_thread;
     struct rb_thread_struct *running_thread;
 
     st_table *living_threads;
     VALUE thgroup_default;
-    VALUE last_status; /* $? */
 
     int running;
     int thread_abort_on_exception;
     unsigned long trace_flag;
+    volatile int sleeper;
 
     /* object management */
     VALUE mark_object_ary;
+
+    VALUE special_exceptions[ruby_special_error_count];
 
     /* load */
     VALUE top_self;
@@ -313,8 +325,10 @@ struct rb_vm_struct
     struct st_table *loading_table;
     
     /* signal */
-    rb_atomic_t signal_buff[RUBY_NSIG];
-    rb_atomic_t buffered_signal_size;
+    struct {
+	VALUE cmd;
+	int safe;
+    } trap_list[RUBY_NSIG];
 
     /* hook */
     rb_event_hook_t *event_hooks;
@@ -322,6 +336,7 @@ struct rb_vm_struct
     int src_encoding_index;
 
     VALUE verbose, debug, progname;
+    VALUE coverages;
 
 #if defined(ENABLE_VM_OBJSPACE) && ENABLE_VM_OBJSPACE
     struct rb_objspace *objspace;
@@ -360,7 +375,8 @@ enum rb_thread_status {
     THREAD_TO_KILL,
     THREAD_RUNNABLE,
     THREAD_STOPPED,
-    THREAD_KILLED,
+    THREAD_STOPPED_FOREVER,
+    THREAD_KILLED
 };
 
 typedef RUBY_JMP_BUF rb_jmpbuf_t;
@@ -384,6 +400,8 @@ struct rb_unblock_callback {
     void *arg;
 };
 
+struct rb_mutex_struct;
+
 struct rb_thread_struct
 {
     VALUE self;
@@ -395,6 +413,7 @@ struct rb_thread_struct
     rb_control_frame_t *cfp;
     int safe_level;
     int raised_flag;
+    VALUE last_status; /* $? */
     
     /* passing state */
     int state;
@@ -416,6 +435,7 @@ struct rb_thread_struct
     rb_thread_id_t thread_id;
     enum rb_thread_status status;
     int priority;
+    int slice;
 
     native_thread_data_t native_thread_data;
 
@@ -429,11 +449,15 @@ struct rb_thread_struct
     int interrupt_flag;
     rb_thread_lock_t interrupt_lock;
     struct rb_unblock_callback unblock;
+    VALUE locking_mutex;
+    struct rb_mutex_struct *keeping_mutexes;
+    int transition_for_lock;
 
     struct rb_vm_tag *tag;
     struct rb_vm_trap_tag *trap_tag;
 
     int parse_in_eval;
+    int mild_compile_error;
 
     /* storage */
     st_table *local_storage;
@@ -487,7 +511,12 @@ VALUE rb_iseq_compile(VALUE src, VALUE file, VALUE line);
 VALUE ruby_iseq_disasm(VALUE self);
 VALUE ruby_iseq_disasm_insn(VALUE str, VALUE *iseqval, int pos, rb_iseq_t *iseq, VALUE child);
 const char *ruby_node_name(int node);
+VALUE rb_iseq_clone(VALUE iseqval, VALUE newcbase);
 
+RUBY_EXTERN VALUE rb_cISeq;
+RUBY_EXTERN VALUE rb_cRubyVM;
+RUBY_EXTERN VALUE rb_cEnv;
+RUBY_EXTERN VALUE rb_mRubyVMFrozenCore;
 
 /* each thread has this size stack : 128KB */
 #define RUBY_VM_THREAD_STACK_SIZE (128 * 1024)
@@ -538,6 +567,9 @@ typedef struct {
 #define VM_CALL_TAILRECURSION_BIT  (0x01 << 6)
 #define VM_CALL_SUPER_BIT          (0x01 << 7)
 #define VM_CALL_SEND_BIT           (0x01 << 8)
+
+#define VM_SPECIAL_OBJECT_VMCORE   0x01
+#define VM_SPECIAL_OBJECT_CBASE    0x02
 
 #define VM_FRAME_MAGIC_METHOD 0x11
 #define VM_FRAME_MAGIC_BLOCK  0x21
@@ -639,12 +671,12 @@ int rb_thread_method_id_and_class(rb_thread_t *th, ID *idp, VALUE *klassp);
 
 VALUE vm_invoke_proc(rb_thread_t *th, rb_proc_t *proc, VALUE self,
 		     int argc, const VALUE *argv, rb_block_t *blockptr);
-VALUE vm_make_proc(rb_thread_t *th, rb_control_frame_t *cfp, const rb_block_t *block);
+VALUE vm_make_proc(rb_thread_t *th, rb_control_frame_t *cfp, const rb_block_t *block, VALUE klass);
 VALUE vm_make_env_object(rb_thread_t *th, rb_control_frame_t *cfp);
 
 NOINLINE(void rb_gc_save_machine_context(rb_thread_t *));
 
-RUBY_EXTERN VALUE sysstack_error;
+#define sysstack_error GET_VM()->special_exceptions[ruby_error_sysstack]
 
 /* for thread */
 
@@ -654,7 +686,7 @@ extern rb_vm_t *ruby_current_vm;
 
 #define GET_VM() ruby_current_vm
 #define GET_THREAD() ruby_current_thread
-#define rb_thread_set_current_raw(th) (ruby_current_thread = th)
+#define rb_thread_set_current_raw(th) (void)(ruby_current_thread = (th))
 #define rb_thread_set_current(th) do { \
     rb_thread_set_current_raw(th); \
     th->vm->running_thread = th; \
@@ -666,12 +698,13 @@ extern rb_vm_t *ruby_current_vm;
 
 #define RUBY_VM_SET_INTERRUPT(th) ((th)->interrupt_flag |= 0x02)
 #define RUBY_VM_SET_TIMER_INTERRUPT(th) ((th)->interrupt_flag |= 0x01)
+#define RUBY_VM_SET_FINALIZER_INTERRUPT(th) ((th)->interrupt_flag |= 0x04)
 #define RUBY_VM_INTERRUPTED(th) ((th)->interrupt_flag & 0x02)
 
 void rb_thread_execute_interrupts(rb_thread_t *);
 
 #define RUBY_VM_CHECK_INTS_TH(th) do { \
-  if(th->interrupt_flag){ \
+  if (th->interrupt_flag) { \
     /* TODO: trap something event */ \
     rb_thread_execute_interrupts(th); \
   } \
@@ -684,6 +717,7 @@ void rb_thread_execute_interrupts(rb_thread_t *);
 static inline void
 exec_event_hooks(rb_event_hook_t *hook, rb_event_flag_t flag, VALUE self, ID id, VALUE klass)
 {
+    if (self == rb_mRubyVMFrozenCore) return;
     while (hook) {
 	if (flag & hook->flag) {
 	    (*hook->func)(flag, hook->data, self, id, klass);

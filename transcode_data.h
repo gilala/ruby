@@ -14,17 +14,13 @@
 #ifndef RUBY_TRANSCODE_DATA_H
 #define RUBY_TRANSCODE_DATA_H 1
 
-typedef unsigned char base_element;
+#define WORDINDEX_SHIFT_BITS 2
+#define WORDINDEX2INFO(widx)      ((widx) << WORDINDEX_SHIFT_BITS)
+#define INFO2WORDINDEX(info)      ((info) >> WORDINDEX_SHIFT_BITS)
+#define BYTE_LOOKUP_BASE(bl) ((bl)[0])
+#define BYTE_LOOKUP_INFO(bl) ((bl)[1])
 
-typedef struct byte_lookup {
-    const base_element *base;
-    const struct byte_lookup *const *info;
-} BYTE_LOOKUP;
-
-#ifndef PType
-/* data file needs to treat this as a pointer, to remove warnings */
-#define PType (const BYTE_LOOKUP *)
-#endif
+#define PType (unsigned int)
 
 #define NOMAP	(PType 0x01)	/* single byte direct map */
 #define ONEbt	(0x02)		/* one byte payload */
@@ -38,11 +34,15 @@ typedef struct byte_lookup {
 #define FUNsi	(PType 0x0D)	/* function from start to info */
 #define FUNio	(PType 0x0E)	/* function from info to output */
 #define FUNso	(PType 0x0F)	/* function from start to output */
+#define STR1	(PType 0x11)	/* string up to 255 bytes: 1byte length + content */
+
+#define STR1_BYTEINDEX(w) ((w) >> 6)
+#define makeSTR1(bi) (((bi) << 6) | STR1)
 
 #define o1(b1)		(PType((((unsigned char)(b1))<<8)|ONEbt))
 #define o2(b1,b2)	(PType((((unsigned char)(b1))<<8)|(((unsigned char)(b2))<<16)|TWObt))
-#define o3(b1,b2,b3)	(PType((((unsigned char)(b1))<<8)|(((unsigned char)(b2))<<16)|(((unsigned char)(b3))<<24)|THREEbt))
-#define o4(b0,b1,b2,b3)	(PType((((unsigned char)(b1))<< 8)|(((unsigned char)(b2))<<16)|(((unsigned char)(b3))<<24)|((((unsigned char)(b0))&0x07)<<5)|FOURbt))
+#define o3(b1,b2,b3)	(PType(((((unsigned char)(b1))<<8)|(((unsigned char)(b2))<<16)|(((unsigned char)(b3))<<24)|THREEbt)&0xffffffffU))
+#define o4(b0,b1,b2,b3)	(PType(((((unsigned char)(b1))<< 8)|(((unsigned char)(b2))<<16)|(((unsigned char)(b3))<<24)|((((unsigned char)(b0))&0x07)<<5)|FOURbt)&0xffffffffU))
 
 #define getBT1(a)	(((a)>> 8)&0xFF)
 #define getBT2(a)	(((a)>>16)&0xFF)
@@ -56,29 +56,40 @@ typedef struct byte_lookup {
 #define TWOTRAIL       /* legal but undefined if two more trailing UTF-8 */
 #define THREETRAIL     /* legal but undefined if three more trailing UTF-8 */
 
-/* dynamic structure, one per conversion (similar to iconv_t) */
-/* may carry conversion state (e.g. for iso-2022-jp) */
-typedef struct rb_transcoding {
-    const struct rb_transcoder *transcoder;
-    VALUE ruby_string_dest; /* the String used as the conversion destination,
-			       or NULL if something else is being converted */
-    unsigned char *(*flush_func)(struct rb_transcoding*, int, int);
-} rb_transcoding;
+typedef enum {
+  asciicompat_converter,        /* ASCII-compatible -> ASCII-compatible */
+  asciicompat_decoder,          /* ASCII-incompatible -> ASCII-compatible */
+  asciicompat_encoder           /* ASCII-compatible -> ASCII-incompatible */
+  /* ASCII-incompatible -> ASCII-incompatible is intentionally ommitted. */
+} rb_transcoder_asciicompat_type_t;
+
+typedef struct rb_transcoder rb_transcoder;
 
 /* static structure, one per supported encoding pair */
-typedef struct rb_transcoder {
-    const char *from_encoding;
-    const char *to_encoding;
-    const BYTE_LOOKUP *conv_tree_start;
+struct rb_transcoder {
+    const char *src_encoding;
+    const char *dst_encoding;
+    unsigned int conv_tree_start;
+    const unsigned char *byte_array;
+    unsigned int byte_array_length;
+    const unsigned int *word_array;
+    unsigned int word_array_length;
+    int word_size;
+    int input_unit_length;
+    int max_input;
     int max_output;
-    int from_utf8;
-    void (*preprocessor)(unsigned char**, unsigned char**, unsigned char*, unsigned char*, struct rb_transcoding *);
-    void (*postprocessor)(unsigned char**, unsigned char**, unsigned char*, unsigned char*, struct rb_transcoding *);
-    VALUE (*func_ii)(VALUE); /* info  -> info   */
-    VALUE (*func_si)(const unsigned char *); /* start -> info   */
-    int (*func_io)(VALUE, const unsigned char*); /* info  -> output */
-    int (*func_so)(const unsigned char*, unsigned char*); /* start -> output */
-} rb_transcoder;
+    rb_transcoder_asciicompat_type_t asciicompat_type;
+    size_t state_size;
+    int (*state_init_func)(void*); /* ret==0:success ret!=0:failure(errno) */
+    int (*state_fini_func)(void*); /* ret==0:success ret!=0:failure(errno) */
+    VALUE (*func_ii)(void*, VALUE); /* info  -> info   */
+    VALUE (*func_si)(void*, const unsigned char*, size_t); /* start -> info   */
+    int (*func_io)(void*, VALUE, const unsigned char*); /* info  -> output */
+    int (*func_so)(void*, const unsigned char*, size_t, unsigned char*); /* start -> output */
+    int (*finish_func)(void*, unsigned char*); /* -> output */
+    int (*resetsize_func)(void*); /* -> len */
+    int (*resetstate_func)(void*, unsigned char*); /* -> output */
+};
 
 void rb_declare_transcoder(const char *enc1, const char *enc2, const char *lib);
 void rb_register_transcoder(const rb_transcoder *);
