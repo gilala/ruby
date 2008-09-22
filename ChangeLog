@@ -1,3 +1,787 @@
+Sun Sep 21 21:52:41 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* math.c (math_log): should check argc.
+
+Sun Sep 21 21:20:24 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* complex.c: added two macros.
+
+	* rational.c: ditto.
+
+Sun Sep 21 18:06:38 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* complex.c (nucomp_s_convert): checks argc.
+
+	* rational.c (nurat_s_convert): ditto.
+
+Sun Sep 21 10:19:04 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* complex.c (nucomp_s_canonicalize_internal): checks exactness of
+	  imag only.
+
+	* rational.c (nurat_s_convert): accepts non real value
+	  (Rational(a,b) as a/b).
+
+	* complex.c (nucomp_s_convert): refined.
+
+Sun Sep 21 09:37:57 2008  James Edward Gray II  <jeg2@ruby-lang.org>
+
+  * lib/csv/csv.rb:  Reworked CSV's parser and generator to be m17n.  Data
+    is now parsed in the Encoding it is in without need for translation.
+  * lib/csv/csv.rb:  Improved inspect() messages for better IRb support.
+  * lib/csv/csv.rb:  Fixed header writing bug reported by Dov Murik.
+  * lib/csv/csv.rb:  Use custom separators in parsing header Strings as
+    suggested by Shmulik Regev.
+  * lib/csv/csv.rb:  Added a :write_headers option for outputting headers.
+  * lib/csv/csv.rb:  Handle open() calls in binary mode whenever we can to
+    workaround a Windows issue where line-ending translation can cause an
+    off-by-one error in seeking back to a non-zero starting position after
+    auto-discovery for :row_sep as suggested by Robert Battle.
+  * lib/csv/csv.rb:  Improved the parser to fail faster when fed some forms
+    of invalid CSV that can be detected without reading ahead.
+  * lib/csv/csv.rb:  Added a :field_size_limit option to control CSV's
+    lookahead and prevent the parser from biting off more data than
+    it can chew.
+  * lib/csv/csv.rb:  Added readers for CSV attributes:  col_sep(), row_sep(),
+    quote_char(), field_size_limit(), converters(), unconverted_fields?(),
+    headers(), return_headers?(), write_headers?(), header_converters(),
+    skip_blanks?(), and force_quotes?().
+	* lib/csv/csv.rb:  Cleaned up code syntax to be more inline with
+	  Ruby 1.9 than 1.8.
+
+Sun Sep 21 07:43:16 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* complex.c: an instance method image has been removed and
+	  uses "imag" instead of "image".
+
+	* complex.c: two instance method re and im are removed.
+
+	* rational.c: follows the above changes.
+
+	* include/ruby/ruby.h: ditto.
+
+	* gc.c: ditto.
+
+	* lib/cmath.rb: ditto.
+
+	* lib/mathn.rb: ditto.
+
+	* lib/complex.rb: ditto. and provides some obsolate methods.
+
+Sun Sep 21 02:48:45 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ext/json/ext/parser/parse.c: use ruby_xfree().
+
+	* ext/json/ext/parser/parse.rl: ditto.
+
+	* ext/json/ext/parser/unicode.c: ditto.
+
+Sun Sep 21 02:40:20 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ext/json: import JSON v 1.1.3.
+
+Sat Sep 20 11:43:08 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* lib/optparse.rb (summarize): separator "" should output new line.
+
+Sat Sep 20 08:07:34 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* parse.y: strings which contain only US-ASCII don't force to have
+	  US-ASCII encoding. [ruby-dev:36400]
+
+Sat Sep 20 07:59:31 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* re.c (rb_reg_desc): Regexps of ASCII Compatible encoding may
+	  contain non-ASCII characters. So in that case its encoding
+	  must keep original encoding.
+
+Sat Sep 20 07:44:56 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* common.mk: prec.c is removed.
+
+Fri Sep 19 22:37:25 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* complex.c: uses f_(in)?exact_p macro.
+
+	* rational.c: ditto.
+
+	* bignum.c (rb_big_pow): bignum**bignum - should calculate without
+	  rational.
+
+	* lib/complex.rb: should override Math module at most once.
+
+	* lib/mathn.rb: requires 'cmath' directly.
+
+Fri Sep 19 20:48:06 2008  Yuki Sonoda  <yugui@yugui.jp>
+
+	* prec.c: removed. Precision will be redesigned and be back again.
+	  c.f. [ruby-dev:36352].
+
+	* common.mk (COMMON_OBJS): removed prec.o.
+
+	* inits.c (rb_call_inits): removed Init_Precision.
+
+	* numeric.c (Init_Numeric): removed inclusion of Precision.
+	  removed #induced_from from each class.
+
+	* rational.c: ditto.
+
+	* ext/bigdecimal/bigdecimal.c: ditto.
+
+	* lib/rdoc/knwon_classes.rb: removed the entry for Precision.
+
+	* test/ruby/test_prec.rb: removed.
+
+	* test/ruby/test_integer.rb: removed tests for Precision.
+
+	* test/ruby/test_fixnum.rb: ditto.
+
+	* test/ruby/test_float.rb: ditto.
+
+	* test/ruby/test_rational.rb: ditto.
+
+	* test/ruby/test_complex.rb: ditto.
+
+	* test/bigdecimal/test_bigdecimal.rb: ditto.
+
+Fri Sep 19 19:43:40 2008  Yuki Sonoda  <yugui@yugui.jp>
+
+	* common.mk : Reverts the changeset 18994.
+	  Uses the official repository of rubyspec again.
+
+Fri Sep 19 17:41:56 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* configure.in: applied OS/2 support patch from Brendan Oakley
+	  <gentux2@gmail.com> in [ruby-core:18707].
+
+Fri Sep 19 09:29:26 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* dln.c: newer BeOS support.  a patch from Pete Goodeve
+	  <pete.goodeve at computer.org> in [ruby-core:18712].
+
+Fri Sep 19 03:41:25 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ext/nkf/nkf-utf8/nkf.c: fix memory violation. mentioned by mame [ruby-dev:36373]
+
+Fri Sep 19 01:07:36 2008  Tanaka Akira  <akr@fsij.org>
+
+	* regexec.c (string_cmp_ic): add text_end argument.
+	  (slow_search): call enclen with real string end.
+	  (map_search): add text_end argument.
+
+Thu Sep 18 22:54:39 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* ext/openssl/ossl_pkey_ec.c (ossl_ec_key_to_string): comment out
+	  fragments of unused code.
+
+Thu Sep 18 22:35:03 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* ext/bigdecimal/bigdecimal.c (VpCtoV): 1E1000...000 is interpreted as
+	  Infinity.  [ruby-dev:36159]
+
+	* ext/bigdecimal/bigdecimal.c (VpPower): Infinity ** 1 returns
+	  Infinity instead of NaN.  [ruby-dev:36159]
+
+	* test/bigdecimal/test_bigdecimal.rb: add tests for above.
+
+Thu Sep 18 21:57:32 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* string.c (rb_str_comparable): make ascii8bit string to be
+	  compatible with any other encoding.
+
+	* string.c (rb_str_cmp): use rb_str_comparable() instead of
+	  rb_enc_compatible() since <=> is a comparison anyway.
+
+Thu Sep 18 21:37:14 2008  Tanaka Akira  <akr@fsij.org>
+
+	* grapheme cluster implementation reverted.  [ruby-dev:36375]
+
+Thu Sep 18 20:50:36 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/rake.rb (Rake::Application#standard_exception_handling):
+	  replaced magic numbers for exit status.
+
+Thu Sep 18 20:37:59 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/optparse.rb (OptionParser::ParseError#set_backtrace): omits
+	  OptionParser internal backtraces unless debug flag is set.
+
+Thu Sep 18 20:02:48 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* lib/uri/common.rb (unescape): skip '%' to make String#hex work
+	  correctly.
+
+Thu Sep 18 19:51:11 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* bignum.c (big2str_karatsuba): free internal buffer eagerly.
+	  a patch from TOYOFUKU Chikanobu <nobu_toyofuku at nifty.com>
+	  in [ruby-dev:36217].
+
+	* bignum.c (rb_big2str0): ditto.
+
+Thu Sep 18 19:43:04 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* st.c (new_size): raise RuntimeError when st_table is too big.
+	  [ruby-dev:36354]
+
+Thu Sep 18 18:23:23 2008  Tanaka Akira  <akr@fsij.org>
+
+	* transcode.c (enc_arg): must take pointer argument to avoid GC
+	  problem.  StringValueCStr modifies the argument and it should be
+	  preserved while the string StringValueCStr returns is used.
+	  Since the string is used by caller, the modified argument should be
+	  hold by caller.  Actually
+	    GC.stress = true
+	    def (o=Object.new).to_str()
+	      "universal"+"_newline"
+	    end                         
+	    "\u3042".encode(o, "")
+	  causes curious warning:
+	    rb_define_const: invalid name `' for constant
+
+Thu Sep 18 17:32:44 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* transcode.c: add "Error" suffix for Encoding exception classes.
+	  a patch from Tadashi Saito <shiba at mail2.accsnet.ne.jp> in
+	  [ruby-dev:36346].
+
+	* encoding.c (Init_Encoding): rename EncodingCompatibilityError to
+	  Encoding::CompatibilityError.  [ruby-dev:36366]
+
+Thu Sep 18 17:18:35 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* transcode.c (enc_arg): revert last change.  too early exception
+	  raising.
+
+	* transcode.c (enc_arg): need not to take pointer argument.
+
+Sun Sep 18 02:22:15 2008  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* test/bigdecimal/test_bigdecimal.rb: add tests to achieve over 90%
+	  test coverage of bigdecimal.
+
+Wed Sep 17 21:50:14 2008  Tanaka Akira  <akr@fsij.org>
+
+	* string.c (rb_str_casecmp): don't use rb_enc_codepoint.
+
+Wed Sep 17 19:55:33 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* complex.c (nucomp_s_convert): accepts complex
+	  value (Complex(a,b) as a+bi).
+
+Wed Sep 17 19:16:47 2008  Kazuhiro NISHIYAMA  <zn@mbf.nifty.com>
+
+	* test/ruby/test_io.rb (TestIO#test_dup): avoid infinite loop.
+	  [ruby-dev:36326]
+
+	* test/ruby/test_io.rb (TestIO#test_dup): remove needless open.
+	  [ruby-dev:35957]
+
+Wed Sep 17 17:44:59 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* io.c (rb_io_extract_modeenc): process option mode: and perm: as
+	  well.
+
+	* io.c (open_key_args): move mode: and perm: related code to
+	  rb_io_extract_modeenc().
+
+Wed Sep 17 13:42:59 2008  Takeyuki Fujioka  <xibbar@ruby-lang.org>
+
+	* lib/cgi/html.rb (checkbox_group,radio_group): bug fix
+	  use size instead of	bytesize.
+
+	* test/cgi/test_cgi_tag_helper.rb: test for checkbox_group,radio_group.
+
+Wed Sep 17 06:58:31 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* numeric.c: provides predicate real? instead of scalar?.
+
+	* complex.c: follows the above change.
+
+	* lib/cmath.rb: ditto.
+
+Wed Sep 17 01:56:27 2008  Tanaka Akira  <akr@fsij.org>
+
+	* test/ruby/test_io_m17n.rb: use __FILE__ instead of /dev/null.
+	  [ruby-dev:36327]
+
+Wed Sep 17 01:33:11 2008  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/oniguruma.h (OnigEncodingTypeST): add precise_ret
+	  argument for mbc_to_code.
+	  (ONIGENC_MBC_TO_CODE): provide NULL for precise_ret.
+	  (ONIGENC_MBC_PRECISE_CODEPOINT): defined.
+
+	* include/ruby/encoding.h (rb_enc_mbc_precise_codepoint): defined.
+
+	* regenc.h (onigenc_single_byte_mbc_to_code): precise_ret argument
+	  added.
+	  (onigenc_mbn_mbc_to_code): ditto.
+
+	* regenc.c (onigenc_single_byte_mbc_to_code): precise_ret argument
+	  added.
+	  (onigenc_mbn_mbc_to_code): ditto.
+
+	* string.c (count_utf8_lead_bytes_with_word): removed.
+	  (str_utf8_nth): removed.
+	  (str_utf8_offset): removed.
+	  (str_strlen): UTF-8 codepoint oriented optimization removed.
+	  (rb_str_substr): ditto.
+	  (enc_succ_char): use rb_enc_mbc_precise_codepoint.
+	  (enc_pred_char): ditto.
+	  (rb_str_succ): ditto.
+
+	* encoding.c (rb_enc_ascget): check length with
+	  rb_enc_mbc_precise_codepoint.
+	  (rb_enc_codepoint): use rb_enc_mbc_precise_codepoint.
+
+	* regexec.c (string_cmp_ic): add text_end argument.
+	  (match_at): check end of character after exact string matches.
+
+	* enc/utf_8.c (grapheme_table): defined for extended grapheme cluster
+	  boundary.
+	  (grapheme_cmp): defined.
+	  (get_grapheme_properties): defined.
+	  (grapheme_boundary_p): defined.
+	  (MAX_BYTES_LENGTH): defined.
+	  (comb_char_enc_len): defined.
+	  (mbc_to_code0): extracted from mbc_to_code.
+	  (mbc_to_code): use mbc_to_code0.
+	  (left_adjust_combchar_head): defined.
+	  (utf_8): use a extended grapheme cluster as a unit.
+	
+	* enc/unicode.c (onigenc_unicode_mbc_case_fold): use
+	  ONIGENC_MBC_PRECISE_CODEPOINT to extract codepoints.
+	  (onigenc_unicode_get_case_fold_codes_by_str): ditto.
+
+	* enc/euc_jp.c (mbc_to_code): follow mbc_to_code field change.
+	  use onigenc_mbn_mbc_to_code.
+
+	* enc/shift_jis.c (mbc_to_code): ditto.
+
+	* enc/emacs_mule.c (mbc_to_code): ditto.
+
+	* enc/gbk.c (gbk_mbc_to_code): follow mbc_to_code field and
+	  onigenc_mbn_mbc_to_code change.
+
+	* enc/cp949.c (cp949_mbc_to_code): ditto.
+
+	* enc/big5.c (big5_mbc_to_code): ditto.
+
+	* enc/euc_tw.c (euctw_mbc_to_code): ditto.
+
+	* enc/euc_kr.c (euckr_mbc_to_code): ditto.
+
+	* enc/gb18030.c (gb18030_mbc_to_code): ditto.
+
+	* enc/utf_32be.c (utf32be_mbc_to_code): follow mbc_to_code field
+	  change.
+
+	* enc/utf_16be.c (utf16be_mbc_to_code): ditto.
+
+	* enc/utf_32le.c (utf32le_mbc_to_code): ditto.
+
+	* enc/utf_16le.c (utf16le_mbc_to_code): ditto.
+
+Wed Sep 17 01:17:12 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* transcode.c (enc_arg): raise exception when unknown encoding is
+	  given.
+
+Tue Sep 16 22:23:24 2008  Takeyuki Fujioka  <xibbar@ruby-lang.org>
+
+	* lib/cgi/core.rb (CGI#header): performance improvement. 
+	  From CGIAlt http://cgialt.rubyforge.org/
+
+	* test/cgi/test_cgi_header.rb: exception class fixed.
+
+Tue Sep 16 22:21:33 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* string.c (rb_str_concat): fix rdoc. (codepoint is integer)
+
+	* string.c (rb_str_each_codepoint): use UINT2NUM.
+
+Tue Sep 16 21:48:55 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* re.c (rb_reg_desc): Regexp#inspect should be US-ASCII.
+
+Tue Sep 16 21:33:22 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* string.c (rb_str_crypt): orthodox crypt() sees only first two bytes
+	  of salt.
+
+Tue Sep 16 19:18:40 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* complex.c (nucomp_marshal_{dump,load}): preserve instance
+	  variables.
+
+	* rational.c (nurat_marshal_{dump,load}): ditto.
+
+Tue Sep 16 18:28:52 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* io.c (rb_io_gets_m): rdoc updated.  limit counts in bytes.
+	  [ruby-core:18617]
+
+	* io.c (rb_io_readlines, rb_f_gets): ditto.
+
+	* io.c (rb_io_readbyte): rdoc updated.  [ruby-core:18617]
+
+Tue Sep 16 11:55:16 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* string.c (rb_str_each_codepoint): add new methods, #codepoints
+	  and #each_codepoint.  a patch from Michael Selig
+	  <michael.selig at fs.com.au> in [ruby-core:18532].
+
+Tue Sep 16 11:24:44 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* ext/socket/mkconstants.rb: add new constants.  a patch from
+	  IWAMURO Motonori <deenheart+ruby at gmail.com> in [ruby-dev:36309].
+
+Tue Sep 16 09:20:42 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* test/ruby/test_io.rb (TestIO#test_dup): exception should be
+	  raised from IO#dup.
+
+Tue Sep 16 08:35:29 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* test/ruby/test_io.rb (TestIO#test_dup): this test might fail if
+	  there are any garbage IO objects.
+
+Tue Sep 16 02:02:56 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* string.c (rb_str_buf_cat_ascii): codepoint is unsigned int.
+
+	* string.c (rb_str_concat): ditto.
+
+	* string.c (str_cat_char): ditto.
+
+	* string.c (prefix_escape): ditto.
+
+Tue Sep 16 01:47:07 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* string.c (single_byte_optimizable): make function inline.  based
+	  on a patch from Michael Selig <michael.selig at fs.com.au> in
+	  [ruby-core:18532].
+
+	* string.c (str_modify_keep_cr): new function act as
+	  rb_str_modify(), but don't clear coderange
+
+	* string.c (rb_str_casecmp): specialized for single byte strings.
+
+	* string.c (rb_str_splice): preserve coderange.
+
+	* string.c (rb_str_slice_bang, rb_str_reverse_bang,
+	  rb_str_upcase_bang, rb_str_downcase_bang, tr_trans,
+	  rb_str_capitalize_bang, rb_str_swapcase_bang,
+	  rb_str_delete_bang, rb_str_chop_bang, rb_str_chomp_bang,
+	  rb_str_lstrip_bang, rb_str_rstrip_bang): ditto.
+
+	* string.c (rb_str_clear): preset coderange.
+
+	* string.c (rb_str_split_m): specialized for splitting with a
+	  string.
+
+Tue Sep 16 00:57:56 2008  Tanaka Akira  <akr@fsij.org>
+
+	* re.c (rb_reg_quote): use rb_enc_mbcput to generate ASCII
+	  incompatible characters properly.
+
+Tue Sep 16 00:51:59 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* encoding.c (Encoding#base_encoding): removed. [ruby-dev:36270]
+
+Tue Sep 16 00:40:56 2008  Tanaka Akira  <akr@fsij.org>
+
+	* transcode_data.h (STR1_LENGTH): defined.
+	  (makeSTR1LEN): defined.
+
+	* tool/transcode-tblgen.rb: use makeSTR1LEN.  generate STR1 for 4 to
+	  259 bytes.
+
+	* transcode.c (rb_transcoding): new field: output_index.
+	  (transcode_restartable0): use STR1_LENGTH.
+
+Mon Sep 15 23:52:45 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* gc.c, include/ruby/ruby.h: rename rb_register_mark_object()
+	  to rb_gc_register_mark_object().
+
+	* eval.c, vm.c: initialize vm->mark_object_ary at
+	  Init_top_self().
+
+	* bignum.c, complex.c, encoding.c, ext/win32ole/win32ole.c,
+	  io.c, load.c, marshal.c, rational.c, ruby.c, vm.c: 
+	  use rb_gc_register_mark_object() instead of
+	  rb_global_variable() or rb_gc_register_address().
+
+Mon Sep 15 23:37:15 2008  Tanaka Akira  <akr@fsij.org>
+
+	* transcode.c (econv_opts): don't use to_sym.
+
+Mon Sep 15 23:28:28 2008  Tanaka Akira  <akr@fsij.org>
+
+	* encoding.c (rb_enc_get_index): don't return -1.
+
+	* io.c (rb_scan_open_args): call FilePathValue before encoding
+	  conversion.
+
+Mon Sep 15 22:11:07 2008  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* string.c (rb_str_squeeze_bang): specialized for 7bit characters in
+	  ASCII compatible strings.
+
+	* string.c (rb_str_count): ditto.
+
+	* string.c (tr_trans): preserve 7bit/valid coderange flag.
+
+	* string.c (rb_str_squeeze_bang): preserve previous coderange value.
+
+	* string.c (rb_str_lstrip_bang): ditto.
+
+	* string.c (rb_str_rstrip_bang): ditto.
+
+	* encoding.c (rb_default_external_encoding): preserve
+	  default_external_encoding in a static variable.
+
+	* string.c (single_byte_optimizable): check coderange first, to
+	  reduce number of calling rb_enc_from_index().
+
+Mon Sep 15 20:57:00 2008  Yuki Sonoda (Yugui)  <yugui@yugui.jp>
+
+	* lib/matrix.rb (Matrix#eql?): fixed [ruby-dev:36298].
+	  Reported by an anonymous user.
+
+	* lib/matrix.rb (Vector#eql?): ditto.
+
+	* (Matrix#compare_by_row_vectors): takes comparison
+	  strategy as an optional parameter.
+
+	* (Vector#compare_by): ditto.
+
+Mon Sep 15 14:34:32 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* encoding.c (RUBY_MAX_CHAR_LEN): defined.
+
+	* encoding.c (str_cat_char): use RUBY_MAX_CHAR_LEN.
+
+Mon Sep 15 13:53:33 2008  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* encoding.c (rb_enc_compatible): accept other than strings and
+	  regexps. [ruby-core:18595]
+
+	* encoding.c (rb_enc_get_index): works files and encodings.
+
+Mon Sep 15 13:17:21 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* complex.c (nucomp_eql_p): new.
+
+	* complex.c (nucomp_hash): should use hash values of the elements.
+
+	* rational.c (nurat_hash): ditto.
+
+	* hash.c (rb_any_cmp): removed an unused variable.
+
+Mon Sep 15 11:11:04 2008  Tanaka Akira  <akr@fsij.org>
+
+	* transcode_data.h (rb_transcoder): resetsize_func and resetstate_func
+	  also returns ssize_t.
+
+	* enc/trans/iso2022.trans: follow the type change.
+
+Mon Sep 15 10:28:10 2008  Yuki Sonoda (Yugui)  <yugui@yugui.jp>
+
+	* test/matrix/test_matrix.rb (setup): typo.
+	  (test_equality): misdefinition of the expected working.
+	  Reported by an anonymous user.
+	  (test_hash): added.
+
+	* test/matrix/test_vector.rb: ditto.
+
+Mon Sep 15 03:33:10 2008  Tanaka Akira  <akr@fsij.org>
+
+	* transcode_data.h: return output functions ssize_t.
+
+	* transcode.c (transcode_restartable0): don't need to cast the result
+	  of output functions.
+
+	* enc/trans/newline.trans: follow the type change.
+
+	* enc/trans/escape.trans: ditto.
+
+	* enc/trans/utf_16_32.trans: ditto.
+
+	* enc/trans/iso2022.trans: ditto.
+
+	* enc/trans/japanese.trans: ditto.
+
+Mon Sep 15 03:04:29 2008  Tanaka Akira  <akr@fsij.org>
+
+	* transcode_data.h: output function takes output buffer size.
+
+	* transcode.c: give output buffer size for output functions.
+
+	* enc/trans/newline.trans: follow the type change.
+
+	* enc/trans/escape.trans: ditto.
+
+	* enc/trans/utf_16_32.trans: ditto.
+
+	* enc/trans/iso2022.trans: ditto.
+
+	* enc/trans/japanese.trans: ditto.
+
+Mon Sep 15 02:37:19 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* transcode.c (str_encode): returns duplicated string if nothing
+	  changed.  [ruby-core:18578]
+
+Sun Sep  14 22:09:01 2008  Takeyuki Fujioka  <xibbar@ruby-lang.org>
+
+	* lib/cgi/core.rb (CGI::parse): performance improvement
+
+Sun Sep 14 18:33:32 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* complex.c: trivial changes.
+
+Sun Sep 14 16:15:22 2008  Yuki Sonoda (Yugui)  <yugui@yugui.jp>
+
+	* lib/matrix.rb (Vector#eql?): typo of the method name as "eqn?".
+	  (Vector#eqn?): removed. Defined by mistake.
+	  Fixes [ruby-dev:36294]. Reported by weda <weda AT
+	  issp.u-tokyo.ac.jp> and an anonymous user.
+
+	* test/matrix/test_matrix.rb: added.
+
+	* test/matrix/test_vector.rb: added.
+
+Sun Sep 14 16:07:04 2008  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ruby.c (process_options): associates the locale encoding with $0 as
+	  well as ARGV.
+
+Sun Sep 14 13:48:03 2008  Yuki Sonoda (Yugui)  <yugui@yugui.jp>
+
+	* object.c (Init_Object): added metameta-class initialization for 
+	  BasicObject, Object, and Module.
+	  The metameta-classes of them are now the metaclass of Class, as the 
+	  metameta-class of Class is. 
+
+	* object.c (boot_defmetametaclass): added.
+
+Sun Sep 14 10:10:43 2008  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* complex.c (f_{add,mul,sub}): omitted some shortcuts for preserving
+	  signed zero anyway.
+
+	* complex.c (nucomp_negate): new.
+
+Sun Sep 14 04:15:16 2008  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/oniguruma.h (OnigEncodingTypeST): add end argument for
+	  left_adjust_char_head.
+	  (ONIGENC_LEFT_ADJUST_CHAR_HEAD): add end argument.
+	  (onigenc_get_left_adjust_char_head): ditto.
+
+	* include/ruby/encoding.h (rb_enc_left_char_head): add end argument.
+
+	* regenc.h (onigenc_single_byte_left_adjust_char_head): ditto.
+
+	* regenc.c (onigenc_get_right_adjust_char_head): follow the interface
+	  change.
+	  (onigenc_get_right_adjust_char_head_with_prev): ditto.
+	  (onigenc_get_prev_char_head): ditto.
+	  (onigenc_step_back): ditto.
+	  (onigenc_get_left_adjust_char_head): ditto.
+	  (onigenc_single_byte_code_to_mbc): ditto.
+
+	* re.c: ditto.
+
+	* string.c: ditto.
+
+	* io.c: ditto.
+
+	* regexec.c: ditto.
+
+	* enc/euc_jp.c: ditto.
+
+	* enc/cp949.c: ditto.
+
+	* enc/shift_jis.c: ditto.
+
+	* enc/gbk.c: ditto.
+
+	* enc/big5.c: ditto.
+
+	* enc/euc_tw.c: ditto.
+
+	* enc/euc_kr.c: ditto.
+
+	* enc/emacs_mule.c: ditto.
+
+	* enc/gb18030.c: ditto.
+
+	* enc/utf_8.c: ditto.
+
+	* enc/utf_16le.c: ditto.
+
+	* enc/utf_16be.c: ditto.
+
+	* enc/utf_32le.c: ditto.
+
+	* enc/utf_32be.c: ditto.
+
+Sun Sep 14 03:43:27 2008  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/oniguruma.h (ONIGENC_STEP_BACK): add end argument.
+	  (onigenc_step_back): ditto.
+
+	* regenc.c (onigenc_step_back): add end argument.
+
+	* regexec.c: follow the interface change.
+
+Sun Sep 14 03:20:03 2008  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/oniguruma.h (onigenc_get_prev_char_head): add end
+	  argument.
+
+	* include/ruby/encoding.h (rb_enc_prev_char): ditto.
+
+	* regenc.c (onigenc_get_prev_char_head): add end argument.
+
+	* regparse.c: follow the interface change.
+
+	* regexec.c: ditto.
+
+	* string.c: ditto.
+
+	* parse.y: ditto.
+
+Sun Sep 14 02:04:28 2008  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/oniguruma.h
+	  (onigenc_get_right_adjust_char_head_with_prev): add end argument.
+
+	* regenc.c (onigenc_get_right_adjust_char_head_with_prev): use end
+	  argument.
+
+	* regexec.c (forward_search_range): follow the interface change.
+
+Sun Sep 14 01:38:26 2008  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/oniguruma.h (onigenc_get_right_adjust_char_head): add
+	  end argument.
+
+	* include/ruby/encoding.h (rb_enc_right_char_head): add end argument.
+
+	* regenc.c (onigenc_get_right_adjust_char_head): use end argument.
+
+	* re.c (rb_reg_adjust_startpos): follow the interface change.
+
+	* string.c (rb_str_index): ditto.
+
+	* regexec.c (backward_search_range): ditto.
+	  (onig_search): ditto.
+
 Sun Sep 14 00:43:28 2008  Tanaka Akira  <akr@fsij.org>
 
 	* ext/ripper/depend (ripper.o): it depends on ruby headers.
@@ -962,7 +1746,8 @@ Thu Sep  4 19:10:27 2008  Tanaka Akira  <akr@fsij.org>
 	* include/ruby/encoding.h (ECONV_INVALID_IGNORE): removed because
 	  it tend to cause security problem.  If the behaviour is really
 	  required, ECONV_INVALID_REPLACE with empty string can be used.
-	  For example, CVE-2006-2313, CVE-2008-1036, [ruby-core:15645]
+	  For example, CVE-2006-2313, CVE-2008-1036, [ruby-core:15645],
+	  http://unicode.org/reports/tr36/
 	  (ECONV_UNDEF_IGNORE): ditto.
 
 	* transcode.c (rb_econv_convert): follow the above change.

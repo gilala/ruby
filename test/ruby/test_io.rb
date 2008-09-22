@@ -578,18 +578,6 @@ class TestIO < Test::Unit::TestCase
     (wt.kill; wt.join) if wt
   end
 
-  def pipe2(&b)
-    a = []
-    a << IO.pipe while true
-  rescue Errno::EMFILE, Errno::ENFILE, Errno::ENOMEM
-    yield(*a.last)
-  ensure
-    a.each do |r, w|
-      r.close unless !r || r.closed?
-      w.close unless !w || w.closed?
-    end
-  end
-
   def ruby(*args)
     args = ['-e', '$>.write($<.read)'] if args.empty?
     ruby = EnvUtil.rubybin
@@ -636,14 +624,16 @@ class TestIO < Test::Unit::TestCase
       assert_equal("", f2.read)
     end
 
-    proc do
-      open(__FILE__) # see Bug #493 [ruby-dev:35957]
-    end.call
-
-    pipe2 do |r, w|
-      assert_raise(Errno::EMFILE, Errno::ENFILE, Errno::ENOMEM) do
-        r2, w2 = r.dup, w.dup
-      end
+    a = []
+    assert_raise(Errno::EMFILE, Errno::ENFILE, Errno::ENOMEM) do
+      loop {a << IO.pipe}
+    end
+    assert_raise(Errno::EMFILE, Errno::ENFILE, Errno::ENOMEM) do
+      loop {a << [a[-1][0].dup, a[-1][1].dup]}
+    end
+    a.each do |r, w|
+      r.close unless !r || r.closed?
+      w.close unless !w || w.closed?
     end
   end
 

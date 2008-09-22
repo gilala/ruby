@@ -722,7 +722,7 @@ rb_gc_disable(void)
 VALUE rb_mGC;
 
 void
-rb_register_mark_object(VALUE obj)
+rb_gc_register_mark_object(VALUE obj)
 {
     VALUE ary = GET_THREAD()->vm->mark_object_ary;
     rb_ary_push(ary, obj);
@@ -1539,7 +1539,7 @@ gc_mark_children(rb_objspace_t *objspace, VALUE ptr, int lev)
 
       case T_COMPLEX:
 	gc_mark(objspace, obj->as.complex.real, lev);
-	gc_mark(objspace, obj->as.complex.image, lev);
+	gc_mark(objspace, obj->as.complex.imag, lev);
 	break;
 
       case T_STRUCT:

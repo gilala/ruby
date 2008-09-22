@@ -650,7 +650,7 @@ struct RRational {
 struct RComplex {
     struct RBasic basic;
     VALUE real;
-    VALUE image;
+    VALUE imag;
 };
 
 struct RData {
@@ -851,7 +851,7 @@ void rb_define_alias(VALUE,const char*,const char*);
 void rb_define_attr(VALUE,const char*,int,int);
 
 void rb_global_variable(VALUE*);
-void rb_register_mark_object(VALUE);
+void rb_gc_register_mark_object(VALUE);
 void rb_gc_register_address(VALUE*);
 void rb_gc_unregister_address(VALUE*);
 
@@ -982,6 +982,7 @@ RUBY_EXTERN VALUE rb_cCont;
 RUBY_EXTERN VALUE rb_cDir;
 RUBY_EXTERN VALUE rb_cData;
 RUBY_EXTERN VALUE rb_cFalseClass;
+RUBY_EXTERN VALUE rb_cEncoding;
 RUBY_EXTERN VALUE rb_cEnumerator;
 RUBY_EXTERN VALUE rb_cFile;
 RUBY_EXTERN VALUE rb_cFixnum;

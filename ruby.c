@@ -967,6 +967,7 @@ process_options(VALUE arg)
     NODE *tree = 0;
     VALUE parser;
     VALUE iseq;
+    VALUE args;
     rb_encoding *enc, *lenc;
     const char *s;
     char fbuf[MAXPATHLEN];
@@ -1067,7 +1068,7 @@ process_options(VALUE arg)
 #if defined DOSISH || defined __CYGWIN__
     translate_char(RSTRING_PTR(rb_progname), '\\', '/');
 #endif
-    opt->script_name = rb_str_new4(rb_progname);
+    opt->script_name = rb_progname;
     opt->script = RSTRING_PTR(opt->script_name);
     safe = rb_safe_level();
     rb_set_safe_level_force(0);
@@ -1077,8 +1078,10 @@ process_options(VALUE arg)
     ruby_init_loadpath();
     ruby_init_gems(!(opt->disable & DISABLE_BIT(gems)));
     lenc = rb_locale_encoding();
-    for (i = 0; i < RARRAY_LEN(rb_argv); i++) {
-	rb_enc_associate(RARRAY_PTR(rb_argv)[i], lenc);
+    rb_enc_associate(rb_progname, lenc);
+    opt->script_name = rb_str_new4(rb_progname);
+    for (i = 0, args = rb_argv; i < RARRAY_LEN(args); i++) {
+	rb_enc_associate(RARRAY_PTR(args)[i], lenc);
     }
     parser = rb_parser_new();
     if (opt->yydebug) rb_parser_set_yydebug(parser, Qtrue);
@@ -1475,7 +1478,6 @@ ruby_prog_init(void)
     rb_define_hooked_variable("$PROGRAM_NAME", &rb_progname, 0, set_arg0);
 
     rb_define_global_const("ARGV", rb_argv);
-    rb_global_variable(&rb_argv0);
 
 #ifdef MSDOS
     /*
@@ -1532,6 +1534,7 @@ ruby_process_options(int argc, char **argv)
 
     ruby_script(argv[0]);	/* for the time being */
     rb_argv0 = rb_str_new4(rb_progname);
+    rb_gc_register_mark_object(rb_argv0);
     args.argc = argc;
     args.argv = argv;
     args.opt = cmdline_options_init(&opt);

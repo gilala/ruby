@@ -2177,13 +2177,14 @@ rb_io_getline_1(VALUE rs, long limit, VALUE io)
         else
             enc = io_input_encoding(fptr);
 	while ((c = appendline(fptr, newline, &str, &limit)) != EOF) {
-            const char *s, *p, *pp;
+            const char *s, *p, *pp, *e;
 
 	    if (c == newline) {
 		if (RSTRING_LEN(str) < rslen) continue;
 		s = RSTRING_PTR(str);
-		p = s + RSTRING_LEN(str) - rslen;
-		pp = rb_enc_left_char_head(s, p, enc);
+                e = s + RSTRING_LEN(str);
+		p = e - rslen;
+		pp = rb_enc_left_char_head(s, p, e, enc);
 		if (pp != p) continue;
 		if (!rspara) rscheck(rsptr, rslen, rs);
 		if (memcmp(p, rsptr, rslen) == 0) break;
@@ -2191,7 +2192,7 @@ rb_io_getline_1(VALUE rs, long limit, VALUE io)
 	    if (limit == 0) {
 		s = RSTRING_PTR(str);
 		p = s + RSTRING_LEN(str);
-		pp = rb_enc_left_char_head(s, p-1, enc);
+		pp = rb_enc_left_char_head(s, p-1, p, enc);
                 if (extra_limit &&
                     MBCLEN_NEEDMORE_P(rb_enc_precise_mbclen(pp, p, enc))) {
                     /* relax the limit while incomplete character.
@@ -2256,7 +2257,7 @@ rb_io_gets(VALUE io)
  *  to <code>$_</code>. Returns <code>nil</code> if called at end of
  *  file.  If the first argument is an integer, or optional second
  *  argument is given, the returning string would not be longer than the
- *  given value.
+ *  given value in bytes.
  *
  *     File.new("testfile").gets   #=> "This is line one\n"
  *     $_                          #=> "This is line one\n"
@@ -2362,8 +2363,8 @@ rb_io_readline(int argc, VALUE *argv, VALUE io)
  *  <i>sep</i> is <code>nil</code>, the rest of the stream is returned
  *  as a single record.  If the first argument is an integer, or
  *  optional second argument is given, the returning string would not be
- *  longer than the given value. The stream must be opened for reading
- *  or an <code>IOError</code> will be raised.
+ *  longer than the given value in bytes. The stream must be opened for
+ *  reading or an <code>IOError</code> will be raised.
  *
  *     f = File.new("testfile")
  *     f.readlines[0]   #=> "This is line one\n"
@@ -2747,7 +2748,7 @@ rb_io_getbyte(VALUE io)
  *  call-seq:
  *     ios.readbyte   => fixnum
  *
- *  Reads a character as with <code>IO#getc</code>, but raises an
+ *  Reads a byte as with <code>IO#getbyte</code>, but raises an
  *  <code>EOFError</code> on end of file.
  */
 
@@ -3863,7 +3864,7 @@ validate_enc_binmode(int fmode, rb_encoding *enc, rb_encoding *enc2)
 }
 
 static void
-rb_io_extract_modeenc(VALUE *vmode_p, VALUE opthash,
+rb_io_extract_modeenc(VALUE *vmode_p, VALUE *vperm_p, VALUE opthash,
         int *oflags_p, int *fmode_p, convconfig_t *convconfig_p)
 {
     VALUE vmode;
@@ -3871,7 +3872,7 @@ rb_io_extract_modeenc(VALUE *vmode_p, VALUE opthash,
     rb_encoding *enc, *enc2;
     int ecflags;
     VALUE ecopts;
-    int has_enc = 0;
+    int has_enc = 0, has_vmode = 0;
     VALUE intmode;
 
     vmode = *vmode_p;
@@ -3890,6 +3891,8 @@ rb_io_extract_modeenc(VALUE *vmode_p, VALUE opthash,
     }
     else {
         const char *p;
+
+      vmode_handle:
         SafeStringValue(vmode);
         p = StringValueCStr(vmode);
         fmode = rb_io_modestr_fmode(p);
@@ -3908,15 +3911,38 @@ rb_io_extract_modeenc(VALUE *vmode_p, VALUE opthash,
     else {
 	VALUE v;
 	v = rb_hash_aref(opthash, sym_textmode);
-	if (RTEST(v))
+	if (!NIL_P(v))
             fmode |= FMODE_TEXTMODE;
 	v = rb_hash_aref(opthash, sym_binmode);
-	if (RTEST(v)) {
+	if (!NIL_P(v)) {
             fmode |= FMODE_BINMODE;
 #ifdef O_BINARY
             oflags |= O_BINARY;
 #endif
         }
+	if (!has_vmode) {
+	    v = rb_hash_aref(opthash, sym_mode);
+	    if (!NIL_P(v)) {
+		if (!NIL_P(vmode)) {
+		    rb_raise(rb_eArgError, "mode specified twice");
+		}
+		has_vmode = 1;
+		vmode = v;
+		goto vmode_handle;
+	    }
+	}
+	v = rb_hash_aref(opthash, sym_perm);
+	if (!NIL_P(v)) {
+	    if (vperm_p) {
+		if (!NIL_P(*vperm_p)) {
+		    rb_raise(rb_eArgError, "perm specified twice");
+		}
+		*vperm_p = v;
+	    }
+	    else {
+		/* perm no use, just ignore */
+	    }
+	}
         ecflags = rb_econv_prepare_opts(opthash, &ecopts);
 
         if (io_extract_encoding_option(opthash, &enc, &enc2)) {
@@ -4587,7 +4613,7 @@ rb_io_s_popen(int argc, VALUE *argv, VALUE klass)
     opt = pop_last_hash(&argc, &argv);
     rb_scan_args(argc, argv, "11", &pname, &pmode);
 
-    rb_io_extract_modeenc(&pmode, opt, &oflags, &fmode, &convconfig);
+    rb_io_extract_modeenc(&pmode, 0, opt, &oflags, &fmode, &convconfig);
     modestr = rb_io_oflags_modestr(oflags);
 
     tmp = rb_check_array_type(pname);
@@ -4630,6 +4656,7 @@ rb_scan_open_args(int argc, VALUE *argv,
     opt = pop_last_hash(&argc, &argv);
 
     rb_scan_args(argc, argv, "12", &fname, &vmode, &vperm);
+    FilePathValue(fname);
 #if defined _WIN32 || defined __APPLE__
     {
 	static rb_encoding *fs_encoding;
@@ -4649,9 +4676,8 @@ rb_scan_open_args(int argc, VALUE *argv,
 	}
     }
 #endif
-    FilePathValue(fname);
  
-    rb_io_extract_modeenc(&vmode, opt, &oflags, &fmode, convconfig_p);
+    rb_io_extract_modeenc(&vmode, &vperm, opt, &oflags, &fmode, convconfig_p);
 
     perm = NIL_P(vperm) ? 0666 :  NUM2UINT(vperm);
 
@@ -4908,7 +4934,7 @@ rb_io_open(VALUE filename, VALUE vmode, VALUE vperm, VALUE opt)
     convconfig_t convconfig;
     mode_t perm;
 
-    rb_io_extract_modeenc(&vmode, opt, &oflags, &fmode, &convconfig);
+    rb_io_extract_modeenc(&vmode, &vperm, opt, &oflags, &fmode, &convconfig);
     perm = NIL_P(vperm) ? 0666 :  NUM2UINT(vperm);
 
     if (!NIL_P(cmd = check_pipe_command(filename))) {
@@ -5595,7 +5621,7 @@ rb_io_initialize(int argc, VALUE *argv, VALUE io)
 
     opt = pop_last_hash(&argc, &argv);
     rb_scan_args(argc, argv, "11", &fnum, &vmode);
-    rb_io_extract_modeenc(&vmode, opt, &oflags, &fmode, &convconfig);
+    rb_io_extract_modeenc(&vmode, 0, opt, &oflags, &fmode, &convconfig);
 
     fd = NUM2INT(fnum);
     UPDATE_MAXFD(fd);
@@ -5993,9 +6019,9 @@ static VALUE argf_gets(int, VALUE *, VALUE);
  *  reads the input one paragraph at a time, where paragraphs are
  *  divided by two consecutive newlines.  If the first argument is an
  *  integer, or optional second argument is given, the returning string
- *  would not be longer than the given value.  If multiple filenames are
- *  present in +ARGV+, +gets(nil)+ will read the contents one file at a
- *  time.
+ *  would not be longer than the given value in bytes.  If multiple
+ *  filenames are present in +ARGV+, +gets(nil)+ will read the contents
+ *  one file at a time.
  *
  *     ARGV << "testfile"
  *     print while gets
@@ -6773,7 +6799,6 @@ static void
 open_key_args(int argc, VALUE *argv, struct foreach_arg *arg)
 {
     VALUE opt, v;
-    VALUE vmode, vperm;
 
     FilePathValue(argv[0]);
     arg->io = 0;
@@ -6800,15 +6825,7 @@ open_key_args(int argc, VALUE *argv, struct foreach_arg *arg)
 	arg->io = rb_io_open_with_args(RARRAY_LEN(args), RARRAY_PTR(args));
 	return;
     }
-    vmode = Qnil;
-    vperm = INT2NUM(O_RDONLY);
-    v = rb_hash_aref(opt, sym_mode);
-    if (!NIL_P(v))
-        vmode = v;
-    v = rb_hash_aref(opt, sym_perm);
-    if (!NIL_P(v))
-        vperm = v;
-    arg->io = rb_io_open(argv[0], vmode, vperm, opt);
+    arg->io = rb_io_open(argv[0], Qnil, INT2NUM(O_RDONLY), opt);
 }
 
 static VALUE
@@ -8179,8 +8196,8 @@ Init_IO(void)
     rb_output_fs = Qnil;
     rb_define_hooked_variable("$,", &rb_output_fs, 0, rb_str_setter);
 
-    rb_global_variable(&rb_default_rs);
     rb_rs = rb_default_rs = rb_str_new2("\n");
+    rb_gc_register_mark_object(rb_default_rs);
     rb_output_rs = Qnil;
     OBJ_FREEZE(rb_default_rs);	/* avoid modifying RS_default */
     rb_define_hooked_variable("$/", &rb_rs, 0, rb_str_setter);

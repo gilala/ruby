@@ -380,8 +380,12 @@ static VALUE
 rb_reg_desc(const char *s, long len, VALUE re)
 {
     VALUE str = rb_str_buf_new2("/");
-
-    rb_enc_copy(str, re);
+    if (rb_enc_asciicompat(rb_enc_get(re))) {
+	rb_enc_copy(str, re);
+    }
+    else {
+	rb_enc_associate(str, rb_usascii_encoding());
+    }
     rb_reg_expr_str(str, s, len);
     rb_str_buf_cat2(str, "/");
     if (re) {
@@ -1264,10 +1268,10 @@ rb_reg_adjust_startpos(VALUE re, VALUE str, int pos, int reverse)
 	 string = (UChar*)RSTRING_PTR(str);
 
 	 if (range > 0) {
-	      p = onigenc_get_right_adjust_char_head(enc, string, string + pos);
+	      p = onigenc_get_right_adjust_char_head(enc, string, string + pos, string + RSTRING_LEN(str));
 	 }
 	 else {
-	      p = ONIGENC_LEFT_ADJUST_CHAR_HEAD(enc, string, string + pos);
+	      p = ONIGENC_LEFT_ADJUST_CHAR_HEAD(enc, string, string + pos, string + RSTRING_LEN(str));
 	 }
 	 return p - string;
     }
@@ -2860,34 +2864,34 @@ rb_reg_quote(VALUE str)
 	  case '*': case '.': case '\\':
 	  case '?': case '+': case '^': case '$':
 	  case '#':
-	    *t++ = '\\';
+            t += rb_enc_mbcput('\\', t, enc);
 	    break;
 	  case ' ':
-	    *t++ = '\\';
-	    *t++ = ' ';
+            t += rb_enc_mbcput('\\', t, enc);
+            t += rb_enc_mbcput(' ', t, enc);
 	    continue;
 	  case '\t':
-	    *t++ = '\\';
-	    *t++ = 't';
+            t += rb_enc_mbcput('\\', t, enc);
+            t += rb_enc_mbcput('t', t, enc);
 	    continue;
 	  case '\n':
-	    *t++ = '\\';
-	    *t++ = 'n';
+            t += rb_enc_mbcput('\\', t, enc);
+            t += rb_enc_mbcput('n', t, enc);
 	    continue;
 	  case '\r':
-	    *t++ = '\\';
-	    *t++ = 'r';
+            t += rb_enc_mbcput('\\', t, enc);
+            t += rb_enc_mbcput('r', t, enc);
 	    continue;
 	  case '\f':
-	    *t++ = '\\';
-	    *t++ = 'f';
+            t += rb_enc_mbcput('\\', t, enc);
+            t += rb_enc_mbcput('f', t, enc);
 	    continue;
 	  case '\v':
-	    *t++ = '\\';
-	    *t++ = 'v';
+            t += rb_enc_mbcput('\\', t, enc);
+            t += rb_enc_mbcput('v', t, enc);
 	    continue;
 	}
-	*t++ = c;
+        t += rb_enc_mbcput(c, t, enc);
     }
     rb_str_resize(tmp, t - RSTRING_PTR(tmp));
     OBJ_INFECT(tmp, str);

@@ -579,13 +579,6 @@ BigDecimal_to_i(VALUE self)
     return rb_cstr2inum(psz,10);
 }
 
-static VALUE
-BigDecimal_induced_from(VALUE self, VALUE x)
-{
-    Real *p = GetVpValue(x,1);
-    return p->obj;
-}
-
 /* Returns a new Float object having approximately the same value as the
  * BigDecimal number. Normal accuracy limits and built-in errors of binary
  * Float arithmetic apply.
@@ -1807,7 +1800,6 @@ Init_bigdecimal(void)
     rb_define_singleton_method(rb_cBigDecimal, "mode", BigDecimal_mode, -1);
     rb_define_singleton_method(rb_cBigDecimal, "limit", BigDecimal_limit, -1);
     rb_define_singleton_method(rb_cBigDecimal, "double_fig", BigDecimal_double_fig, 0);
-    rb_define_singleton_method(rb_cBigDecimal, "induced_from",BigDecimal_induced_from, 1);
     rb_define_singleton_method(rb_cBigDecimal, "_load", BigDecimal_load, 1);
     rb_define_singleton_method(rb_cBigDecimal, "ver", BigDecimal_version, 0);
 
@@ -3944,7 +3936,12 @@ VpCtoV(Real *a, const char *int_chr, U_LONG ni, const char *frac, U_LONG nf, con
             es = e*((S_INT)BASE_FIG);
             e = e * 10 + exp_chr[i] - '0';
             if(es>e*((S_INT)BASE_FIG)) {
-                return VpException(VP_EXCEPTION_INFINITY,"exponent overflow",0);
+                VpException(VP_EXCEPTION_INFINITY,"exponent overflow",0);
+                sign = 1;
+                if(int_chr[0] == '-') sign = -1;
+                if(signe > 0) VpSetInf(a, sign);
+                else VpSetZero(a, sign);
+                return 1;
             }
             ++i;
         }
@@ -4633,8 +4630,20 @@ VpPower(Real *y, Real *x, S_INT n)
         }
         goto Exit;
     }
-    if(!VpIsDef(x)) {
-        VpSetNaN(y); /* Not sure !!! */
+    if(VpIsNaN(x)) {
+        VpSetNaN(y);
+        goto Exit;
+    }
+    if(VpIsInf(x)) {
+        if(n==0) {
+            VpSetOne(y);
+            goto Exit;
+        }
+        if(n>0) {
+            VpSetInf(y, (n%2==0 || VpIsPosInf(x)) ? 1 : -1);
+            goto Exit;
+        }
+        VpSetZero(y, (n%2==0 || VpIsPosInf(x)) ? 1 : -1);
         goto Exit;
     }
 

@@ -774,7 +774,7 @@ power_cache_get_power0(int base, int i)
 	big2str_power_cache[base - 2][i] =
 	    i == 0 ? rb_big_pow(rb_int2big(base), INT2FIX(KARATSUBA_DIGITS))
 		   : bigsqr(power_cache_get_power0(base, i - 1));
-	rb_global_variable(&big2str_power_cache[base - 2][i]);
+	rb_gc_register_mark_object(big2str_power_cache[base - 2][i]);
     }
     return big2str_power_cache[base - 2][i];
 }
@@ -909,8 +909,10 @@ big2str_karatsuba(VALUE x, int base, char* ptr,
     bigdivmod(x, b, &q, &r);
     lh = big2str_karatsuba(q, base, ptr, (len - m1)/2,
 			   len - m1, hbase, trim);
+    rb_big_resize(q, 0);
     ll = big2str_karatsuba(r, base, ptr + lh, m1/2,
 			   m1, hbase, !lh && trim);
+    rb_big_resize(r, 0);
 
     return lh + ll;
 }
@@ -953,6 +955,7 @@ rb_big2str0(VALUE x, int base, int trim)
 	len = off + big2str_karatsuba(xx, base, ptr + off, n1,
 				      n2, hbase, trim);
     }
+    rb_big_resize(xx, 0);
 
     ptr[len] = '\0';
     rb_str_resize(ss, len);
@@ -2099,9 +2102,6 @@ rb_big_pow(VALUE x, VALUE y)
 	break;
 
       case T_BIGNUM:
-	if (rb_funcall(y, '<', 1, INT2FIX(0)))
-	  return rb_funcall(rb_rational_raw1(x), rb_intern("**"), 1, y);
-
 	rb_warn("in a**b, b may be too big");
 	d = rb_big2dbl(y);
 	break;
@@ -2110,7 +2110,7 @@ rb_big_pow(VALUE x, VALUE y)
 	yy = FIX2LONG(y);
 
 	if (yy < 0)
-	  return rb_funcall(rb_rational_raw1(x), rb_intern("**"), 1, y);
+	    return rb_funcall(rb_rational_raw1(x), rb_intern("**"), 1, y);
 	else {
 	    VALUE z = 0;
 	    SIGNED_VALUE mask;

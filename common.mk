@@ -9,7 +9,7 @@ RUBYOPT       = -
 
 SPEC_GIT_BASE = git://github.com/rubyspec
 MSPEC_GIT_URL = $(SPEC_GIT_BASE)/mspec.git
-RUBYSPEC_GIT_URL = git://github.com/yugui/rubyspec.git
+RUBYSPEC_GIT_URL = $(SPEC_GIT_BASE)/rubyspec.git
 
 STATIC_RUBY   = static-ruby
 
@@ -49,7 +49,6 @@ COMMONOBJS    = array.$(OBJEXT) \
 		pack.$(OBJEXT) \
 		parse.$(OBJEXT) \
 		process.$(OBJEXT) \
-		prec.$(OBJEXT) \
 		random.$(OBJEXT) \
 		range.$(OBJEXT) \
 		rational.$(OBJEXT) \
@@ -520,7 +519,6 @@ parse.$(OBJEXT): {$(VPATH)}parse.c {$(VPATH)}parse.y $(RUBY_H_INCLUDES) \
   {$(VPATH)}oniguruma.h $(ID_H_INCLUDES) {$(VPATH)}regenc.h \
   {$(VPATH)}regex.h {$(VPATH)}util.h {$(VPATH)}lex.c {$(VPATH)}keywords \
   {$(VPATH)}debug.h {$(VPATH)}id.c
-prec.$(OBJEXT): {$(VPATH)}prec.c $(RUBY_H_INCLUDES) {$(VPATH)}st.h
 proc.$(OBJEXT): {$(VPATH)}proc.c {$(VPATH)}eval_intern.h \
   $(RUBY_H_INCLUDES) {$(VPATH)}st.h {$(VPATH)}node.h {$(VPATH)}util.h \
   {$(VPATH)}vm_core.h {$(VPATH)}debug.h \
