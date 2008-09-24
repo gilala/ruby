@@ -709,13 +709,13 @@ vtune: miniruby$(EXEEXT)
 # Ricsin
 RICSIN_TARGET=t.rcb
 ricsin: miniruby$(EXEEXT) PHONY
-	$(MINIRUBY) $(srcdir)/tool/ricsin.rb $(srcdir)/ricsin/$(RICSIN_TARGET) --run --save-ruby-file
+	$(MINIRUBY) $(srcdir)/ricsin/ricsin.rb $(srcdir)/ricsin/$(RICSIN_TARGET) --run --save-ruby-file
 
 ricsin-test: miniruby$(EXEEXT) PHONY
-	$(MINIRUBY) $(srcdir)/tool/ricsin.rb $(srcdir)/ricsin/test.rcb --run --save-ruby-file
+	$(MINIRUBY) $(srcdir)/ricsin/ricsin.rb $(srcdir)/ricsin/test.rcb --run --save-ruby-file
 
 ricsin-benchmark: miniruby$(EXEEXT) PHONY
-	$(MINIRUBY) $(srcdir)/tool/ricsin.rb $(srcdir)/ricsin/benchmark.rcb --run --save-ruby-file
+	$(MINIRUBY) $(srcdir)/ricsin/ricsin.rb $(srcdir)/ricsin/benchmark.rcb --run --save-ruby-file
 
 dist: $(PREP) $(PROGRAM)
 	$(srcdir)/tool/make-snapshot . $(TARNAME)
