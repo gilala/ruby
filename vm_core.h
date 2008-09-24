@@ -111,6 +111,9 @@ typedef struct rb_compile_option_struct {
     int stack_caching;
     int trace_instruction;
     int debug_level;
+    int ricsin_mode;
+    int ricsin_counter;
+    void **ricsin_funcptrs;
 } rb_compile_option_t;
 
 #if 1
@@ -545,7 +548,7 @@ typedef VALUE CDHASH;
 #endif
 
 typedef rb_control_frame_t *
-  (FUNC_FASTCALL(*rb_insn_func_t))(rb_thread_t *, rb_control_frame_t *);
+  (FUNC_FASTCALL(*rb_insn_func_t))(rb_control_frame_t *);
 
 #define GC_GUARDED_PTR(p)     ((VALUE)((VALUE)(p) | 0x01))
 #define GC_GUARDED_PTR_REF(p) ((void *)(((VALUE)p) & ~0x03))

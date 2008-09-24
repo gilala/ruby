@@ -76,7 +76,7 @@ struct iseq_compile_data {
     int flip_cnt;
     int label_no;
     int node_level;
-    const rb_compile_option_t *option;
+    rb_compile_option_t *option;
 };
 
 /* defined? */

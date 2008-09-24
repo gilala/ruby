@@ -706,6 +706,17 @@ vtune: miniruby$(EXEEXT)
 	vtl view -hf -mn miniruby$(EXEEXT) -sum -sort -cd
 	vtl view -ha -mn miniruby$(EXEEXT) -sum -sort -cd | $(RUNRUBY) $(srcdir)/tool/vtlh.rb > ha.lines
 
+# Ricsin
+RICSIN_TARGET=t.rcb
+ricsin: miniruby$(EXEEXT) PHONY
+	$(MINIRUBY) $(srcdir)/tool/ricsin.rb $(srcdir)/ricsin/$(RICSIN_TARGET) --run --save-ruby-file
+
+ricsin-test: miniruby$(EXEEXT) PHONY
+	$(MINIRUBY) $(srcdir)/tool/ricsin.rb $(srcdir)/ricsin/test.rcb --run --save-ruby-file
+
+ricsin-benchmark: miniruby$(EXEEXT) PHONY
+	$(MINIRUBY) $(srcdir)/tool/ricsin.rb $(srcdir)/ricsin/benchmark.rcb --run --save-ruby-file
+
 dist: $(PREP) $(PROGRAM)
 	$(srcdir)/tool/make-snapshot . $(TARNAME)
 
@@ -715,9 +726,6 @@ up:
 
 depends: PHONY
 	gcc $(XCFLAGS) -MM $(srcdir)/*.c > depends.txt
-
-vm_test.o: vm_test.c $(RUBY_H_INCLUDES) $(VM_CORE_H_INCLUDES) \
-  vm_exec.c vm_insnhelper.c vm_insnhelper.h
 
 help: PHONY
 	@echo "                Makefile of Ruby"

@@ -1364,8 +1364,15 @@ iseq_set_sequence(rb_iseq_t *iseq, LINK_ANCHOR *anchor)
 			{
 			    VALUE v = operands[j];
 			    rb_iseq_t *block = 0;
+
 			    if (v) {
-				GetISeqPtr(v, block);
+				if (BUILTIN_TYPE(v) == T_NODE) {
+				    /* ricsin special node */
+				    block = (rb_iseq_t *)v;
+				}
+				else {
+				    GetISeqPtr(v, block);
+				}
 			    }
 			    generated_iseq[pos + 1 + j] = (VALUE)block;
 			    break;
@@ -1393,6 +1400,18 @@ iseq_set_sequence(rb_iseq_t *iseq, LINK_ANCHOR *anchor)
 			    struct global_entry *entry =
 				(struct global_entry *)(operands[j] & (~1));
 			    generated_iseq[pos + 1 + j] = (VALUE)entry;
+			}
+			break;
+		      case TS_FUNCPTR:
+			{
+			    if (iseq->compile_data->option->ricsin_mode == 1) {
+				/* compile mode */
+				generated_iseq[pos + 1 + j] = 0;
+				rb_ary_push(operands[j], INT2FIX(pos + len));
+			    }
+			    else {
+				generated_iseq[pos + 1 + j] = operands[j] & ~0x01;
+			    }
 			}
 			break;
 		      default:
@@ -2775,8 +2794,47 @@ add_ensure_iseq(LINK_ANCHOR *ret, rb_iseq_t *iseq)
     ADD_SEQ(ret, ensure);
 }
 
+static void ricsin_compile_check_local(rb_iseq_t *iseq, VALUE ary, int dvoffset);
+
+static void
+ricsin_compile_block(rb_iseq_t *iseq, NODE *node)
+{
+    VALUE ary = rb_ary_new();
+    NODE *args = node->nd_args;
+    VALUE sources = rb_gv_get("$ricsin_sources");
+
+    ricsin_compile_check_local(iseq, ary, 1);
+    rb_ary_push(ary, INT2FIX(nd_line(node)));
+
+    if (nd_type(args->nd_head) == NODE_STR) {
+	rb_ary_push(ary, args->nd_head->nd_lit);
+    }
+
+    rb_ary_push(ary, ID2SYM(rb_intern("ifunc")));
+
+    rb_ary_push(sources, ary);
+}
+
+static NODE *
+rcsin_make_ifunc_node(rb_iseq_t *iseq, NODE *node)
+{
+    NODE *ifunc;
+    VALUE (*func) (ANYARGS);
+
+    void **func_ptrs = iseq->compile_data->option->ricsin_funcptrs;
+    int fidx = iseq->compile_data->option->ricsin_counter;
+    iseq->compile_data->option->ricsin_counter++;
+
+    func = (void *)func_ptrs[fidx];
+
+    ifunc = NEW_IFUNC(func, 0);
+    iseq_add_mark_object(iseq, (VALUE)ifunc);
+    return ifunc;
+}
+
 static VALUE
-setup_args(rb_iseq_t *iseq, LINK_ANCHOR *args, NODE *argn, unsigned long *flag)
+setup_args(rb_iseq_t *iseq, LINK_ANCHOR *args, NODE *argn,
+	   unsigned long *flag, VALUE *parent_block)
 {
     VALUE argc = INT2FIX(0);
     int nsplat = 0;
@@ -2785,9 +2843,36 @@ setup_args(rb_iseq_t *iseq, LINK_ANCHOR *args, NODE *argn, unsigned long *flag)
 
     INIT_ANCHOR(arg_block);
     INIT_ANCHOR(args_splat);
+
     if (argn && nd_type(argn) == NODE_BLOCK_PASS) {
-	COMPILE(arg_block, "block", argn->nd_body);
+	int ricsin_mode = iseq->compile_data->option->ricsin_mode;
+	NODE *bnode = argn->nd_body;
+
+	if (ricsin_mode) {
+	    if (nd_type(bnode) == NODE_FCALL &&
+		bnode->nd_mid == rb_intern("__Cb__")) {
+		if (ricsin_mode == 1) {
+		    /* ricsin compile mode */
+		    ricsin_compile_block(iseq, bnode);
+		}
+		else {
+		    /* ricsin execution mode */
+		    NODE *ifunc = rcsin_make_ifunc_node(iseq, bnode);
+
+		    if (parent_block == 0) {
+			rb_bug("ricsin: parent_block is null");
+		    }
+		    *parent_block = (VALUE)ifunc;
+		}
+
+		goto blockarg_end;
+	    }
+	}
+
+	COMPILE(arg_block, "block", bnode);
 	*flag |= VM_CALL_ARGS_BLOCKARG_BIT;
+
+      blockarg_end:
 	argn = argn->nd_head;
     }
 
@@ -2861,6 +2946,115 @@ setup_args(rb_iseq_t *iseq, LINK_ANCHOR *args, NODE *argn, unsigned long *flag)
     return argc;
 }
 
+static void
+ricsin_compile_special(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE *node, const char *type)
+{
+    VALUE source_ary = rb_gv_get(type);
+    NODE *args = node->nd_args;
+
+    while (args) {
+	if (nd_type(args->nd_head) == NODE_STR) {
+	    rb_ary_push(source_ary, args->nd_head->nd_lit);
+	}
+	else {
+	    rb_bug("boo...");
+	}
+	args = args->nd_next;
+    }
+}
+
+static void
+ricsin_compile_check_local(rb_iseq_t *iseq, VALUE ary, int dvoffset)
+{
+    VALUE lvary = rb_ary_new();
+    VALUE dvary = rb_ary_new();
+    int i;
+    rb_iseq_t *tmpiseq;
+
+    /* information for local variables */
+
+    for (i=0; i<iseq->local_iseq->local_table_size; i++) {
+	ID vid = iseq->local_iseq->local_table[i];
+	int idx = iseq->local_iseq->local_size - get_local_var_idx(iseq, vid);
+	VALUE v = rb_ary_new3(2, ID2SYM(vid), INT2FIX(idx));
+
+	rb_ary_push(lvary, v);
+    }
+    rb_ary_push(ary, lvary);
+
+    /* information for dynamic variables */
+
+    tmpiseq = iseq;
+    while (tmpiseq != iseq->local_iseq) {
+	for (i=0; i<tmpiseq->local_table_size; i++) {
+	    ID vid = tmpiseq->local_table[i];
+	    VALUE v;
+	    int lev, ls, idx;
+
+	    idx = get_dyna_var_idx(iseq, vid, &lev, &ls);
+
+	    v= rb_ary_new3(3, ID2SYM(vid),
+			   INT2FIX(lev + dvoffset),
+			   INT2FIX(ls - idx));
+	    rb_ary_push(dvary, v);
+	}
+	tmpiseq = tmpiseq->parent_iseq;
+    }
+    rb_ary_push(ary, dvary);
+}
+
+static void
+ricsin_compile(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE *node, int cx)
+{
+    /* compile mode */
+    NODE *args = node->nd_args;
+    VALUE ary = rb_ary_new();
+    VALUE sources = rb_gv_get("$ricsin_sources");
+
+    ricsin_compile_check_local(iseq, ary, 0);
+
+    /* information for line number */
+
+    rb_ary_push(ary, INT2FIX(nd_line(node)));
+
+    /* information for C source code */
+
+    if (nd_type(args->nd_head) == NODE_STR) {
+	rb_ary_push(ary, args->nd_head->nd_lit);
+    }
+    else {
+	rb_bug("boo...");
+    }
+
+    if (cx) {
+	args = args->nd_next;
+
+	if (nd_type(args->nd_head) == NODE_LIT) {
+	    rb_ary_push(ary, args->nd_head->nd_lit);
+	    rb_ary_push(ary, (VALUE)iseq | 0x01 /* iseq id */);
+	}
+	else {
+	    
+	    rb_bug("boo...: %s", ruby_node_name(nd_type(args->nd_head)));
+	}
+
+	args = args->nd_next;
+    }
+
+    rb_ary_push(sources, ary);
+
+    ADD_INSN1(ret, nd_line(node), opt_call_ricsin, ary); /* dummy */
+}
+
+static void
+ricsin_compile_exec(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE *node)
+{
+    void **func_ptrs = iseq->compile_data->option->ricsin_funcptrs;
+    int fidx = iseq->compile_data->option->ricsin_counter;
+    iseq->compile_data->option->ricsin_counter++;
+
+    ADD_INSN1(ret, nd_line(node), opt_call_ricsin, func_ptrs[fidx] | 0x01);
+}
 
 /**
   compile each node
@@ -3673,7 +3867,7 @@ iseq_compile_each(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE * node, int poped)
 	  COMPILE(ret, "NODE_OP_ASGN1 recv", node->nd_recv);
 	  if (nd_type(node->nd_args->nd_body) != NODE_ZARRAY) {
 	      INIT_ANCHOR(args);
-	      argc = setup_args(iseq, args, node->nd_args->nd_body, &flag);
+	      argc = setup_args(iseq, args, node->nd_args->nd_body, &flag, 0);
 	      ADD_SEQ(ret, args);
 	  }
 	  else {
@@ -3886,10 +4080,76 @@ iseq_compile_each(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE * node, int poped)
 	VALUE argc;
 	unsigned long flag = 0;
 	VALUE parent_block = iseq->compile_data->current_block;
+	VALUE ricsin_mode = iseq->compile_data->option->ricsin_mode;
+
 	iseq->compile_data->current_block = Qfalse;
 
 	INIT_ANCHOR(recv);
 	INIT_ANCHOR(args);
+
+	if (ricsin_mode) {
+	    if (nd_type(node) == NODE_FCALL) {
+		if (mid == rb_intern("__Cdecl__")) {
+		    if (ricsin_mode == 1) {
+			/* compile mode only */
+			ricsin_compile_special(iseq, ret, node, "$ricsin_decl_source");
+		    }
+		    else {
+			/* exec mode: do nothing */
+		    }
+
+		    if (!poped) {
+			ADD_INSN(ret, nd_line(node), putnil);
+		    }
+		    break;
+		}
+		else if (mid == rb_intern("__Cinit__")) {
+		    if (ricsin_mode == 1) {
+			/* compile mode only */
+			ricsin_compile_special(iseq, ret, node, "$ricsin_init_source");
+		    }
+		    else {
+			/* exec mode: do nothing */
+		    }
+
+		    if (!poped) {
+			ADD_INSN(ret, nd_line(node), putnil);
+		    }
+		    break;
+		}
+		else if (mid == rb_intern("__C__")) {
+		    if (ricsin_mode == 1) {
+			/* ricsin compile mode */
+			ricsin_compile(iseq, ret, node, 0);
+		    }
+		    else {
+			/* ricsin exec mode */
+			ricsin_compile_exec(iseq, ret, node);
+		    }
+
+		    if (poped) {
+			ADD_INSN(ret, nd_line(node), pop);
+		    }
+		    break;
+		}
+		else if (mid == rb_intern("__Cx__")) {
+		    if (ricsin_mode == 1) {
+			/* ricsin compile mode */
+			ricsin_compile(iseq, ret, node, 1);
+		    }
+		    else {
+			/* ricsin exec mode */
+			ricsin_compile_exec(iseq, ret, node);
+		    }
+
+		    if (poped) {
+			ADD_INSN(ret, nd_line(node), pop);
+		    }
+		    break;
+		}
+	    }
+	}
+
 #if SUPPORT_JOKE
 	if (nd_type(node) == NODE_VCALL) {
 	    if (mid == idBitblt) {
@@ -3950,7 +4210,7 @@ iseq_compile_each(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE * node, int poped)
 
 	/* args */
 	if (nd_type(node) != NODE_VCALL) {
-	    argc = setup_args(iseq, args, node->nd_args, &flag);
+	    argc = setup_args(iseq, args, node->nd_args, &flag, &parent_block);
 	}
 	else {
 	    argc = INT2FIX(0);
@@ -3988,7 +4248,7 @@ iseq_compile_each(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE * node, int poped)
 	INIT_ANCHOR(args);
 	iseq->compile_data->current_block = Qfalse;
 	if (nd_type(node) == NODE_SUPER) {
-	    argc = setup_args(iseq, args, node->nd_args, &flag);
+	    argc = setup_args(iseq, args, node->nd_args, &flag, &parent_block);
 	}
 	else {
 	    /* NODE_ZSUPER */
@@ -4162,7 +4422,7 @@ iseq_compile_each(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE * node, int poped)
 	}
 
 	if (node->nd_head) {
-	    argc = setup_args(iseq, args, node->nd_head, &flag);
+	    argc = setup_args(iseq, args, node->nd_head, &flag, 0);
 	}
 	else {
 	    argc = INT2FIX(0);
@@ -4755,7 +5015,7 @@ iseq_compile_each(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE * node, int poped)
 
 	INIT_ANCHOR(recv);
 	INIT_ANCHOR(args);
-	argc = setup_args(iseq, args, node->nd_args, &flag);
+	argc = setup_args(iseq, args, node->nd_args, &flag, 0);
 
 	if (node->nd_recv == (NODE *) 1) {
 	    flag |= VM_CALL_FCALL_BIT;
@@ -5167,6 +5427,11 @@ iseq_build_body(rb_iseq_t *iseq, LINK_ANCHOR *anchor,
 				rb_ary_store(op, i+1, (VALUE)label | 1);
 			    }
 			    argv[j] = op;
+			}
+			break;
+		      case TS_FUNCPTR:
+			{
+			    argv[j] = op & ~0x01;
 			}
 			break;
 		      default:

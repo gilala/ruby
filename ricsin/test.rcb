@@ -1,0 +1,57 @@
+
+require 'test/unit'
+
+class TestRcsin < Test::Unit::TestCase
+  def test_c
+    assert_equal(nil, __C__(''))
+    assert_equal(42, __C__('return INT2FIX(42);'))
+  end
+
+  def test_variables
+    lv = 'lv'
+    $gv = 'gv'
+    @iv = 'iv'
+    1.times{|i|
+      assert_equal(i, __C__('return i;'))
+    }
+    assert_equal('lv', __C__('return lv;'))
+    assert_equal('gv', __C__('return $gv;'))
+    assert_equal('iv', __C__('return @iv;'))
+  end
+
+  def test_cx
+    v = nil
+    #C v = INT2FIX(42);
+    assert_equal(42, v)
+
+    #C if (0) {
+      flunk
+    #C } else {
+      assert_equal('ok', 'ok')
+    #C }
+
+    #C while (1) {
+      assert_equal('ok', 'ok')
+    #C goto lend; } lend:;
+  end
+
+  def test_decl
+    __Cdecl__ %q{
+      VALUE func() {
+        return INT2FIX(42);
+      }
+    }
+    assert_equal(42, __C__('return func();'))
+  end
+
+  def test_init
+    __Cdecl__ %q{
+      VALUE global_foo = Qnil;
+    }
+    __Cinit__ %q{
+      global_foo = INT2FIX(42);
+    }
+    assert_equal(42, __C__('return global_foo;'))
+  end
+end
+

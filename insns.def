@@ -1984,25 +1984,17 @@ opt_regexpmatch2
 
 /**
   @c optimize
-  @e call native compiled method
-  @j ネイティブコンパイルしたメソッドを起動。
+  @e ricsin
+  @j ricsin
  */
 DEFINE_INSN
-opt_call_c_function
+opt_call_ricsin
 (rb_insn_func_t funcptr)
 ()
-()
+(VALUE val)
 {
-    reg_cfp = (funcptr)(th, reg_cfp);
-
-    if (reg_cfp == 0) {
-	VALUE err = th->errinfo;
-	th->errinfo = Qnil;
-	THROW_EXCEPTION(err);
-    }
-
-    RESTORE_REGS();
-    NEXT_INSN();
+    val = (funcptr)(reg_cfp);
+    reg_pc  = reg_cfp->pc;
 }
 
 /**

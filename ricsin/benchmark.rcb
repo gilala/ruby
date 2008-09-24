@@ -1,0 +1,194 @@
+
+__Cdecl__ %q{
+  #define FIX_PP(i) i += 2
+  #define FIX_CMP_LT(x, y) ((SIGNED_VALUE)(x) < (SIGNED_VALUE)(y))
+}
+
+class Array
+  def each2
+    return self.enum_for(:each) unless block_given?
+    i = 0
+    e = nil
+    #C for (; FIX2LONG(i) < RARRAY_LEN(self); FIX_PP(i)) {
+    #C   e = RARRAY_PTR(self)[FIX2LONG(i)];
+         yield e
+    #C }
+    self
+  end
+
+  def each3
+    i = 0
+    while i < self.length
+      yield self[i]
+      i = i.succ
+    end
+  end
+end
+
+class Fixnum
+  def times2
+    return self.enum_for(:times) unless block_given?
+    i = 0
+    #C  for (; FIX_CMP_LT(i, self); FIX_PP(i)) {
+          yield i
+    #C  }
+    i
+  end
+
+  def times3
+    i = 0
+    while i < self
+      yield i
+      i = i.succ
+    end
+    i
+  end
+end
+
+class Range
+  def each2
+    return self.enum_for(:each) unless block_given?
+    i = self.first
+    e = self.last
+    e += 1 unless self.exclude_end?
+
+    #C for (; FIX_CMP_LT(i, e); FIX_PP(i)) {
+         yield(i)
+    #C }
+
+    self
+  end
+
+  def each3
+    i = self.first
+    e = self.last
+    e += 1 if self.exclude_end?
+
+    while i<e
+      yield
+      i = i.succ
+    end
+
+    self
+  end
+end
+
+
+###
+
+require 'benchmark'
+
+max = 10000000
+
+obj = Array.new(max)
+Benchmark.bm{|x|
+  x.report("orig  "){
+    obj.each{|e|}
+  }
+  x.report("ricsin"){
+    obj.each2{|e|}
+  }
+  x.report("pure  "){
+    obj.each3{|e|}
+  }
+} if false
+
+obj = (1..max)
+Benchmark.bm{|x|
+  x.report("orig  "){
+    obj.each{|e|}
+  }
+  x.report("ricsin"){
+    obj.each2{|e|}
+  }
+  x.report("pure  "){
+    obj.each3{|e|}
+  }
+} if false
+
+Benchmark.bm{|x|
+  x.report("orig  "){
+    max.times{|i|}
+  }
+  x.report("ricsin"){
+    max.times2{|i|}
+  }
+  x.report("pure  "){
+    max.times3{|i|}
+  }
+  x.report("cblock"){
+    max.times(&__Cb__(""))
+  }
+  x.report("cblock"){
+    max.times2(&__Cb__(""))
+  }
+  x.report("cblock"){
+    max.times3(&__Cb__(""))
+  }
+}
+
+__END__
+
+ruby 1.9.0 (2008-09-19 revision 0) [i686-linux]
+
+      user     system      total        real
+orig    2.860000   0.000000   2.860000 (  2.864203)
+ricsin  2.160000   0.000000   2.160000 (  2.161214)
+pure    5.130000   0.000000   5.130000 (  5.138235)
+      user     system      total        real
+orig    2.810000   0.000000   2.810000 (  2.822292)
+ricsin  2.070000   0.000000   2.070000 (  2.066880)
+pure    2.790000   0.000000   2.790000 (  2.787441)
+      user     system      total        real
+orig    2.700000   0.000000   2.700000 (  2.697477)
+ricsin  2.070000   0.000000   2.070000 (  2.078570)
+pure    2.800000   0.000000   2.800000 (  2.794948)
+
+
+ruby 1.9.0 (2008-09-20 revision 12) [x86_64-linux]
+
+      user     system      total        real
+orig    0.830000   0.000000   0.830000 (  0.825043)
+ricsin  0.540000   0.010000   0.550000 (  0.545134)
+pure    1.310000   0.000000   1.310000 (  1.313828)
+      user     system      total        real
+orig    0.850000   0.000000   0.850000 (  0.855513)
+ricsin  0.560000   0.000000   0.560000 (  0.554663)
+pure    0.660000   0.000000   0.660000 (  0.663112)
+      user     system      total        real
+orig    0.860000   0.000000   0.860000 (  0.854639)
+ricsin  0.540000   0.000000   0.540000 (  0.547628)
+pure    0.790000   0.000000   0.790000 (  0.787023)
+
+
+
+
+
+Benchmark.bm{|x|
+  x.report("orig  "){
+    max.times{|i|}
+  }
+  x.report("ricsin"){
+    max.times2{|i|}
+  }
+  x.report("pure  "){
+    max.times3{|i|}
+  }
+  x.report("cblock"){
+    max.times(&__Cb__(""))
+  }
+  x.report("cblock"){
+    max.times2(&__Cb__(""))
+  }
+  x.report("cblock"){
+    max.times3(&__Cb__(""))
+  }
+}
+
+      user     system      total        real
+orig    2.760000   0.000000   2.760000 (  2.757706)
+ricsin  2.230000   0.000000   2.230000 (  2.236137)
+pure    3.130000   0.000000   3.130000 (  3.159513)
+cblock  1.000000   0.000000   1.000000 (  1.004778)
+cblock  1.960000   0.000000   1.960000 (  1.963191)
+cblock  2.740000   0.000000   2.740000 (  2.747436)

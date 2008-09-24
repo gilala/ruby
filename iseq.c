@@ -232,6 +232,7 @@ static rb_compile_option_t COMPILE_OPTION_DEFAULT = {
     OPT_INSTRUCTIONS_UNIFICATION, /* int instructions_unification; */
     OPT_STACK_CACHING, /* int stack_caching; */
     OPT_TRACE_INSTRUCTION, /* int trace_instruction */
+    0,
 };
 static const rb_compile_option_t COMPILE_OPTION_FALSE = {0};
 
@@ -268,6 +269,14 @@ make_compile_option(rb_compile_option_t *option, VALUE opt)
 	SET_COMPILE_OPTION(option, opt, stack_caching);
 	SET_COMPILE_OPTION(option, opt, trace_instruction);
 	SET_COMPILE_OPTION_NUM(option, opt, debug_level);
+
+	SET_COMPILE_OPTION_NUM(option, opt, ricsin_mode);
+
+	if (option->ricsin_mode == 2 /* exec mode */) {
+	    VALUE ptr = rb_hash_aref(opt, ID2SYM(rb_intern("ricsin_funcptrs")));
+	    option->ricsin_funcptrs = (void **)(ptr & ~0x01);
+	}
+
 #undef SET_COMPILE_OPTION
 #undef SET_COMPILE_OPTION_NUM
     }
@@ -1302,7 +1311,8 @@ rb_iseq_build_for_ruby2cext(
     iseq->iseq = ALLOC_N(VALUE, iseq->iseq_size);
 
     for (i=0; i<iseq->iseq_size; i+=2) {
-	iseq->iseq[i] = BIN(opt_call_c_function);
+	rb_bug("unsupported");
+	iseq->iseq[i] = BIN(putobject); /* BIN(opt_call_c_function); */
 	iseq->iseq[i+1] = (VALUE)func;
     }
 

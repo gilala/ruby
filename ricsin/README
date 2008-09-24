@@ -1,0 +1,180 @@
+Ricsin - C Mix-in to Ruby
+==========================
+  written by Koichi Sasada
+
+
+= Abstract
+
+Ricsin system supports writing Ruby program with C expression.  You can 
+embed C source code into Ruby script easily without writing C extension.
+
+
+= ricsin command
+
+* Writing foo.rcb file (extname should be ".rcb")
+* Invoke "ricsin foo.rcb" command
+* "ricsin_foo.so" extension will be generated
+
+
+= Embedding C into Ruby Script
+
+You can embed C source code into Ruby script with several way.
+
+== __C__ method
+
+Most basic Ricsin method is "__C__".  This method embeds C expression 
+into Ruby script.  The name of "__C__" is inspired by "__asm__" syntax 
+that some C compilers support.
+
+  # example
+  __C__ %q{
+    printf("hello");
+  }
+
+You can use __C__ method as normal Ruby method.  Passed string is 
+treated as C source code.
+
+Note that the string is inspected at compile time only.  This means that 
+you *CAN NOT* write string with embedded style such as "...#{...}...".  
+Also you *CAN NOT* pass any other expressions.  Only string literal is 
+permitted.
+
+If C source code return a value, you can use returned value in Ruby 
+script.  If C source code doesn't return a value, nil (Qnil) is returned 
+implicitly.
+
+  # example
+  v = __C__ %Q{ return Qtru; }
+  p v #=> true
+
+== __Cdecl__ method
+
+You can write declaration or definition for C source code with __Cdecl__ 
+method.
+
+  # example
+  __Cdecl__ %q{
+    /* decl */
+    int external_function(void);
+    
+    /* define macro */
+    #define foo bar
+    
+    /* define function */
+    static void helper_function(void) {
+      /* ... */
+    }
+  }
+
+You can write some __Cdecl__ codes.  All parts of C source codes passed 
+by __Cdecl__ are located at top of auto generated C source code.
+
+Note that you *CAN NOT* write C expression other than definitions or 
+declarations.  If you write C expressions such as "printf(...)", compile 
+error will be occureed by your C compiler.
+
+== __Cinit__ method
+
+If your script needs some initialization process before running this 
+script, you can write initialization process with __Cinit__ method.
+
+  # example
+  __Cinit__ %q{
+    something_to_do_when_loading_time();
+  }
+
+This program run before running this script.  Writing some __Cinit__ is 
+permitted.  All initialization codes are collected and placed into an 
+initialization function.
+
+== __Cb__ method
+
+Ricsin enables writing block in C.  Passing block parameter with __Cb__ 
+method, generate block with passed C source code.
+
+  # example
+  3.times(&__Cb__('rb_p(arg)'))
+
+  # example
+  pr = proc(&__Cb__('rb_p(arg)'))
+  pr.call(1)
+
+Parameter of block is passed with "arg" variable.  This is an 
+implementation limitation.
+
+== #C special syntax
+
+The last one is special syntax.  You can write C source code if begin of 
+line is "#C".
+
+  #C printf("Hello\n");
+
+This syntax permits writing Ruby script in C source code.  So you can 
+"mix-in" C and Ruby source code.
+
+  # example
+  #C if (1) {      /* C source */
+       puts "true"  # Ruby script
+  #C else {        /* C source */
+       puts "false" # Ruby script
+  #C }             /* C source */
+  
+  # This script prints "true".
+
+Note that parts of C source code *CANNOT* share their lcoal variables.
+
+  # *BAD* example
+  #C int i = 10;
+  ... # some Ruby script
+  #C printf("%d\n", i); /* print a strange number */
+
+Because local environemnts (variables) of C are not stored and restored 
+when returning/re-entering to/from Ruby script.
+
+You should store variables in Ruby environment if you want to share 
+information between C parts.
+
+
+= Access Ruby Environment from C source code
+
+Ricsin enables to access Ruby environemts from C.  "Enviroment" means 
+local variables, special variables such as "self", and other variables.
+
+== Local Variables
+
+You can access Ruby's local variables from C source code.  To access 
+Ruby's local variable, you needs only write local variable name which is 
+defined in Ruby script.
+
+  # example
+  str = 'hello'
+  3.times{|i|
+    __C__ %q{
+      rb_p(str)  #=> 'hello'
+      rb_p(i)    #=> 1, 2, 3
+    }
+  }
+
+Each ruby variables return "VALUE" type values.  You can get and set 
+VALUEs with this syntax.
+
+== Instance Variables, Global Variables, Class Variables, Constants
+
+You can get instance variables, global variables, class variables and 
+Constat value with macros written in following example:
+
+  # example
+  $global_variable = 'global-variable'
+  class C
+    CONST = 'Constant'
+    def initialize
+      @instance_variable = 'instance-variable'
+    end
+    def m
+      #C rb_p(RIV(instance_variable));
+      #C rb_p(RGV(global_variable));
+      #C rb_p(RConst(CONST));
+      #C rb_p(RCV(class_variable));
+    end
+  end
+

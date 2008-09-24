@@ -1,0 +1,66 @@
+
+__Cdecl__ %q{
+  #define FIX_PP(i) i += 2
+  #define FIX_CMP_LT(x, y) ((SIGNED_VALUE)(x) < (SIGNED_VALUE)(y))
+}
+
+class Array
+  alias orig_each each
+  def each
+    return self.enum_for(:each) unless block_given?
+    i = 0
+    e = nil
+    #C for (; FIX2LONG(i) < RARRAY_LEN(self); FIX_PP(i)) {
+    #C   e = RARRAY_PTR(self)[FIX2LONG(i)];
+         yield e
+    #C }
+    self
+  end
+end
+
+require 'benchmark'
+
+max = 10000
+
+obj = Array.new(max)
+Benchmark.bm{|x|
+  x.report("orig  "){
+    obj.each{|e|}
+  }
+  x.report("ricsin"){
+    obj.each2{|e|}
+  }
+  x.report("pure  "){
+    obj.each3{|e|}
+  }
+}
+
+__END__
+
+class Fixnum
+  alias orig_times times
+  def times
+    return self.enum_for(:times) unless block_given?
+    i = 0
+    #C  for (; FIX_CMP_LT(i, self); FIX_PP(i)) {
+          yield i
+    #C  }
+    i
+  end
+end
+
+class Range
+  alias orig_each each
+  def each
+    return self.enum_for(:each) unless block_given?
+    i = self.first
+    e = self.last
+    e += 1 unless self.exclude_end?
+
+    #C for (; FIX_CMP_LT(i, e); FIX_PP(i)) {
+         yield(i)
+    #C }
+
+    self
+  end
+end
