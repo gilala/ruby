@@ -1,3 +1,6 @@
+#
+# Ricsin test
+#
 
 require 'test/unit'
 
@@ -17,6 +20,8 @@ class TestRcsin < Test::Unit::TestCase
     assert_equal('lv', __C__('return lv;'))
     assert_equal('gv', __C__('return $gv;'))
     assert_equal('iv', __C__('return @iv;'))
+    assert_equal('$gv', __C__('return rb_str_new2("$gv");'))
+    assert_equal('@iv', __C__('return rb_str_new2("@iv");'))
   end
 
   def test_cx
