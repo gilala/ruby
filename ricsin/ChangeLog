@@ -1,0 +1,6 @@
+Wed Sep 24 14:47:29 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* ricsin/ricsin.rb: moved from tool/ricsin.rb.
+
+	* ricsin/ricsin.rb: fix to skip string and comment
+	  while preprocessing C source.

@@ -84,14 +84,25 @@ class Ricsin
     }
   end
 
+  Str = /("[^\\"]*(?:\\.[^\\"]*)*")/m
+  Com = /(\/\*.*?\*\/)/m
+  Oth = /([\w\W]+?(?=[\"\/]|\z))/m
+  CProg = /\G(?:#{Str}|#{Com}|#{Oth})/m
+
   def preprocess_c src
-    src.gsub(/\$(\w+)\b/){
-      # @ids[$~.to_s] = $1
-      "RGV(#{$1})"
-    }.gsub(/\@(\w+)\b/){
-      @ids[$~.to_s] = $1
-      "RIV(#{$1})"
+    ret = ''
+    src.scan(CProg){|str, comm, body|
+      ret << str if str
+      ret << comm if comm
+      ret << body.gsub(/\$(\w+)\b/){
+        # @ids[$~.to_s] = $1
+        "RGV(#{$1})"
+      }.gsub(/\@(\w+)\b/){
+        @ids[$~.to_s] = $1
+        "RIV(#{$1})"
+      } if body
     }
+    ret
   end
 
   def csrc_function name, params, src, pre_csrc, fastcall = true

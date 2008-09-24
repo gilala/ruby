@@ -1,3 +1,10 @@
+
+$foo = 42
+p __C__('return $foo; /* $foo */')
+
+
+__END__
+
 p __C__('return INT2FIX(42);')
 
 __END__
