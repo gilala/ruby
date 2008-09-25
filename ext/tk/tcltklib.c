@@ -8,15 +8,10 @@
 
 #include "ruby.h"
 
-#ifdef HAVE_RUBY_RUBY_H
-/* #include "ruby/ruby.h" */
-#include "ruby/signal.h"
 #ifdef HAVE_RUBY_ENCODING_H
 #include "ruby/encoding.h"
 #endif
-#else
-/* #include "ruby.h" */
-#include "rubysig.h"
+#ifndef HAVE_RUBY_RUBY_H
 #include "version.h"
 #endif
 
@@ -53,6 +48,9 @@
 #define TCL_BETA_RELEASE        1
 #define TCL_FINAL_RELEASE       2
 #endif
+
+static VALUE rb_thread_critical; /* dummy */
+int rb_thread_check_trap_pending();
 
 static struct {
   int major;
@@ -119,7 +117,7 @@ fprintf(stderr, ARG1, ARG2, ARG3); fprintf(stderr, "\n"); fflush(stderr); }
 static const char tcltklib_release_date[] = TCLTKLIB_RELEASE_DATE;
 
 /* finalize_proc_name */
-static char *finalize_hook_name = "INTERP_FINALIZE_HOOK";
+static const char finalize_hook_name[] = "INTERP_FINALIZE_HOOK";
 
 static void ip_finalize _((Tcl_Interp*));
 
@@ -188,13 +186,14 @@ static VALUE ip_invoke_real _((int, VALUE*, VALUE));
 static VALUE ip_invoke _((int, VALUE*, VALUE));
 static VALUE ip_invoke_with_position _((int, VALUE*, VALUE, Tcl_QueuePosition));
 static VALUE tk_funcall _((VALUE(), int, VALUE*, VALUE));
+static VALUE callq_safelevel_handler _((VALUE, VALUE));
 
 /* Tcl's object type */
 #if TCL_MAJOR_VERSION >= 8
-static char *Tcl_ObjTypeName_ByteArray = "bytearray";
+static const char Tcl_ObjTypeName_ByteArray[] = "bytearray";
 static Tcl_ObjType *Tcl_ObjType_ByteArray;
 
-static char *Tcl_ObjTypeName_String    = "string";
+static const char Tcl_ObjTypeName_String[]    = "string";
 static Tcl_ObjType *Tcl_ObjType_String;
 
 #if TCL_MAJOR_VERSION > 8 || (TCL_MAJOR_VERSION == 8 && TCL_MINOR_VERSION >= 1)
@@ -1044,12 +1043,12 @@ call_original_exit(ptr, state)
 
     } else {
         /* string interface */
-        char **argv;
+        CONST84 char **argv;
 #define USE_RUBY_ALLOC 0
 #if USE_RUBY_ALLOC
-        argv = (char **)ALLOC_N(char *, 3); /* XXXXXXXXXX */
+        argv = ALLOC_N(char *, 3); /* XXXXXXXXXX */
 #else /* not USE_RUBY_ALLOC */
-        argv = (char **)ckalloc(sizeof(char *) * 3);
+        argv = (CONST84 char **)ckalloc(sizeof(char *) * 3);
 #if 0 /* use Tcl_Preserve/Release */
 	Tcl_Preserve((ClientData)argv); /* XXXXXXXX */
 #endif
@@ -1059,8 +1058,7 @@ call_original_exit(ptr, state)
         argv[1] = Tcl_GetStringFromObj(state_obj, (int*)NULL);
         argv[2] = (char *)NULL;
 
-        ptr->return_value = (*(info->proc))(info->clientData, ptr->ip, 
-                                            2, (CONST84 char **)argv);
+        ptr->return_value = (*(info->proc))(info->clientData, ptr->ip, 2, argv);
 
 #if USE_RUBY_ALLOC
         free(argv);
@@ -1502,7 +1500,7 @@ static VALUE
 lib_num_of_mainwindows(self)
     VALUE self;
 {
-#ifdef RUBY_VM  /* Ruby 1.9+ !!! */
+#ifdef RUBY_USE_NATIVE_THREAD  /* Ruby 1.9+ !!! */
     return tk_funcall(lib_num_of_mainwindows_core, 0, (VALUE*)NULL, self);
 #else
     return lib_num_of_mainwindows_core(self, 0, (VALUE*)NULL);
@@ -1622,6 +1620,28 @@ get_thread_alone_check_flag()
 #endif
 }
 #endif
+
+#define TRAP_CHECK() do { \
+    if (trap_check(check_var) == 0) return 0; \
+} while (0)
+
+static int
+trap_check(int *check_var)
+{
+    DUMP1("trap check");
+
+    if (rb_thread_check_trap_pending()) {
+	if (check_var != (int*)NULL) {
+	    /* wait command */
+	    return 0;
+	}
+	else {
+	    rb_thread_check_ints();
+	}
+    }
+
+    return 1;
+}
 
 static int
 lib_eventloop_core(check_root, update_flag, check_var, interp)
@@ -1755,28 +1775,12 @@ lib_eventloop_core(check_root, update_flag, check_var, interp)
               }
             }
 
-            DUMP1("trap check");
-            if (rb_trap_pending) {
-                run_timer_flag = 0;
-                if (rb_prohibit_interrupt || check_var != (int*)NULL) {
-                    /* pending or on wait command */
-                    return 0;
-                } else {
-                    rb_trap_exec();
-                }
-            }
+	    TRAP_CHECK();
 
-            DUMP1("check Root Widget");
+	    DUMP1("check Root Widget");
             if (check_root && tk_stubs_init_p() && Tk_GetNumMainWindows() == 0) {
                 run_timer_flag = 0;
-                if (rb_trap_pending) {
-                    if (rb_prohibit_interrupt || check_var != (int*)NULL) {
-                        /* pending or on wait command */
-                        return 0;
-                    } else {
-                        rb_trap_exec();
-                    }
-                }
+		TRAP_CHECK();
                 return 1;
             }
 
@@ -1886,16 +1890,7 @@ lib_eventloop_core(check_root, update_flag, check_var, interp)
                         return 0;
                     }
 
-                    DUMP1("trap check");
-                    if (rb_trap_pending) {
-                        run_timer_flag = 0;
-                        if (rb_prohibit_interrupt || check_var != (int*)NULL) {
-                            /* pending or on wait command */
-                            return 0;
-                        } else {
-                            rb_trap_exec();
-                        }
-                    }
+		    TRAP_CHECK();
 
                     if (check_var != (int*)NULL 
                         && !NIL_P(rbtk_pending_exception)) {
@@ -1966,28 +1961,12 @@ lib_eventloop_core(check_root, update_flag, check_var, interp)
                     return 1;
                 }
 
-                DUMP1("trap check");
-                if (rb_trap_pending) {
-                    run_timer_flag = 0;
-                    if (rb_prohibit_interrupt || check_var != (int*)NULL) {
-                        /* pending or on wait command */
-                        return 0;
-                    } else {
-                        rb_trap_exec();
-                    }
-                }
+		TRAP_CHECK();
 
                 DUMP1("check Root Widget");
                 if (check_root && tk_stubs_init_p() && Tk_GetNumMainWindows() == 0) {
                     run_timer_flag = 0;
-                    if (rb_trap_pending) {
-                        if (rb_prohibit_interrupt || check_var != (int*)NULL) {
-                            /* pending or on wait command */
-                            return 0;
-                        } else {
-                            rb_trap_exec();
-                        }
-                    }
+		    TRAP_CHECK();
                     return 1;
                 }
 
@@ -2823,7 +2802,6 @@ tcl_protect(interp, proc, data)
     VALUE (*proc)();
     VALUE data;
 {
-    int old_trapflag = rb_trap_immediate;
     int code;
 
 #ifdef HAVE_NATIVETHREAD
@@ -2834,10 +2812,7 @@ tcl_protect(interp, proc, data)
 #endif
 #endif
 
-    rb_trap_immediate = 0;
     code = tcl_protect_core(interp, proc, data);
-    rb_trap_immediate = old_trapflag;
-
     return code;
 }
 
@@ -2944,7 +2919,9 @@ ip_ruby_cmd_receiver_const_get(name)
      char *name;
 {
   volatile VALUE klass = rb_cObject;
+#if 0
   char *head, *tail;
+#endif
   int state;
 
 #if SUPPORT_NESTED_CONST_AS_IP_RUBY_CMD_RECEIVER
@@ -2994,8 +2971,9 @@ ip_ruby_cmd_receiver_get(str)
      char *str;
 {
   volatile VALUE receiver;
-  volatile VALUE klass = rb_cObject;
+#if !SUPPORT_NESTED_CONST_AS_IP_RUBY_CMD_RECEIVER
   int state;
+#endif
 
   if (str[0] == ':' || ('A' <= str[0] && str[0] <= 'Z')) {
     /* class | module | constant */
@@ -3401,7 +3379,7 @@ ip_rbUpdateCommand(clientData, interp, objc, objv)
     }
 
     /* trap check */
-    if (rb_trap_pending) {
+    if (rb_thread_check_trap_pending()) {
         Tcl_Release(interp);
 
         return TCL_RETURN;
@@ -3767,7 +3745,7 @@ ip_rbVwaitCommand(clientData, interp, objc, objv)
     }
 
     /* trap check */
-    if (rb_trap_pending) {
+    if (rb_thread_check_trap_pending()) {
 #if TCL_MAJOR_VERSION >= 8
         Tcl_DecrRefCount(objv[1]);
 #endif
@@ -4056,7 +4034,7 @@ ip_rbTkWaitCommand(clientData, interp, objc, objv)
         }
 
         /* trap check */
-        if (rb_trap_pending) {
+        if (rb_thread_check_trap_pending()) {
             Tcl_Release(interp);
 
             return TCL_RETURN;
@@ -4116,7 +4094,7 @@ ip_rbTkWaitCommand(clientData, interp, objc, objv)
         }
 
         /* trap check */
-        if (rb_trap_pending) {
+        if (rb_thread_check_trap_pending()) {
 #if TCL_MAJOR_VERSION >= 8
             Tcl_DecrRefCount(objv[2]);
 #endif
@@ -4211,7 +4189,7 @@ ip_rbTkWaitCommand(clientData, interp, objc, objv)
         }
 
         /* trap check */
-        if (rb_trap_pending) {
+        if (rb_thread_check_trap_pending()) {
             Tcl_Release(interp);
 
             return TCL_RETURN;
@@ -6093,10 +6071,6 @@ get_str_from_obj(obj)
     int len, binary = 0;
     const char *s;
     volatile VALUE str;
-#if TCL_MAJOR_VERSION > 8 || (TCL_MAJOR_VERSION == 8 && TCL_MINOR_VERSION >= 4)
-    int len2;
-    const char *s2;
-#endif
 
 #if TCL_MAJOR_VERSION == 8 && TCL_MINOR_VERSION == 0
     s = Tcl_GetStringFromObj(obj, &len);
@@ -6105,7 +6079,7 @@ get_str_from_obj(obj)
      /* TCL_VERSION 8.1 -- 8.3 */
     if (Tcl_GetCharLength(obj) != Tcl_UniCharLen(Tcl_GetUnicode(obj))) {
         /* possibly binary string */
-        s = Tcl_GetByteArrayFromObj(obj, &len);
+        s = (char *)Tcl_GetByteArrayFromObj(obj, &len);
         binary = 1;
     } else {
         /* possibly text string */
@@ -6113,7 +6087,7 @@ get_str_from_obj(obj)
     }
 #else /* TCL_VERSION >= 8.4 */
     if (IS_TCL_BYTEARRAY(obj)) {
-      s = Tcl_GetByteArrayFromObj(obj, &len);
+      s = (char *)Tcl_GetByteArrayFromObj(obj, &len);
       binary = 1;
     } else {
       s = Tcl_GetStringFromObj(obj, &len);
@@ -6153,7 +6127,7 @@ get_obj_from_str(str)
         StringValue(enc);
         if (strcmp(RSTRING_PTR(enc), "binary") == 0) {
             /* binary string */
-            return Tcl_NewByteArrayObj(s, RSTRING_LEN(str));
+            return Tcl_NewByteArrayObj((const unsigned char *)s, RSTRING_LEN(str));
         } else {
             /* text string */
             return Tcl_NewStringObj(s, RSTRING_LEN(str));
@@ -6161,11 +6135,11 @@ get_obj_from_str(str)
 #ifdef HAVE_RUBY_ENCODING_H
     } else if (rb_enc_get_index(str) == ENCODING_INDEX_BINARY) {
         /* binary string */
-        return Tcl_NewByteArrayObj(s, RSTRING_LEN(str));
+        return Tcl_NewByteArrayObj((const unsigned char *)s, RSTRING_LEN(str));
 #endif
     } else if (strlen(s) != RSTRING_LEN(str)) {
         /* probably binary string */
-        return Tcl_NewByteArrayObj(s, RSTRING_LEN(str));
+        return Tcl_NewByteArrayObj((const unsigned char *)s, RSTRING_LEN(str));
     } else {
         /* probably text string */
         return Tcl_NewStringObj(s, RSTRING_LEN(str));
@@ -7343,7 +7317,7 @@ lib_fromUTF8_core(ip_obj, src, encodename)
             StringValue(str);
             tclstr = Tcl_NewStringObj(RSTRING_PTR(str), RSTRING_LEN(str));
 	    Tcl_IncrRefCount(tclstr);
-            s = Tcl_GetByteArrayFromObj(tclstr, &len);
+            s = (char*)Tcl_GetByteArrayFromObj(tclstr, &len);
             str = rb_tainted_str_new(s, len);
 	    s = (char*)NULL;
 	    Tcl_DecrRefCount(tclstr);
@@ -9195,7 +9169,7 @@ create_dummy_encoding_for_tk_core(interp, name, error_mode)
      VALUE name;
      VALUE error_mode;
 {
-  struct tcltkip *ptr = get_ip(interp);
+  get_ip(interp);
 
   rb_secure(4);
 
@@ -10148,6 +10122,8 @@ Init_tcltklib()
     Tcl_ObjType_String    = Tcl_GetObjType(Tcl_ObjTypeName_String);
 
     /* --------------------------------------------------------------- */
+
+    (void)call_original_exit;
 }
 
 /* eof */

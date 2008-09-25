@@ -4,6 +4,15 @@ require_relative 'marshaltestlib'
 class TestMarshal < Test::Unit::TestCase
   include MarshalTestLib
 
+  def setup
+    @verbose = $VERBOSE
+    $VERBOSE = nil
+  end
+
+  def teardown
+    $VERBOSE = @verbose
+  end
+
   def encode(o)
     Marshal.dump(o)
   end
@@ -169,5 +178,17 @@ class TestMarshal < Test::Unit::TestCase
     assert_nothing_raised do
       Marshal.dump((0..1000).map {|x| C4.new(x % 50 == 25) })
     end
+  end
+
+  def test_taint_and_untrust
+    x = Object.new
+    x.taint
+    x.untrust
+    s = Marshal.dump(x)
+    assert_equal(true, s.tainted?)
+    assert_equal(true, s.untrusted?)
+    y = Marshal.load(s)
+    assert_equal(true, y.tainted?)
+    assert_equal(true, y.untrusted?)
   end
 end

@@ -222,7 +222,7 @@ mbc_case_fold(OnigCaseFoldType flag,
 }
 
 static UChar*
-left_adjust_char_head(const UChar* start, const UChar* s, OnigEncoding enc)
+left_adjust_char_head(const UChar* start, const UChar* s, const UChar* end, OnigEncoding enc)
 {
   /* In this encoding
      mb-trail bytes doesn't mix with single bytes.
@@ -234,7 +234,7 @@ left_adjust_char_head(const UChar* start, const UChar* s, OnigEncoding enc)
   p = s;
 
   while (!eucjp_islead(*p) && p > start) p--;
-  len = enclen(enc, p, s);
+  len = enclen(enc, p, end);
   if (p + len > s) return (UChar* )p;
   p += len;
   return (UChar* )(p + ((s - p) & ~1));
@@ -377,7 +377,7 @@ ENC_ALIAS("eucJP", "EUC-JP") /* UI-OSF Application Platform Profile for Japanese
  * Link: http://ja.wikipedia.org/wiki/EUC-JP
  */
 ENC_REPLICATE("eucJP-ms", "EUC-JP") /* TOG/JVC CDE/Motif Technical WG */
-ENC_ALIAS("euc-jp-ms", "EUC-JP")
+ENC_ALIAS("euc-jp-ms", "eucJP-ms")
 
 /*
  * Name: CP51932

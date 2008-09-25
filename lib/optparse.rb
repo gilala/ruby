@@ -632,7 +632,7 @@ class OptionParser
       list.each do |opt|
         if opt.respond_to?(:summarize) # perhaps OptionParser::Switch
           opt.summarize(*args, &block)
-        elsif !opt
+        elsif !opt or opt.empty?
           yield("")
         elsif opt.respond_to?(:each_line)
           opt.each_line(&block)
@@ -1474,6 +1474,7 @@ class OptionParser
   #
   def environment(env = File.basename($0, '.*'))
     env = ENV[env] || ENV[env.upcase] or return
+    require 'shellwords'
     parse(*Shellwords.shellwords(env))
   end
 
@@ -1602,6 +1603,13 @@ class OptionParser
     def recover(argv)
       argv[0, 0] = @args
       argv
+    end
+
+    def set_backtrace(array)
+      unless $DEBUG
+        array.delete_if(&%r"\A#{Regexp.quote(__FILE__)}:"o.method(:=~))
+      end
+      super(array)
     end
 
     def set_option(opt, eq)

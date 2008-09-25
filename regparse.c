@@ -729,7 +729,10 @@ name_add(regex_t* reg, UChar* name, UChar* name_end, int backref, ScanEnv* env)
     CHECK_NULL_RETURN_MEMERR(e);
 
     e->name = strdup_with_null(reg->enc, name, name_end);
-    if (IS_NULL(e->name)) return ONIGERR_MEMORY;
+    if (IS_NULL(e->name)) {
+      xfree(e);
+      return ONIGERR_MEMORY;
+    }
     onig_st_insert_strend(t, e->name, (e->name + (name_end - name)),
                           (HashDataType )e);
 
@@ -1537,7 +1540,7 @@ str_node_split_last_char(StrNode* sn, OnigEncoding enc)
   Node* n = NULL_NODE;
 
   if (sn->end > sn->s) {
-    p = onigenc_get_prev_char_head(enc, sn->s, sn->end);
+    p = onigenc_get_prev_char_head(enc, sn->s, sn->end, sn->end);
     if (p && p > sn->s) { /* can be splitted. */
       n = node_new_str(p, sn->end);
       if ((sn->flag & NSTR_RAW) != 0)
@@ -5384,13 +5387,19 @@ parse_exp(Node** np, OnigToken* tok, int term,
       if (tok->u.repeat.possessive != 0) {
 	Node* en;
 	en = node_new_enclose(ENCLOSE_STOP_BACKTRACK);
-	CHECK_NULL_RETURN_MEMERR(en);
+	if (IS_NULL(en)) {
+	  onig_node_free(qn);
+	  return ONIGERR_MEMORY;
+	}
 	NENCLOSE(en)->target = qn;
 	qn = en;
       }
 
       if (r == 0) {
 	*targetp = qn;
+      }
+      else if (r == 1) {
+        onig_node_free(qn);
       }
       else if (r == 2) { /* split case: /abc+/ */
 	Node *tmp;

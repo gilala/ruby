@@ -18,11 +18,11 @@ void syck_parser_pop_level( SyckParser * );
  * Custom assert
  */
 void 
-syck_assert( char *file_name, unsigned line_num )
+syck_assert( const char *file_name, unsigned line_num, const char *expr )
 {
     fflush( NULL );
-    fprintf( stderr, "\nAssertion failed: %s, line %u\n",
-             file_name, line_num );
+    fprintf( stderr, "\nAssertion failed: %s, line %u: %s\n",
+             file_name, line_num, expr );
     fflush( stderr );
     abort();
 }
@@ -177,7 +177,7 @@ syck_new_parser(void)
 }
 
 int
-syck_add_sym( SyckParser *p, char *data )
+syck_add_sym( SyckParser *p, void *data )
 {
     SYMID id = 0;
     if ( p->syms == NULL )
@@ -190,10 +190,14 @@ syck_add_sym( SyckParser *p, char *data )
 }
 
 int
-syck_lookup_sym( SyckParser *p, SYMID id, char **data )
+syck_lookup_sym( SyckParser *p, SYMID id, void **datap )
 {
+    st_data_t data = (st_data_t)*datap;
+    int ret;
     if ( p->syms == NULL ) return 0;
-    return st_lookup( p->syms, id, (st_data_t *)data );
+    ret = st_lookup( p->syms, id, &data );
+    *datap = (void *)data;
+    return ret;
 }
 
 int
@@ -225,6 +229,22 @@ syck_st_free( SyckParser *p )
     }
 }
 
+typedef struct {
+   long hash;
+   char *buffer;
+   long length;
+   long remaining;
+   int  printed;
+} bytestring_t;
+
+int
+syck_st_free_syms( void *key, bytestring_t *sav, void *dummy )
+{
+    S_FREE(sav->buffer);
+    S_FREE(sav);
+    return ST_CONTINUE;
+}
+
 void
 syck_free_parser( SyckParser *p )
 {
@@ -233,6 +253,7 @@ syck_free_parser( SyckParser *p )
      */
     if ( p->syms != NULL )
     {
+        st_foreach( p->syms, syck_st_free_syms, 0 );
         st_free_table( p->syms );
         p->syms = NULL;
     }
@@ -493,9 +514,9 @@ syck_parse( SyckParser *p )
 }
 
 void
-syck_default_error_handler( SyckParser *p, char *msg )
+syck_default_error_handler( SyckParser *p, const char *msg )
 {
-    printf( "Error at [Line %d, Col %d]: %s\n", 
+    printf( "Error at [Line %d, Col %"PRIdPTRDIFF"]: %s\n", 
         p->linect,
         p->cursor - p->lineptr,
         msg );

@@ -131,7 +131,7 @@ struct pty_info {
 };
 
 static void
-raise_from_wait(char *state, struct pty_info *info)
+raise_from_wait(const char *state, const struct pty_info *info)
 {
     char buf[1024];
     VALUE exc;
@@ -143,8 +143,9 @@ raise_from_wait(char *state, struct pty_info *info)
 }
 
 static VALUE
-pty_syswait(struct pty_info *info)
+pty_syswait(void *arg)
 {
+    const struct pty_info *const info = arg;
     rb_pid_t cpid;
     int status;
 
@@ -363,7 +364,7 @@ get_device_once(int *master, int *slave, char SlaveName[DEVICELEN], int fail)
     if (!fail) rb_raise(rb_eRuntimeError, "can't get Master/Slave device");
     return -1;
 #else
-    char **p;
+    const char *const *p;
     char MasterName[DEVICELEN];
 
     for (p = deviceNo; *p != NULL; p++) {
@@ -414,11 +415,11 @@ pty_getpty(int argc, VALUE *argv, VALUE self)
 
     rfptr->mode = rb_io_mode_flags("r");
     rfptr->fd = info.fd;
-    rfptr->path = strdup(SlaveName);
+    rfptr->pathv = rb_obj_freeze(rb_str_new_cstr(SlaveName));
 
     wfptr->mode = rb_io_mode_flags("w") | FMODE_SYNC;
     wfptr->fd = dup(info.fd);
-    wfptr->path = strdup(SlaveName);
+    wfptr->pathv = rfptr->pathv;
 
     res = rb_ary_new2(3);
     rb_ary_store(res,0,(VALUE)rport);

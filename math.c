@@ -53,6 +53,24 @@ domain_check(double x, const char *msg)
     }
 }
 
+static void
+infinity_check(VALUE arg, double res, const char *msg)
+{
+    while(1) {
+	if (errno) {
+	    rb_sys_fail(msg);
+	}
+	if (isinf(res) && !isinf(RFLOAT_VALUE(arg))) {
+#if defined(EDOM)
+	    errno = EDOM;
+#elif defined(ERANGE)
+	    errno = ERANGE;
+#endif
+	    continue;
+	}
+	break;
+    }
+}
 
 /*
  *  call-seq:
@@ -67,7 +85,7 @@ VALUE
 math_atan2(VALUE obj, VALUE y, VALUE x)
 {
     Need_Float2(y, x);
-    return DOUBLE2NUM(atan2(RFLOAT_VALUE(y), RFLOAT_VALUE(x)));
+    return DBL2NUM(atan2(RFLOAT_VALUE(y), RFLOAT_VALUE(x)));
 }
 
 
@@ -83,7 +101,7 @@ VALUE
 math_cos(VALUE obj, VALUE x)
 {
     Need_Float(x);
-    return DOUBLE2NUM(cos(RFLOAT_VALUE(x)));
+    return DBL2NUM(cos(RFLOAT_VALUE(x)));
 }
 
 /*
@@ -99,7 +117,7 @@ math_sin(VALUE obj, VALUE x)
 {
     Need_Float(x);
 
-    return DOUBLE2NUM(sin(RFLOAT_VALUE(x)));
+    return DBL2NUM(sin(RFLOAT_VALUE(x)));
 }
 
 
@@ -115,7 +133,7 @@ math_tan(VALUE obj, VALUE x)
 {
     Need_Float(x);
 
-    return DOUBLE2NUM(tan(RFLOAT_VALUE(x)));
+    return DBL2NUM(tan(RFLOAT_VALUE(x)));
 }
 
 /*
@@ -134,7 +152,7 @@ math_acos(VALUE obj, VALUE x)
     errno = 0;
     d = acos(RFLOAT_VALUE(x));
     domain_check(d, "acos");
-    return DOUBLE2NUM(d);
+    return DBL2NUM(d);
 }
 
 /*
@@ -153,7 +171,7 @@ math_asin(VALUE obj, VALUE x)
     errno = 0;
     d = asin(RFLOAT_VALUE(x));
     domain_check(d, "asin");
-    return DOUBLE2NUM(d);
+    return DBL2NUM(d);
 }
 
 /*
@@ -167,7 +185,7 @@ static VALUE
 math_atan(VALUE obj, VALUE x)
 {
     Need_Float(x);
-    return DOUBLE2NUM(atan(RFLOAT_VALUE(x)));
+    return DBL2NUM(atan(RFLOAT_VALUE(x)));
 }
 
 #ifndef HAVE_COSH
@@ -190,7 +208,7 @@ math_cosh(VALUE obj, VALUE x)
 {
     Need_Float(x);
     
-    return DOUBLE2NUM(cosh(RFLOAT_VALUE(x)));
+    return DBL2NUM(cosh(RFLOAT_VALUE(x)));
 }
 
 #ifndef HAVE_SINH
@@ -213,7 +231,7 @@ VALUE
 math_sinh(VALUE obj, VALUE x)
 {
     Need_Float(x);
-    return DOUBLE2NUM(sinh(RFLOAT_VALUE(x)));
+    return DBL2NUM(sinh(RFLOAT_VALUE(x)));
 }
 
 #ifndef HAVE_TANH
@@ -236,7 +254,7 @@ static VALUE
 math_tanh(VALUE obj, VALUE x)
 {
     Need_Float(x);
-    return DOUBLE2NUM(tanh(RFLOAT_VALUE(x)));
+    return DBL2NUM(tanh(RFLOAT_VALUE(x)));
 }
 
 /*
@@ -255,7 +273,7 @@ math_acosh(VALUE obj, VALUE x)
     errno = 0;
     d = acosh(RFLOAT_VALUE(x));
     domain_check(d, "acosh");
-    return DOUBLE2NUM(d);
+    return DBL2NUM(d);
 }
 
 /*
@@ -269,7 +287,7 @@ static VALUE
 math_asinh(VALUE obj, VALUE x)
 {
     Need_Float(x);
-    return DOUBLE2NUM(asinh(RFLOAT_VALUE(x)));
+    return DBL2NUM(asinh(RFLOAT_VALUE(x)));
 }
 
 /*
@@ -288,7 +306,8 @@ math_atanh(VALUE obj, VALUE x)
     errno = 0;
     d = atanh(RFLOAT_VALUE(x));
     domain_check(d, "atanh");
-    return DOUBLE2NUM(d);
+    infinity_check(x, d, "atanh");
+    return DBL2NUM(d);
 }
 
 /*
@@ -302,7 +321,7 @@ VALUE
 math_exp(VALUE obj, VALUE x)
 {
     Need_Float(x);
-    return DOUBLE2NUM(exp(RFLOAT_VALUE(x)));
+    return DBL2NUM(exp(RFLOAT_VALUE(x)));
 }
 
 #if defined __CYGWIN__
@@ -334,12 +353,13 @@ math_log(int argc, VALUE *argv)
     Need_Float(x);
     errno = 0;
     d = log(RFLOAT_VALUE(x));
-    if (!NIL_P(base)) {
+    if (argc == 2) {
 	Need_Float(base);
 	d /= log(RFLOAT_VALUE(base));
     }
     domain_check(d, "log");
-    return DOUBLE2NUM(d);
+    infinity_check(x, d, "log");
+    return DBL2NUM(d);
 }
 
 #ifndef log2
@@ -369,10 +389,9 @@ math_log2(VALUE obj, VALUE x)
     Need_Float(x);
     errno = 0;
     d = log2(RFLOAT_VALUE(x));
-    if (errno) {
-	rb_sys_fail("log2");
-    }
-    return DOUBLE2NUM(d);
+    domain_check(d, "log2");
+    infinity_check(x, d, "log2");
+    return DBL2NUM(d);
 }
 
 /*
@@ -391,7 +410,8 @@ math_log10(VALUE obj, VALUE x)
     errno = 0;
     d = log10(RFLOAT_VALUE(x));
     domain_check(d, "log10");
-    return DOUBLE2NUM(d);
+    infinity_check(x, d, "log10");
+    return DBL2NUM(d);
 }
 
 /*
@@ -427,7 +447,7 @@ math_sqrt(VALUE obj, VALUE x)
     errno = 0;
     d = sqrt(RFLOAT_VALUE(x));
     domain_check(d, "sqrt");
-    return DOUBLE2NUM(d);
+    return DBL2NUM(d);
 }
 
 /*
@@ -466,7 +486,7 @@ static VALUE
 math_cbrt(VALUE obj, VALUE x)
 {
     Need_Float(x);
-    return DOUBLE2NUM(cbrt(RFLOAT_VALUE(x)));
+    return DBL2NUM(cbrt(RFLOAT_VALUE(x)));
 }
 
 /*
@@ -490,7 +510,7 @@ math_frexp(VALUE obj, VALUE x)
     Need_Float(x);
     
     d = frexp(RFLOAT_VALUE(x), &exp);
-    return rb_assoc_new(DOUBLE2NUM(d), INT2NUM(exp));
+    return rb_assoc_new(DBL2NUM(d), INT2NUM(exp));
 }
 
 /*
@@ -507,7 +527,7 @@ static VALUE
 math_ldexp(VALUE obj, VALUE x, VALUE n)
 {
     Need_Float(x);
-    return DOUBLE2NUM(ldexp(RFLOAT_VALUE(x), NUM2INT(n)));
+    return DBL2NUM(ldexp(RFLOAT_VALUE(x), NUM2INT(n)));
 }
 
 /*
@@ -524,7 +544,7 @@ VALUE
 math_hypot(VALUE obj, VALUE x, VALUE y)
 {
     Need_Float2(x, y);
-    return DOUBLE2NUM(hypot(RFLOAT_VALUE(x), RFLOAT_VALUE(y)));
+    return DBL2NUM(hypot(RFLOAT_VALUE(x), RFLOAT_VALUE(y)));
 }
 
 /*
@@ -538,7 +558,7 @@ static VALUE
 math_erf(VALUE obj, VALUE x)
 {
     Need_Float(x);
-    return DOUBLE2NUM(erf(RFLOAT_VALUE(x)));
+    return DBL2NUM(erf(RFLOAT_VALUE(x)));
 }
 
 /*
@@ -552,7 +572,7 @@ static VALUE
 math_erfc(VALUE obj, VALUE x)
 {
     Need_Float(x);
-    return DOUBLE2NUM(erfc(RFLOAT_VALUE(x)));
+    return DBL2NUM(erfc(RFLOAT_VALUE(x)));
 }
 
 /*
@@ -604,7 +624,7 @@ math_gamma(VALUE obj, VALUE x)
     errno = 0;
     d = tgamma(RFLOAT_VALUE(x));
     domain_check(d, "gamma");
-    return DOUBLE2NUM(d);
+    return DBL2NUM(d);
 }
 
 /*
@@ -629,7 +649,7 @@ math_lgamma(VALUE obj, VALUE x)
     errno = 0;
     d = lgamma_r(RFLOAT_VALUE(x), &sign);
     domain_check(d, "lgamma");
-    v = DOUBLE2NUM(d);
+    v = DBL2NUM(d);
     return rb_assoc_new(v, INT2FIX(sign));
 }
 
@@ -647,15 +667,15 @@ Init_Math(void)
     rb_mMath = rb_define_module("Math");
 
 #ifdef M_PI
-    rb_define_const(rb_mMath, "PI", DOUBLE2NUM(M_PI));
+    rb_define_const(rb_mMath, "PI", DBL2NUM(M_PI));
 #else
-    rb_define_const(rb_mMath, "PI", DOUBLE2NUM(atan(1.0)*4.0));
+    rb_define_const(rb_mMath, "PI", DBL2NUM(atan(1.0)*4.0));
 #endif
 
 #ifdef M_E
-    rb_define_const(rb_mMath, "E", DOUBLE2NUM(M_E));
+    rb_define_const(rb_mMath, "E", DBL2NUM(M_E));
 #else
-    rb_define_const(rb_mMath, "E", DOUBLE2NUM(exp(1.0)));
+    rb_define_const(rb_mMath, "E", DBL2NUM(exp(1.0)));
 #endif
 
     rb_define_module_function(rb_mMath, "atan2", math_atan2, 2);

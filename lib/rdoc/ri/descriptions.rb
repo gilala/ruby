@@ -2,11 +2,10 @@ require 'yaml'
 require 'rdoc/markup/fragments'
 require 'rdoc/ri'
 
-#--
+##
 # Descriptions are created by RDoc (in ri_generator) and written out in
 # serialized form into the documentation tree. ri then reads these to generate
 # the documentation
-#++
 
 class RDoc::RI::NamedThing
   attr_reader :name
@@ -78,7 +77,9 @@ end
 class RDoc::RI::ModuleDescription < RDoc::RI::Description
 
   attr_accessor :class_methods
+  attr_accessor :class_method_extensions
   attr_accessor :instance_methods
+  attr_accessor :instance_method_extensions
   attr_accessor :attributes
   attr_accessor :constants
   attr_accessor :includes
@@ -94,8 +95,12 @@ class RDoc::RI::ModuleDescription < RDoc::RI::Description
       @comment = old.comment
     else
       unless old.comment.nil? or old.comment.empty? then
-        @comment << RDoc::Markup::Flow::RULE.new
-        @comment.concat old.comment
+        if @comment.nil? or @comment.empty? then
+          @comment = old.comment
+        else
+          @comment << RDoc::Markup::Flow::RULE.new
+          @comment.concat old.comment
+        end
       end
     end
   end
@@ -145,6 +150,7 @@ class RDoc::RI::MethodDescription < RDoc::RI::Description
   attr_accessor :aliases
   attr_accessor :is_alias_for
   attr_accessor :params
+  attr_accessor :source_path
 
 end
 

@@ -1,5 +1,6 @@
 require 'test/unit'
 require 'tmpdir'
+require 'pathname'
 require_relative 'envutil'
 
 class TestProcess < Test::Unit::TestCase
@@ -21,6 +22,7 @@ class TestProcess < Test::Unit::TestCase
 
   def with_tmpchdir
     Dir.mktmpdir {|d|
+      d = Pathname.new(d).realpath.to_s
       Dir.chdir(d) {
         yield d
       }
@@ -106,8 +108,8 @@ class TestProcess < Test::Unit::TestCase
   def test_rlimit_value
     return unless rlimit_exist?
     assert_raise(ArgumentError) { Process.setrlimit(:CORE, :FOO) }
-    assert_raise(Errno::EPERM) { Process.setrlimit(:NOFILE, :INFINITY) }
-    assert_raise(Errno::EPERM) { Process.setrlimit(:NOFILE, "INFINITY") }
+    assert_raise(Errno::EPERM, Errno::EINVAL) { Process.setrlimit(:NOFILE, :INFINITY) }
+    assert_raise(Errno::EPERM, Errno::EINVAL) { Process.setrlimit(:NOFILE, "INFINITY") }
   end
 
   TRUECOMMAND = [RUBY, '-e', '']
@@ -447,6 +449,7 @@ class TestProcess < Test::Unit::TestCase
   end
 
   def test_popen_fork
+    return if /freebsd/ =~ RUBY_PLATFORM # this test freeze in FreeBSD
     IO.popen("-") {|io|
       if !io
         puts "fooo"
@@ -946,15 +949,15 @@ class TestProcess < Test::Unit::TestCase
   end
 
   def test_getpriority
-    assert_kind_of(Integer, Process.getpriority(Process::PRIO_USER, 0))
+    assert_kind_of(Integer, Process.getpriority(Process::PRIO_PROCESS, $$))
   rescue NameError, NotImplementedError
   end
 
   def test_setpriority
     if defined? Process::PRIO_USER
       assert_nothing_raised do
-        pr = Process.getpriority(Process::PRIO_USER, 0)
-        Process.setpriority(Process::PRIO_USER, 0, pr)
+        pr = Process.getpriority(Process::PRIO_PROCESS, $$)
+        Process.setpriority(Process::PRIO_PROCESS, $$, pr)
       end
     end
   end
@@ -998,4 +1001,7 @@ class TestProcess < Test::Unit::TestCase
     assert(true == r || false == r)
   end
 
+  def test_pst_inspect
+    assert_nothing_raised { Process::Status.allocate.inspect }
+  end
 end

@@ -204,9 +204,8 @@ rb_w32_Sleep(unsigned long msec)
 }
 
 static void
-native_sleep(rb_thread_t *th, struct timeval *tv, int deadlockable)
+native_sleep(rb_thread_t *th, struct timeval *tv)
 {
-    int prev_status = th->status;
     DWORD msec;
 
     if (tv) {
@@ -214,15 +213,6 @@ native_sleep(rb_thread_t *th, struct timeval *tv, int deadlockable)
     }
     else {
 	msec = INFINITE;
-    }
-
-    if (!tv && deadlockable) {
-	th->status = THREAD_STOPPED_FOREVER;
-	th->vm->sleeper++;
-	rb_check_deadlock(th->vm);
-    }
-    else {
-	th->status = THREAD_STOPPED;
     }
 
     GVL_UNLOCK_BEGIN();
@@ -249,9 +239,6 @@ native_sleep(rb_thread_t *th, struct timeval *tv, int deadlockable)
 	native_mutex_unlock(&th->interrupt_lock);
     }
     GVL_UNLOCK_END();
-    th->status = prev_status;
-    if (!tv && deadlockable) th->vm->sleeper--;
-    RUBY_VM_CHECK_INTS();
 }
 
 static int
@@ -512,6 +499,8 @@ native_thread_join(HANDLE th)
     w32_wait_events(&th, 1, 0, 0);
 }
 
+#if USE_NATIVE_THREAD_PRIORITY
+
 static void
 native_thread_apply_priority(rb_thread_t *th)
 {
@@ -529,11 +518,15 @@ native_thread_apply_priority(rb_thread_t *th)
     SetThreadPriority(th->thread_id, priority);
 }
 
+#endif /* USE_NATIVE_THREAD_PRIORITY */
+
 static void
 ubf_handle(void *ptr)
 {
+    typedef BOOL (WINAPI *cancel_io_func_t)(HANDLE);
     rb_thread_t *th = (rb_thread_t *)ptr;
     thread_debug("ubf_handle: %p\n", th);
+
     w32_set_event(th->native_thread_data.interrupt_event);
 }
 
@@ -555,7 +548,8 @@ void
 rb_thread_create_timer_thread(void)
 {
     if (timer_thread_id == 0) {
-	timer_thread_id = w32_create_thread(1024, timer_thread_func, GET_VM());
+	timer_thread_id = w32_create_thread(1024 + (THREAD_DEBUG ? BUFSIZ : 0),
+					    timer_thread_func, GET_VM());
 	w32_resume_thread(timer_thread_id);
     }
 }

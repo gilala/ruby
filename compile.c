@@ -10,25 +10,13 @@
 **********************************************************************/
 
 #include "ruby/ruby.h"
-#include "ruby/node.h"
 
 #define USE_INSN_STACK_INCREASE 1
 #include "vm_core.h"
-#include "compile.h"
+#include "iseq.h"
 #include "insns.inc"
 #include "insns_info.inc"
 
-#ifdef HAVE_STDARG_PROTOTYPES
-#include <stdarg.h>
-#define va_init_list(a,b) va_start(a,b)
-#else
-#include <varargs.h>
-#define va_init_list(a,b) va_start(a)
-#endif
-
-VALUE iseq_load(VALUE self, VALUE data, VALUE parent, VALUE opt);
-
-/* types */
 
 typedef struct iseq_link_element {
     enum {
@@ -81,6 +69,232 @@ struct iseq_compile_data_ensure_node_stack {
     struct iseq_compile_data_ensure_node_stack *prev;
     struct ensure_range *erange;
 };
+
+/**
+ * debug function(macro) interface depend on CPDEBUG
+ * if it is less than 0, runtime option is in effect.
+ *
+ * debug level:
+ *  0: no debug output
+ *  1: show node type
+ *  2: show node important parameters
+ *  ...
+ *  5: show other parameters
+ * 10: show every AST array
+ */
+
+#ifndef CPDEBUG
+#define CPDEBUG 0
+#endif
+
+#if CPDEBUG >= 0
+#define compile_debug CPDEBUG
+#else
+#define compile_debug iseq->compile_data->option->debug_level
+#endif
+
+NORETURN(PRINTF_ARGS(void rb_compile_bug(const char*, int, const char*, ...), 3, 4));
+
+#if CPDEBUG
+
+#define compile_debug_print_indent(level) \
+    ruby_debug_print_indent(level, compile_debug, gl_node_level * 2)
+
+#define debugp(header, value) (void) \
+  (compile_debug_print_indent(1) && \
+   ruby_debug_print_value(1, compile_debug, header, value))
+
+#define debugi(header, id)  (void) \
+  (compile_debug_print_indent(1) && \
+   ruby_debug_print_id(1, compile_debug, header, id))
+
+#define debugp_param(header, value)  (void) \
+  (compile_debug_print_indent(1) && \
+   ruby_debug_print_value(1, compile_debug, header, value))
+
+#define debugp_verbose(header, value)  (void) \
+  (compile_debug_print_indent(2) && \
+   ruby_debug_print_value(2, compile_debug, header, value))
+
+#define debugp_verbose_node(header, value)  (void) \
+  (compile_debug_print_indent(10) && \
+   ruby_debug_print_value(10, compile_debug, header, value))
+
+#define debug_node_start(node)  ((void) \
+  (compile_debug_print_indent(1) && \
+   (ruby_debug_print_node(1, CPDEBUG, "", (NODE *)node), gl_node_level)), \
+   gl_node_level++)
+
+#define debug_node_end()  gl_node_level --;
+
+#else
+
+static inline ID
+r_id(ID id)
+{
+    return id;
+}
+
+static inline VALUE
+r_value(VALUE value)
+{
+    return value;
+}
+
+#define debugi(header, id)                 r_id(id)
+#define debugp(header, value)              r_value(value)
+#define debugp_verbose(header, value)      r_value(value)
+#define debugp_verbose_node(header, value) r_value(value)
+#define debugp_param(header, value)        r_value(value)
+#define debug_node_start(node)             ((void)0)
+#define debug_node_end()                   ((void)0)
+#endif
+
+#if CPDEBUG > 1 || CPDEBUG < 0
+PRINTF_ARGS(void ruby_debug_printf(const char*, ...), 1, 2);
+#define debugs if (compile_debug_print_indent(1)) ruby_debug_printf
+#define debug_compile(msg, v) ((void)(compile_debug_print_indent(1) && fputs(msg, stderr)), (v))
+#else
+#define debugs                             if(0)printf
+#define debug_compile(msg, v) (v)
+#endif
+
+
+/* create new label */
+#define NEW_LABEL(l) new_label_body(iseq, l)
+
+#define iseq_filename(iseq) \
+  (((rb_iseq_t*)DATA_PTR(iseq))->filename)
+
+#define NEW_ISEQVAL(node, name, type)       \
+  new_child_iseq(iseq, node, name, 0, type)
+
+#define NEW_CHILD_ISEQVAL(node, name, type)       \
+  new_child_iseq(iseq, node, name, iseq->self, type)
+
+#define NEW_SPECIAQL_BLOCK_ISEQVAL(iseq, sym) \
+  new_child_iseq(iseq, iseq->node, iseq->name, iseq->parent_iseq, iseq->type, sym)
+
+/* add instructions */
+#define ADD_SEQ(seq1, seq2) \
+  APPEND_LIST(seq1, seq2)
+
+/* add an instruction */
+#define ADD_INSN(seq, line, insn) \
+  ADD_ELEM(seq, (LINK_ELEMENT *) new_insn_body(iseq, line, BIN(insn), 0))
+
+/* add an instruction with label operand */
+#define ADD_INSNL(seq, line, insn, label) \
+  ADD_ELEM(seq, (LINK_ELEMENT *) \
+           new_insn_body(iseq, line, BIN(insn), 1, (VALUE)label))
+
+/* add an instruction with some operands (1, 2, 3, 5) */
+#define ADD_INSN1(seq, line, insn, op1) \
+  ADD_ELEM(seq, (LINK_ELEMENT *) \
+           new_insn_body(iseq, line, BIN(insn), 1, (VALUE)op1))
+
+#define ADD_INSN2(seq, line, insn, op1, op2) \
+  ADD_ELEM(seq, (LINK_ELEMENT *) \
+           new_insn_body(iseq, line, BIN(insn), 2, (VALUE)op1, (VALUE)op2))
+
+#define ADD_INSN3(seq, line, insn, op1, op2, op3) \
+  ADD_ELEM(seq, (LINK_ELEMENT *) \
+           new_insn_body(iseq, line, BIN(insn), 3, (VALUE)op1, (VALUE)op2, (VALUE)op3))
+
+/* Specific Insn factory */
+#define ADD_SEND(seq, line, id, argc) \
+  ADD_SEND_R(seq, line, id, argc, (VALUE)Qfalse, (VALUE)INT2FIX(0))
+
+#define ADD_CALL_RECEIVER(seq, line) \
+  ADD_INSN(seq, line, putnil)
+
+#define ADD_CALL(seq, line, id, argc) \
+  ADD_SEND_R(seq, line, id, argc, (VALUE)Qfalse, (VALUE)INT2FIX(VM_CALL_FCALL_BIT))
+
+#define ADD_CALL_WITH_BLOCK(seq, line, id, argc, block) \
+  ADD_SEND_R(seq, line, id, argc, block, (VALUE)INT2FIX(VM_CALL_FCALL_BIT))
+
+#define ADD_SEND_R(seq, line, id, argc, block, flag) \
+  ADD_ELEM(seq, (LINK_ELEMENT *) \
+           new_insn_send(iseq, line, \
+                         (VALUE)id, (VALUE)argc, (VALUE)block, (VALUE)flag))
+
+#define ADD_TRACE(seq, line, event) \
+  do { \
+      if ((event) == RUBY_EVENT_LINE && iseq->coverage && \
+	  RARRAY_PTR(iseq->coverage)[(line) - 1] == Qnil) { \
+	  RARRAY_PTR(iseq->coverage)[(line) - 1] = INT2FIX(0); \
+	  ADD_INSN1(seq, line, trace, INT2FIX(RUBY_EVENT_COVERAGE)); \
+      } \
+      if (iseq->compile_data->option->trace_instruction) { \
+	  ADD_INSN1(seq, line, trace, INT2FIX(event)); \
+      } \
+  }while(0);
+
+/* add label */
+#define ADD_LABEL(seq, label) \
+  ADD_ELEM(seq, (LINK_ELEMENT *) label)
+
+#define ADD_ADJUST(seq, line, label) \
+  ADD_ELEM(seq, (LINK_ELEMENT *) new_adjust_body(iseq, label, line))
+
+#define ADD_ADJUST_RESTORE(seq, label) \
+  ADD_ELEM(seq, (LINK_ELEMENT *) new_adjust_body(iseq, label, -1))
+
+#define ADD_CATCH_ENTRY(type, ls, le, iseqv, lc)		\
+    (rb_ary_push(iseq->compile_data->catch_table_ary,		\
+		 rb_ary_new3(5, type,				\
+			     (VALUE)(ls) | 1, (VALUE)(le) | 1,	\
+			     iseqv, (VALUE)(lc) | 1)))
+
+/* compile node */
+#define COMPILE(anchor, desc, node) \
+  (debug_compile("== " desc "\n", \
+                 iseq_compile_each(iseq, anchor, node, 0)))
+
+/* compile node, this node's value will be poped */
+#define COMPILE_POPED(anchor, desc, node)    \
+  (debug_compile("== " desc "\n", \
+                 iseq_compile_each(iseq, anchor, node, 1)))
+
+/* compile node, which is poped when 'poped' is true */
+#define COMPILE_(anchor, desc, node, poped)  \
+  (debug_compile("== " desc "\n", \
+                 iseq_compile_each(iseq, anchor, node, poped)))
+
+#define OPERAND_AT(insn, idx) \
+  (((INSN*)(insn))->operands[idx])
+
+#define INSN_OF(insn) \
+  (((INSN*)(insn))->insn_id)
+
+/* error */
+#define COMPILE_ERROR(strs)                        \
+{                                                  \
+  VALUE tmp = GET_THREAD()->errinfo;               \
+  if (compile_debug) rb_compile_bug strs;          \
+  GET_THREAD()->errinfo = iseq->compile_data->err_info;  \
+  rb_compile_error strs;                           \
+  iseq->compile_data->err_info = GET_THREAD()->errinfo; \
+  GET_THREAD()->errinfo = tmp;                     \
+  ret = 0;                                         \
+  break;                                           \
+}
+
+#define ERROR_ARGS ruby_sourcefile, nd_line(node),
+
+
+#define COMPILE_OK 1
+#define COMPILE_NG 0
+
+
+/* leave name uninitialized so that compiler warn if INIT_ANCHOR is
+ * missing */
+#define DECL_ANCHOR(name) \
+  LINK_ANCHOR *name, name##_body__ = {{0,},}
+#define INIT_ANCHOR(name) \
+  (name##_body__.last = &name##_body__.anchor, name = &name##_body__)
+
 
 #include "optinsn.inc"
 #if OPT_INSTRUCTIONS_UNIFICATION
@@ -2334,6 +2548,9 @@ defined_expr(rb_iseq_t *iseq, LINK_ANCHOR *ret,
       case NODE_STR:
       case NODE_LIT:
       case NODE_ZARRAY:
+      case NODE_AND:
+      case NODE_OR:
+      default:
 	estr = "expression";
 	break;
 
@@ -2476,33 +2693,6 @@ defined_expr(rb_iseq_t *iseq, LINK_ANCHOR *ret,
       case NODE_CVASGN:
 	estr = "assignment";
 	break;
-
-      default:{
-	LABEL *lstart = NEW_LABEL(nd_line(node));
-	LABEL *lend = NEW_LABEL(nd_line(node));
-	VALUE ensure = NEW_CHILD_ISEQVAL(NEW_NIL(),
-					 rb_str_concat(rb_str_new2
-						       ("defined guard in "),
-						       iseq->name),
-					 ISEQ_TYPE_DEFINED_GUARD);
-
-	ADD_LABEL(ret, lstart);
-	COMPILE(ret, "defined expr (others)", node);
-	if (!lfinish[1]) {
-	    lfinish[1] = NEW_LABEL(nd_line(node));
-	}
-	ADD_INSNL(ret, nd_line(node), branchunless, lfinish[1]);
-	if (needstr) {
-	    ADD_INSN1(ret, nd_line(node), putstring, rb_str_new2("expression"));
-	}
-	else {
-	    ADD_INSN1(ret, nd_line(node), putobject, Qtrue);
-	}
-	ADD_LABEL(ret, lend);
-
-	ADD_CATCH_ENTRY(CATCH_TYPE_RESCUE, lstart, lend, ensure, lfinish[1]);
-	return 1;
-      } /* end of default */
     }
 
     if (estr != 0) {
@@ -4527,11 +4717,20 @@ iseq_compile_each(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE * node, int poped)
 	break;
       }
       case NODE_POSTEXE:{
+	LABEL *lstart = NEW_LABEL(nd_line(node));
+	LABEL *lend = NEW_LABEL(nd_line(node));
 	VALUE block = NEW_CHILD_ISEQVAL(node->nd_body, make_name_for_block(iseq), ISEQ_TYPE_BLOCK);
+
+	ADD_LABEL(ret, lstart);
+	ADD_INSN2(ret, nd_line(node), onceinlinecache, 0, lend);
+	ADD_INSN(ret, nd_line(node), pop);
 
 	ADD_INSN1(ret, nd_line(node), putspecialobject, INT2FIX(VM_SPECIAL_OBJECT_VMCORE));
 	ADD_INSN1(ret, nd_line(node), putiseq, block);
 	ADD_SEND (ret, nd_line(node), ID2SYM(id_core_set_postexe), INT2FIX(1));
+
+	ADD_INSN1(ret, nd_line(node), setinlinecache, lstart);
+	ADD_LABEL(ret, lend);
 
 	if (poped) {
 	    ADD_INSN(ret, nd_line(node), pop);
@@ -4670,10 +4869,8 @@ insn_data_to_s_detail(INSN *iobj)
 	    switch (type) {
 	      case TS_OFFSET:	/* label(destination position) */
 		{
-		    char buff[0x100];
 		    LABEL *lobj = (LABEL *)OPERAND_AT(iobj, j);
-		    snprintf(buff, sizeof(buff), "<L%03d>", lobj->label_no);
-		    rb_str_concat(str, rb_str_new2(buff));
+		    rb_str_catf(str, "<L%03d>", lobj->label_no);
 		    break;
 		}
 		break;
@@ -4799,6 +4996,7 @@ static VALUE
 get_exception_sym2type(VALUE sym)
 {
 #undef rb_intern
+#define rb_intern(str) rb_intern_const(str)
     static VALUE symRescue, symEnsure, symRetry;
     static VALUE symBreak, symRedo, symNext;
 
@@ -4919,7 +5117,8 @@ iseq_build_body(rb_iseq_t *iseq, LINK_ANCHOR *anchor,
 		      case TS_LINDEX:
 		      case TS_DINDEX:
 		      case TS_NUM:
-			argv[j] = (NUM2INT(op), op);
+			(void)NUM2INT(op);
+			argv[j] = op;
 			break;
 		      case TS_VALUE:
 			argv[j] = op;
@@ -5066,3 +5265,55 @@ iseq_build_from_ary(rb_iseq_t *iseq, VALUE locals, VALUE args,
     iseq_build_body(iseq, anchor, body, labels_table);
     return iseq->self;
 }
+
+/* for parser */
+
+int
+rb_dvar_defined(ID id)
+{
+    rb_thread_t *th = GET_THREAD();
+    rb_iseq_t *iseq;
+    if (th->base_block && (iseq = th->base_block->iseq)) {
+	while (iseq->type == ISEQ_TYPE_BLOCK ||
+	       iseq->type == ISEQ_TYPE_RESCUE ||
+	       iseq->type == ISEQ_TYPE_ENSURE ||
+	       iseq->type == ISEQ_TYPE_EVAL) {
+	    int i;
+
+	    for (i = 0; i < iseq->local_table_size; i++) {
+		if (iseq->local_table[i] == id) {
+		    return 1;
+		}
+	    }
+	    iseq = iseq->parent_iseq;
+	}
+    }
+    return 0;
+}
+
+int
+rb_local_defined(ID id)
+{
+    rb_thread_t *th = GET_THREAD();
+    rb_iseq_t *iseq;
+
+    if (th->base_block && th->base_block->iseq) {
+	int i;
+	iseq = th->base_block->iseq->local_iseq;
+
+	for (i=0; i<iseq->local_table_size; i++) {
+	    if (iseq->local_table[i] == id) {
+		return 1;
+	    }
+	}
+    }
+    return 0;
+}
+
+int
+rb_parse_in_eval(void)
+{
+    return GET_THREAD()->parse_in_eval != 0;
+}
+
+

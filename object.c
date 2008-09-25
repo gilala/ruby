@@ -14,7 +14,6 @@
 #include "ruby/ruby.h"
 #include "ruby/st.h"
 #include "ruby/util.h"
-#include "debug.h"
 #include <stdio.h>
 #include <errno.h>
 #include <ctype.h>
@@ -161,7 +160,7 @@ init_copy(VALUE dest, VALUE obj)
         rb_raise(rb_eTypeError, "[bug] frozen object (%s) allocated", rb_obj_classname(dest));
     }
     RBASIC(dest)->flags &= ~(T_MASK|FL_EXIVAR);
-    RBASIC(dest)->flags |= RBASIC(obj)->flags & (T_MASK|FL_EXIVAR|FL_TAINT);
+    RBASIC(dest)->flags |= RBASIC(obj)->flags & (T_MASK|FL_EXIVAR|FL_TAINT|FL_UNTRUSTED);
     rb_copy_generic_ivar(dest, obj);
     rb_gc_copy_finalizer(dest, obj);
     switch (TYPE(obj)) {
@@ -234,7 +233,7 @@ rb_obj_clone(VALUE obj)
     }
     clone = rb_obj_alloc(rb_obj_class(obj));
     RBASIC(clone)->klass = rb_singleton_class_clone(obj);
-    RBASIC(clone)->flags = (RBASIC(obj)->flags | FL_TEST(clone, FL_TAINT)) & ~(FL_FREEZE|FL_FINALIZE);
+    RBASIC(clone)->flags = (RBASIC(obj)->flags | FL_TEST(clone, FL_TAINT) | FL_TEST(clone, FL_UNTRUSTED)) & ~(FL_FREEZE|FL_FINALIZE);
     init_copy(clone, obj);
     RBASIC(clone)->flags |= RBASIC(obj)->flags & FL_FREEZE;
 
@@ -302,7 +301,7 @@ rb_any_to_s(VALUE obj)
     VALUE str;
 
     str = rb_sprintf("#<%s:%p>", cname, (void*)obj);
-    if (OBJ_TAINTED(obj)) OBJ_TAINT(str);
+    OBJ_INFECT(str, obj);
 
     return str;
 }
@@ -692,6 +691,62 @@ rb_obj_untaint(VALUE obj)
     return obj;
 }
 
+/*
+ *  call-seq:
+ *     obj.untrusted?    => true or false
+ *  
+ *  Returns <code>true</code> if the object is untrusted.
+ */
+
+VALUE
+rb_obj_untrusted(VALUE obj)
+{
+    if (OBJ_UNTRUSTED(obj))
+	return Qtrue;
+    return Qfalse;
+}
+
+/*
+ *  call-seq:
+ *     obj.untrust -> obj
+ *  
+ *  Marks <i>obj</i> as untrusted.
+ */
+
+VALUE
+rb_obj_untrust(VALUE obj)
+{
+    rb_secure(4);
+    if (!OBJ_UNTRUSTED(obj)) {
+	if (OBJ_FROZEN(obj)) {
+	    rb_error_frozen("object");
+	}
+	OBJ_UNTRUST(obj);
+    }
+    return obj;
+}
+
+
+/*
+ *  call-seq:
+ *     obj.trust    => obj
+ *  
+ *  Removes the untrusted mark from <i>obj</i>.
+ */
+
+VALUE
+rb_obj_trust(VALUE obj)
+{
+    rb_secure(3);
+    if (OBJ_UNTRUSTED(obj)) {
+	if (OBJ_FROZEN(obj)) {
+	    rb_error_frozen("object");
+	}
+	FL_UNSET(obj, FL_UNTRUSTED);
+    }
+    return obj;
+}
+
 void
 rb_obj_infect(VALUE obj1, VALUE obj2)
 {
@@ -705,7 +760,7 @@ static st_table *immediate_frozen_tbl = 0;
  *     obj.freeze    => obj
  *  
  *  Prevents further modifications to <i>obj</i>. A
- *  <code>TypeError</code> will be raised if modification is attempted.
+ *  <code>RuntimeError</code> will be raised if modification is attempted.
  *  There is no way to unfreeze a frozen object. See also
  *  <code>Object#frozen?</code>.
  *     
@@ -715,7 +770,7 @@ static st_table *immediate_frozen_tbl = 0;
  *     
  *  <em>produces:</em>
  *     
- *     prog.rb:3:in `<<': can't modify frozen array (TypeError)
+ *     prog.rb:3:in `<<': can't modify frozen array (RuntimeError)
  *     	from prog.rb:3
  */
 
@@ -723,7 +778,7 @@ VALUE
 rb_obj_freeze(VALUE obj)
 {
     if (!OBJ_FROZEN(obj)) {
-	if (rb_safe_level() >= 4 && !OBJ_TAINTED(obj)) {
+	if (rb_safe_level() >= 4 && !OBJ_UNTRUSTED(obj)) {
 	    rb_raise(rb_eSecurityError, "Insecure: can't freeze object");
 	}
 	OBJ_FREEZE(obj);
@@ -794,7 +849,7 @@ nil_to_i(VALUE obj)
 static VALUE
 nil_to_f(VALUE obj)
 {
-    return DOUBLE2NUM(0.0);
+    return DBL2NUM(0.0);
 }
 
 /*
@@ -1904,12 +1959,36 @@ rb_mod_cvar_defined(VALUE obj, VALUE iv)
     return rb_cvar_defined(obj, id);
 }
 
+static struct conv_method_tbl {
+    const char *method;
+    ID id;
+} conv_method_names[] = {
+    {"to_int", 0},
+    {"to_ary", 0},
+    {"to_str", 0},
+    {"to_sym", 0},
+    {"to_hash", 0},
+    {"to_proc", 0},
+    {"to_io", 0},
+    {"to_a", 0},
+    {"to_s", 0},
+    {NULL, 0}
+};
+
 static VALUE
 convert_type(VALUE val, const char *tname, const char *method, int raise)
 {
-    ID m;
+    ID m = 0;
+    int i;
 
-    m = rb_intern(method);
+    for (i=0; conv_method_names[i].method; i++) {
+	if (conv_method_names[i].method[0] == method[0] &&
+	    strcmp(conv_method_names[i].method, method) == 0) {
+	    m = conv_method_names[i].id;
+	    break;
+	}
+    }
+    if (!m) m = rb_intern(method);
     if (!rb_respond_to(val, m)) {
 	if (raise) {
 	    rb_raise(rb_eTypeError, "can't convert %s into %s",
@@ -2150,16 +2229,16 @@ rb_Float(VALUE val)
 {
     switch (TYPE(val)) {
       case T_FIXNUM:
-	return DOUBLE2NUM((double)FIX2LONG(val));
+	return DBL2NUM((double)FIX2LONG(val));
 
       case T_FLOAT:
 	return val;
 
       case T_BIGNUM:
-	return DOUBLE2NUM(rb_big2dbl(val));
+	return DBL2NUM(rb_big2dbl(val));
 
       case T_STRING:
-	return DOUBLE2NUM(rb_str_to_dbl(val, Qtrue));
+	return DBL2NUM(rb_str_to_dbl(val, Qtrue));
 
       case T_NIL:
 	rb_raise(rb_eTypeError, "can't convert nil into Float");
@@ -2289,6 +2368,12 @@ boot_defclass(const char *name, VALUE super)
     return obj;
 }
 
+static void
+boot_defmetametaclass(VALUE klass, VALUE metametaclass)
+{
+    RBASIC(RBASIC(klass)->klass)->klass = metametaclass;
+}
+
 /*
  *  Document-class: Class
  *
@@ -2371,7 +2456,10 @@ boot_defclass(const char *name, VALUE super)
 void
 Init_Object(void)
 {
+    int i;
+
 #undef rb_intern
+#define rb_intern(str) rb_intern_const(str)
 
     VALUE metaclass;
 
@@ -2384,6 +2472,9 @@ Init_Object(void)
     metaclass = rb_make_metaclass(rb_cObject, metaclass);
     metaclass = rb_make_metaclass(rb_cModule, metaclass);
     metaclass = rb_make_metaclass(rb_cClass, metaclass);
+    boot_defmetametaclass(rb_cModule, metaclass);
+    boot_defmetametaclass(rb_cObject, metaclass);
+    boot_defmetametaclass(rb_cBasicObject, metaclass);
 
     rb_define_private_method(rb_cBasicObject, "initialize", rb_obj_dummy, 0);
     rb_define_alloc_func(rb_cBasicObject, rb_class_allocate_instance);
@@ -2419,6 +2510,9 @@ Init_Object(void)
     rb_define_method(rb_mKernel, "taint", rb_obj_taint, 0);
     rb_define_method(rb_mKernel, "tainted?", rb_obj_tainted, 0);
     rb_define_method(rb_mKernel, "untaint", rb_obj_untaint, 0);
+    rb_define_method(rb_mKernel, "untrust", rb_obj_untrust, 0);
+    rb_define_method(rb_mKernel, "untrusted?", rb_obj_untrusted, 0);
+    rb_define_method(rb_mKernel, "trust", rb_obj_trust, 0);
     rb_define_method(rb_mKernel, "freeze", rb_obj_freeze, 0);
     rb_define_method(rb_mKernel, "frozen?", rb_obj_frozen_p, 0);
 
@@ -2546,4 +2640,8 @@ Init_Object(void)
     id_match = rb_intern("=~");
     id_inspect = rb_intern("inspect");
     id_init_copy = rb_intern("initialize_copy");
+
+    for (i=0; conv_method_names[i].method; i++) {
+	conv_method_names[i].id = rb_intern(conv_method_names[i].method);
+    }
 }

@@ -558,7 +558,8 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
 	    {
 		VALUE val = GETARG();
 		VALUE tmp;
-		int c, n;
+		unsigned int c;
+		int n;
 
 		tmp = rb_check_string_type(val);
 		if (!NIL_P(tmp)) {
@@ -1034,6 +1035,8 @@ fmt_setup(char *buf, int c, int flags, int width, int prec)
 #endif
 #undef vsnprintf
 #undef snprintf
+#define FLOATING_POINT 1
+#define BSD__dtoa dtoa
 #include "missing/vsnprintf.c"
 
 static int
@@ -1043,7 +1046,7 @@ ruby__sfvwrite(register rb_printf_buffer *fp, register struct __suio *uio)
     VALUE result = (VALUE)fp->_bf._base;
     char *buf = (char*)fp->_p;
     size_t len, n;
-    int blen = buf - RSTRING_PTR(result), bsiz = fp->_w;
+    size_t blen = buf - RSTRING_PTR(result), bsiz = fp->_w;
 
     if (RBASIC(result)->klass) {
 	rb_raise(rb_eRuntimeError, "rb_vsprintf reentered");
@@ -1114,4 +1117,39 @@ rb_sprintf(const char *format, ...)
     va_end(ap);
 
     return result;
+}
+
+VALUE
+rb_str_vcatf(VALUE str, const char *fmt, va_list ap)
+{
+    rb_printf_buffer f;
+    VALUE klass;
+
+    StringValue(str);
+    rb_str_modify(str);
+    f._flags = __SWR | __SSTR;
+    f._bf._size = 0;
+    f._w = rb_str_capacity(str);
+    f._bf._base = (unsigned char *)str;
+    f._p = (unsigned char *)RSTRING_END(str);
+    klass = RBASIC(str)->klass;
+    RBASIC(str)->klass = 0;
+    f.vwrite = ruby__sfvwrite;
+    BSD_vfprintf(&f, fmt, ap);
+    RBASIC(str)->klass = klass;
+    rb_str_resize(str, (char *)f._p - RSTRING_PTR(str));
+
+    return str;
+}
+
+VALUE
+rb_str_catf(VALUE str, const char *format, ...)
+{
+    va_list ap;
+
+    va_start(ap, format);
+    str = rb_str_vcatf(str, format, ap);
+    va_end(ap);
+
+    return str;
 }

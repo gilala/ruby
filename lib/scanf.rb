@@ -325,7 +325,7 @@ module Scanf
     end
 
     def count_space?
-      /(?:\A|\S)%\*?\d*c|\[/.match(@spec_string)
+      /(?:\A|\S)%\*?\d*c|%\d*\[/.match(@spec_string)
     end
 
     def initialize(str)
@@ -357,7 +357,7 @@ module Scanf
 
           # %i
         when /%\*?i/
-          [ "([-+]?(?:(?:0[0-7]+)|(?:0[Xx]#{h}+)|(?:[1-9]\\d+)))", :extract_integer ]
+          [ "([-+]?(?:(?:0[0-7]+)|(?:0[Xx]#{h}+)|(?:[1-9]\\d*)))", :extract_integer ]
 
           # %5i
         when /%\*?(\d+)i/

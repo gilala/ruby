@@ -110,14 +110,17 @@ class TestMath < Test::Unit::TestCase
     check(0, Math.log(1, 10))
     check(1, Math.log(10, 10))
     check(2, Math.log(100, 10))
+    assert_equal(1.0/0, Math.log(1.0/0))
     assert_raise(Errno::EDOM, Errno::ERANGE) { Math.log(0) }
     assert_raise(Errno::EDOM, Errno::ERANGE) { Math.log(-1) }
+    assert_raise(TypeError) { Math.log(1,nil) }
   end
 
   def test_log2
     check(0, Math.log2(1))
     check(1, Math.log2(2))
     check(2, Math.log2(4))
+    assert_equal(1.0/0, Math.log2(1.0/0))
     assert_raise(Errno::EDOM, Errno::ERANGE) { Math.log2(0) }
     assert_raise(Errno::EDOM, Errno::ERANGE) { Math.log2(-1) }
   end
@@ -126,6 +129,7 @@ class TestMath < Test::Unit::TestCase
     check(0, Math.log10(1))
     check(1, Math.log10(10))
     check(2, Math.log10(100))
+    assert_equal(1.0/0, Math.log10(1.0/0))
     assert_raise(Errno::EDOM, Errno::ERANGE) { Math.log10(0) }
     assert_raise(Errno::EDOM, Errno::ERANGE) { Math.log10(-1) }
   end
@@ -134,6 +138,7 @@ class TestMath < Test::Unit::TestCase
     check(0, Math.sqrt(0))
     check(1, Math.sqrt(1))
     check(2, Math.sqrt(4))
+    assert_equal(1.0/0, Math.sqrt(1.0/0))
     assert_raise(Errno::EDOM, Errno::ERANGE) { Math.sqrt(-1) }
   end
 

@@ -86,7 +86,7 @@ class OpenSSL::TestSSL < Test::Unit::TestCase
         server_proc.call(ctx, ssl)
       end
     end
-  rescue Errno::EBADF, IOError
+  rescue Errno::EBADF, IOError, Errno::EINVAL, Errno::ECONNABORTED
   end
 
   def start_server(port0, verify_mode, start_immediately, args = {}, &block)
@@ -128,8 +128,15 @@ class OpenSSL::TestSSL < Test::Unit::TestCase
 
       block.call(server, port.to_i)
     ensure
-      tcps.shutdown if (tcps)
       begin
+        begin
+          tcps.shutdown
+        rescue Errno::ENOTCONN
+          # when `Errno::ENOTCONN: Socket is not connected' on some platforms,
+          # call #close instead of #shutdown.
+          tcps.close
+          tcps = nil
+        end if (tcps)
         if (server)
           server.join(5)
           if server.alive?
@@ -138,7 +145,6 @@ class OpenSSL::TestSSL < Test::Unit::TestCase
             flunk("TCPServer was closed and SSLServer is still alive") unless $!
           end
         end
-      rescue Errno::EINVAL, Errno::EBADF
       ensure
         tcps.close if (tcps)
       end
@@ -230,7 +236,7 @@ class OpenSSL::TestSSL < Test::Unit::TestCase
   def test_client_auth
     vflag = OpenSSL::SSL::VERIFY_PEER|OpenSSL::SSL::VERIFY_FAIL_IF_NO_PEER_CERT
     start_server(PORT, vflag, true){|server, port|
-      assert_raises(OpenSSL::SSL::SSLError){
+      assert_raise(OpenSSL::SSL::SSLError){
         sock = TCPSocket.new("127.0.0.1", port)
         ssl = OpenSSL::SSL::SSLSocket.new(sock)
         ssl.connect
@@ -369,10 +375,10 @@ class OpenSSL::TestSSL < Test::Unit::TestCase
       sock = TCPSocket.new("127.0.0.1", port)
       ssl = OpenSSL::SSL::SSLSocket.new(sock)
       ssl.connect
-      assert_raises(sslerr){ssl.post_connection_check("localhost.localdomain")}
-      assert_raises(sslerr){ssl.post_connection_check("127.0.0.1")}
+      assert_raise(sslerr){ssl.post_connection_check("localhost.localdomain")}
+      assert_raise(sslerr){ssl.post_connection_check("127.0.0.1")}
       assert(ssl.post_connection_check("localhost"))
-      assert_raises(sslerr){ssl.post_connection_check("foo.example.com")}
+      assert_raise(sslerr){ssl.post_connection_check("foo.example.com")}
 
       cert = ssl.peer_cert
       assert(!OpenSSL::SSL.verify_certificate_identity(cert, "localhost.localdomain"))
@@ -395,8 +401,8 @@ class OpenSSL::TestSSL < Test::Unit::TestCase
       ssl.connect
       assert(ssl.post_connection_check("localhost.localdomain"))
       assert(ssl.post_connection_check("127.0.0.1"))
-      assert_raises(sslerr){ssl.post_connection_check("localhost")}
-      assert_raises(sslerr){ssl.post_connection_check("foo.example.com")}
+      assert_raise(sslerr){ssl.post_connection_check("localhost")}
+      assert_raise(sslerr){ssl.post_connection_check("foo.example.com")}
 
       cert = ssl.peer_cert
       assert(OpenSSL::SSL.verify_certificate_identity(cert, "localhost.localdomain"))
@@ -417,9 +423,9 @@ class OpenSSL::TestSSL < Test::Unit::TestCase
       ssl = OpenSSL::SSL::SSLSocket.new(sock)
       ssl.connect
       assert(ssl.post_connection_check("localhost.localdomain"))
-      assert_raises(sslerr){ssl.post_connection_check("127.0.0.1")}
-      assert_raises(sslerr){ssl.post_connection_check("localhost")}
-      assert_raises(sslerr){ssl.post_connection_check("foo.example.com")}
+      assert_raise(sslerr){ssl.post_connection_check("127.0.0.1")}
+      assert_raise(sslerr){ssl.post_connection_check("localhost")}
+      assert_raise(sslerr){ssl.post_connection_check("foo.example.com")}
       cert = ssl.peer_cert
       assert(OpenSSL::SSL.verify_certificate_identity(cert, "localhost.localdomain"))
       assert(!OpenSSL::SSL.verify_certificate_identity(cert, "127.0.0.1"))
@@ -433,7 +439,10 @@ class OpenSSL::TestSSL < Test::Unit::TestCase
     start_server(PORT, OpenSSL::SSL::VERIFY_NONE, true) do |server, port|
       2.times do
         sock = TCPSocket.new("127.0.0.1", port)
-        ssl = OpenSSL::SSL::SSLSocket.new(sock)
+        # Debian's openssl 0.9.8g-13 failed at assert(ssl.session_reused?),
+        # when use default SSLContext. [ruby-dev:36167]
+        ctx = OpenSSL::SSL::SSLContext.new("TLSv1")
+        ssl = OpenSSL::SSL::SSLSocket.new(sock, ctx)
         ssl.sync_close = true
         ssl.session = last_session if last_session
         ssl.connect

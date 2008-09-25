@@ -78,13 +78,14 @@ class String
   end
 
   (Array.instance_methods-instance_methods-[:to_ary,:transpose,:flatten,:flatten!,:compact,:compact!,:assoc,:rassoc]).each{|meth|
-    eval"def #{meth}(*args, &block)
+    eval"
+    def #{meth}(*args, &block)
       a=to_a
       result = a.#{meth}(*args, &block)
       replace(a.join)
       if result.class == Array
         Integer===result[0] ? result.pack('c*') : result.join
-      elsif result.class == Enumerable::Enumerator
+      elsif result.class == Enumerator
         result.map(&:join).to_enum
       else
         result
@@ -93,10 +94,11 @@ class String
   }
 end
 
-class Enumerable::Enumerator
+class Enumerator
   alias old_to_s to_s
   (Array.instance_methods-instance_methods-[:replace]+[:to_s]).each{|meth|
-    eval"def #{meth}(*args, &block)
+    eval"
+    def #{meth}(*args, &block)
       to_a.#{meth}(*args, &block)
     end"
   }

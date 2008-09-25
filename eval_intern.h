@@ -1,6 +1,8 @@
-
 #ifndef RUBY_EVAL_INTERN_H
 #define RUBY_EVAL_INTERN_H
+
+#include "ruby/ruby.h"
+#include "vm_core.h"
 
 #define PASS_PASSED_BLOCK_TH(th) do { \
     (th)->passed_block = GC_GUARDED_PTR_REF((rb_block_t *)(th)->cfp->lfp[0]); \
@@ -11,12 +13,6 @@
     rb_thread_t * const __th__ = GET_THREAD(); \
     PASS_PASSED_BLOCK_TH(__th__); \
 } while (0)
-
-#include "ruby/ruby.h"
-#include "ruby/node.h"
-#include "ruby/util.h"
-#include "ruby/signal.h"
-#include "vm_core.h"
 
 #ifdef HAVE_STDLIB_H
 #include <stdlib.h>
@@ -30,9 +26,6 @@
 
 #include <stdio.h>
 #include <setjmp.h>
-
-#include "ruby/st.h"
-#include "dln.h"
 
 #ifdef __APPLE__
 #include <crt_externs.h>
@@ -59,14 +52,6 @@ void *alloca();
 # endif	/* HAVE_ALLOCA_H */
 #endif /* __GNUC__ */
 
-#ifdef HAVE_STDARG_PROTOTYPES
-#include <stdarg.h>
-#define va_init_list(a,b) va_start(a,b)
-#else
-#include <varargs.h>
-#define va_init_list(a,b) va_start(a)
-#endif
-
 #ifndef HAVE_STRING_H
 char *strrchr(const char *, const char);
 #endif
@@ -75,7 +60,7 @@ char *strrchr(const char *, const char);
 #include <unistd.h>
 #endif
 
-#ifdef __BEOS__
+#ifdef HAVE_NET_SOCKET_H
 #include <net/socket.h>
 #endif
 
@@ -231,5 +216,6 @@ VALUE rb_vm_call_cfunc(VALUE recv, VALUE (*func)(VALUE), VALUE arg, const rb_blo
 void rb_thread_terminate_all(void);
 VALUE rb_vm_top_self();
 VALUE rb_vm_cbase(void);
+void rb_trap_restore_mask(void);
 
 #endif /* RUBY_EVAL_INTERN_H */

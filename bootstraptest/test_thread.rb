@@ -355,3 +355,13 @@ assert_equal 'ok', %q{
   sleep 1; m.lock
   :ok
 }
+
+assert_equal 'ok', %q{
+  t = Thread.new {`echo`}
+  t.join
+  $? ? :ng : :ok
+}, '[ruby-dev:35414]'
+
+assert_equal 'ok', %q{
+  10000.times { Thread.new(true) {|x| x == false } }; :ok
+}

@@ -691,11 +691,11 @@ pack_pack(VALUE ary, VALUE fmt)
 	  case 'i':		/* signed int */
 	  case 'I':		/* unsigned int */
 	    while (len-- > 0) {
-		long i;
+		int i;
 
 		from = NEXTFROM;
 		i = num2i32(from);
-		rb_str_buf_cat(res, OFF32(&i), NATINT_LEN(int,4));
+		rb_str_buf_cat(res, (char*)&i, sizeof(int));
 	    }
 	    break;
 
@@ -1009,7 +1009,7 @@ static const char b64_table[] =
 static void
 encodes(VALUE str, const char *s, long len, int type)
 {
-    char *buff = ALLOCA_N(char, len * 4 / 3 + 6);
+    char buff[4096];
     long i = 0;
     const char *trans = type == 'u' ? uu_table : b64_table;
     int padding;
@@ -1022,13 +1022,20 @@ encodes(VALUE str, const char *s, long len, int type)
 	padding = '=';
     }
     while (len >= 3) {
-	buff[i++] = trans[077 & (*s >> 2)];
-	buff[i++] = trans[077 & (((*s << 4) & 060) | ((s[1] >> 4) & 017))];
-	buff[i++] = trans[077 & (((s[1] << 2) & 074) | ((s[2] >> 6) & 03))];
-	buff[i++] = trans[077 & s[2]];
-	s += 3;
-	len -= 3;
+        while (len >= 3 && sizeof(buff)-i >= 4) {
+            buff[i++] = trans[077 & (*s >> 2)];
+            buff[i++] = trans[077 & (((*s << 4) & 060) | ((s[1] >> 4) & 017))];
+            buff[i++] = trans[077 & (((s[1] << 2) & 074) | ((s[2] >> 6) & 03))];
+            buff[i++] = trans[077 & s[2]];
+            s += 3;
+            len -= 3;
+        }
+        if (sizeof(buff)-i < 4) {
+            rb_str_buf_cat(str, buff, i);
+            i = 0;
+        }
     }
+
     if (len == 2) {
 	buff[i++] = trans[077 & (*s >> 2)];
 	buff[i++] = trans[077 & (((*s << 4) & 060) | ((s[1] >> 4) & 017))];
@@ -1291,7 +1298,7 @@ infected_str_new(const char *ptr, long len, VALUE str)
 static VALUE
 pack_unpack(VALUE str, VALUE fmt)
 {
-    static const char *hexdigits = "0123456789abcdef0123456789ABCDEFx";
+    static const char hexdigits[] = "0123456789abcdef";
     char *s, *send;
     char *p, *pend;
     VALUE ary;
@@ -1617,7 +1624,7 @@ pack_unpack(VALUE str, VALUE fmt)
 	    PACK_LENGTH_ADJUST(unsigned short,2);
 	    while (len-- > 0) {
 		unsigned short tmp = 0;
-		memcpy(OFF16(&tmp), s, NATINT_LEN(unsigned short,2));
+		memcpy(&tmp, s, NATINT_LEN(unsigned short,2));
 		s += NATINT_LEN(unsigned short,2);
 		UNPACK_PUSH(UINT2NUM(vtohs(tmp)));
 	    }
@@ -1628,7 +1635,7 @@ pack_unpack(VALUE str, VALUE fmt)
 	    PACK_LENGTH_ADJUST(unsigned long,4);
 	    while (len-- > 0) {
 		unsigned long tmp = 0;
-		memcpy(OFF32(&tmp), s, NATINT_LEN(long,4));
+		memcpy(&tmp, s, NATINT_LEN(long,4));
 		s += NATINT_LEN(long,4);
 		UNPACK_PUSH(ULONG2NUM(vtohl(tmp)));
 	    }
@@ -1642,7 +1649,7 @@ pack_unpack(VALUE str, VALUE fmt)
 		float tmp;
 		memcpy(&tmp, s, sizeof(float));
 		s += sizeof(float);
-		UNPACK_PUSH(DOUBLE2NUM((double)tmp));
+		UNPACK_PUSH(DBL2NUM((double)tmp));
 	    }
 	    PACK_ITEM_ADJUST();
 	    break;
@@ -1656,7 +1663,7 @@ pack_unpack(VALUE str, VALUE fmt)
 		memcpy(&tmp, s, sizeof(float));
 		s += sizeof(float);
 		tmp = VTOHF(tmp,ftmp);
-		UNPACK_PUSH(DOUBLE2NUM((double)tmp));
+		UNPACK_PUSH(DBL2NUM((double)tmp));
 	    }
 	    PACK_ITEM_ADJUST();
 	    break;
@@ -1670,7 +1677,7 @@ pack_unpack(VALUE str, VALUE fmt)
 		memcpy(&tmp, s, sizeof(double));
 		s += sizeof(double);
 		tmp = VTOHD(tmp,dtmp);
-		UNPACK_PUSH(DOUBLE2NUM(tmp));
+		UNPACK_PUSH(DBL2NUM(tmp));
 	    }
 	    PACK_ITEM_ADJUST();
 	    break;
@@ -1682,7 +1689,7 @@ pack_unpack(VALUE str, VALUE fmt)
 		double tmp;
 		memcpy(&tmp, s, sizeof(double));
 		s += sizeof(double);
-		UNPACK_PUSH(DOUBLE2NUM(tmp));
+		UNPACK_PUSH(DBL2NUM(tmp));
 	    }
 	    PACK_ITEM_ADJUST();
 	    break;
@@ -1696,7 +1703,7 @@ pack_unpack(VALUE str, VALUE fmt)
 		memcpy(&tmp, s, sizeof(float));
 		s += sizeof(float);
 		tmp = NTOHF(tmp,ftmp);
-		UNPACK_PUSH(DOUBLE2NUM((double)tmp));
+		UNPACK_PUSH(DBL2NUM((double)tmp));
 	    }
 	    PACK_ITEM_ADJUST();
 	    break;
@@ -1710,7 +1717,7 @@ pack_unpack(VALUE str, VALUE fmt)
 		memcpy(&tmp, s, sizeof(double));
 		s += sizeof(double);
 		tmp = NTOHD(tmp,dtmp);
-		UNPACK_PUSH(DOUBLE2NUM(tmp));
+		UNPACK_PUSH(DBL2NUM(tmp));
 	    }
 	    PACK_ITEM_ADJUST();
 	    break;
@@ -1787,33 +1794,31 @@ pack_unpack(VALUE str, VALUE fmt)
 		VALUE buf = infected_str_new(0, (send - s)*3/4, str);
 		char *ptr = RSTRING_PTR(buf);
 		int a = -1,b = -1,c = 0,d;
-		static int first = 1;
-		static int b64_xtable[256];
+		static signed char b64_xtable[256];
 
-		if (first) {
+		if (b64_xtable['/'] <= 0) {
 		    int i;
-		    first = 0;
 
 		    for (i = 0; i < 256; i++) {
 			b64_xtable[i] = -1;
 		    }
 		    for (i = 0; i < 64; i++) {
-			b64_xtable[(int)b64_table[i]] = i;
+			b64_xtable[(unsigned char)b64_table[i]] = i;
 		    }
 		}
 		while (s < send) {
 		    a = b = c = d = -1;
-		    while((a = b64_xtable[(int)(*(unsigned char*)s)]) == -1 && s < send) { s++; }
-		    if( s >= send ) break;
+		    while ((a = b64_xtable[(unsigned char)*s]) == -1 && s < send) {s++;}
+		    if (s >= send) break;
 		    s++;
-		    while((b = b64_xtable[(int)(*(unsigned char*)s)]) == -1 && s < send) { s++; }
-		    if( s >= send ) break;
+		    while ((b = b64_xtable[(unsigned char)*s]) == -1 && s < send) {s++;}
+		    if (s >= send) break;
 		    s++;
-		    while((c = b64_xtable[(int)(*(unsigned char*)s)]) == -1 && s < send) { if( *s == '=' ) break; s++; }
-		    if( *s == '=' || s >= send ) break;
+		    while ((c = b64_xtable[(unsigned char)*s]) == -1 && s < send) {if (*s == '=') break; s++;}
+		    if (*s == '=' || s >= send) break;
 		    s++;
-		    while((d = b64_xtable[(int)(*(unsigned char*)s)]) == -1 && s < send) { if( *s == '=' ) break; s++; }
-		    if( *s == '=' || s >= send ) break;
+		    while ((d = b64_xtable[(unsigned char)*s]) == -1 && s < send) {if (*s == '=') break; s++;}
+		    if (*s == '=' || s >= send) break;
 		    s++;
 		    *ptr++ = a << 2 | b >> 4;
 		    *ptr++ = b << 4 | c >> 2;

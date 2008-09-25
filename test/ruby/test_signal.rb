@@ -21,7 +21,7 @@ class TestSignal < Test::Unit::TestCase
       assert_equal 2, x
 
       Signal.trap(:INT) { raise "Interrupt" }
-      ex = assert_raises(RuntimeError) {
+      ex = assert_raise(RuntimeError) {
         Process.kill :INT, Process.pid
         sleep 0.1
       }
@@ -146,8 +146,8 @@ class TestSignal < Test::Unit::TestCase
 
       Signal.trap(:INT, "EXIT")
 
-      assert_raise(ArgumentError) { Signal.trap(:INT, "xxxxxx") }
-      assert_raise(ArgumentError) { Signal.trap(:INT, "xxxx") }
+      Signal.trap(:INT, "xxxxxx")
+      Signal.trap(:INT, "xxxx")
 
       Signal.trap(SignalException.new(:INT).signo, "SIG_DFL")
 

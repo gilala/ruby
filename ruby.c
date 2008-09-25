@@ -20,7 +20,6 @@
 #include "ruby/wince.h"
 #endif
 #include "ruby/ruby.h"
-#include "ruby/node.h"
 #include "ruby/encoding.h"
 #include "eval_intern.h"
 #include "dln.h"
@@ -967,6 +966,7 @@ process_options(VALUE arg)
     NODE *tree = 0;
     VALUE parser;
     VALUE iseq;
+    VALUE args;
     rb_encoding *enc, *lenc;
     const char *s;
     char fbuf[MAXPATHLEN];
@@ -1069,18 +1069,20 @@ process_options(VALUE arg)
 #if defined DOSISH || defined __CYGWIN__
     translate_char(RSTRING_PTR(rb_progname), '\\', '/');
 #endif
-    opt->script_name = rb_str_new4(rb_progname);
+    opt->script_name = rb_progname;
     opt->script = RSTRING_PTR(opt->script_name);
+    safe = rb_safe_level();
+    rb_set_safe_level_force(0);
     ruby_set_argv(argc, argv);
     process_sflag(opt);
 
     ruby_init_loadpath();
-    safe = rb_safe_level();
-    rb_set_safe_level_force(0);
     ruby_init_gems(!(opt->disable & DISABLE_BIT(gems)));
     lenc = rb_locale_encoding();
-    for (i = 0; i < RARRAY_LEN(rb_argv); i++) {
-	rb_enc_associate(RARRAY_PTR(rb_argv)[i], lenc);
+    rb_enc_associate(rb_progname, lenc);
+    opt->script_name = rb_str_new4(rb_progname);
+    for (i = 0, args = rb_argv; i < RARRAY_LEN(args); i++) {
+	rb_enc_associate(RARRAY_PTR(args)[i], lenc);
     }
     parser = rb_parser_new();
     if (opt->yydebug) rb_parser_set_yydebug(parser, Qtrue);
@@ -1165,8 +1167,8 @@ process_options(VALUE arg)
 	tree = rb_parser_while_loop(parser, tree, opt->do_line, opt->do_split);
     }
 
-    iseq = rb_iseq_new(tree, rb_str_new2("<main>"),
-		       opt->script_name, Qfalse, ISEQ_TYPE_TOP);
+    iseq = rb_iseq_new_top(tree, rb_str_new2("<main>"),
+			   opt->script_name, Qfalse);
 
     if (opt->dump & DUMP_BIT(insns)) {
 	rb_io_write(rb_stdout, ruby_iseq_disasm(iseq));
@@ -1286,12 +1288,12 @@ load_file(VALUE parser, const char *fname, int script, struct cmdline_options *o
 		}
 
 		/* push back shebang for pragma may exist in next line */
-		rb_io_ungetc(f, rb_str_new2("!\n"));
+		rb_io_ungetbyte(f, rb_str_new2("!\n"));
 	    }
 	    else if (!NIL_P(c)) {
-		rb_io_ungetc(f, c);
+		rb_io_ungetbyte(f, c);
 	    }
-	    rb_io_ungetc(f, INT2FIX('#'));
+	    rb_io_ungetbyte(f, INT2FIX('#'));
 	    if (no_src_enc && opt->src.enc.name) {
 		opt->src.enc.index = opt_enc_index(opt->src.enc.name);
 		src_encoding_index = opt->src.enc.index;
@@ -1301,7 +1303,7 @@ load_file(VALUE parser, const char *fname, int script, struct cmdline_options *o
 	    }
 	}
 	else if (!NIL_P(c)) {
-	    rb_io_ungetc(f, c);
+	    rb_io_ungetbyte(f, c);
 	}
 	require_libraries(opt);	/* Why here? unnatural */
     }
@@ -1501,7 +1503,6 @@ ruby_prog_init(void)
     rb_define_hooked_variable("$PROGRAM_NAME", &rb_progname, 0, set_arg0);
 
     rb_define_global_const("ARGV", rb_argv);
-    rb_global_variable(&rb_argv0);
 
 #ifdef MSDOS
     /*
@@ -1558,6 +1559,7 @@ ruby_process_options(int argc, char **argv)
 
     ruby_script(argv[0]);	/* for the time being */
     rb_argv0 = rb_str_new4(rb_progname);
+    rb_gc_register_mark_object(rb_argv0);
     args.argc = argc;
     args.argv = argv;
     args.opt = cmdline_options_init(&opt);

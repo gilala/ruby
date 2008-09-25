@@ -10,8 +10,8 @@
 **********************************************************************/
 
 #include "ruby/ruby.h"
-#include "ruby/node.h"
 #include "ruby/util.h"
+#include "node.h"
 
 VALUE rb_mEnumerable;
 static ID id_each, id_eqq, id_cmp, id_next, id_size;
@@ -1585,8 +1585,8 @@ enum_zip(int argc, VALUE *argv, VALUE obj)
 static VALUE
 take_i(VALUE i, VALUE *arg, int argc, VALUE *argv)
 {
-    if (arg[1]-- == 0) rb_iter_break();
     rb_ary_push(arg[0], enum_values_pack(argc, argv));
+    if (--arg[1] == 0) rb_iter_break();
     return Qnil;
 }
 
@@ -1611,8 +1611,9 @@ enum_take(VALUE obj, VALUE n)
 	rb_raise(rb_eArgError, "attempt to take negative size");
     }
 
-    args[1] = len;
+    if (len == 0) return rb_ary_new2(0);
     args[0] = rb_ary_new();
+    args[1] = len;
     rb_block_call(obj, id_each, 0, 0, take_i, (VALUE)args);
     return args[0];
 }
@@ -1803,6 +1804,7 @@ void
 Init_Enumerable(void)
 {
 #undef rb_intern
+#define rb_intern(str) rb_intern_const(str)
 
     rb_mEnumerable = rb_define_module("Enumerable");
 

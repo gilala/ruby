@@ -119,7 +119,11 @@ native_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
 
 #define native_cleanup_push pthread_cleanup_push
 #define native_cleanup_pop  pthread_cleanup_pop
-#define native_thread_yield() sched_yield()
+#ifdef HAVE_SCHED_YIELD
+#define native_thread_yield() (void)sched_yield()
+#else
+#define native_thread_yield() ((void)0)
+#endif
 
 #ifndef __CYGWIN__
 static void add_signal_thread_list(rb_thread_t *th);
@@ -409,7 +413,9 @@ native_thread_create(rb_thread_t *th)
 	CHECK_ERR(pthread_attr_setstacksize(&attr, stack_size));
 #endif
 
+#ifdef HAVE_PTHREAD_ATTR_SETINHERITSCHED
 	CHECK_ERR(pthread_attr_setinheritsched(&attr, PTHREAD_INHERIT_SCHED));
+#endif
 	CHECK_ERR(pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED));
 
 	err = pthread_create(&th->thread_id, &attr, thread_start_func_1, th);
@@ -437,6 +443,9 @@ native_thread_join(pthread_t th)
     }
 }
 
+
+#if USE_NATIVE_THREAD_PRIORITY
+
 static void
 native_thread_apply_priority(rb_thread_t *th)
 {
@@ -462,6 +471,8 @@ native_thread_apply_priority(rb_thread_t *th)
     /* not touched */
 #endif
 }
+
+#endif /* USE_NATIVE_THREAD_PRIORITY */
 
 static void
 ubf_pthread_cond_signal(void *ptr)
@@ -493,9 +504,8 @@ ubf_select(void *ptr)
 #endif
 
 static void
-native_sleep(rb_thread_t *th, struct timeval *tv, int deadlockable)
+native_sleep(rb_thread_t *th, struct timeval *tv)
 {
-    int prev_status = th->status;
     struct timespec ts;
     struct timeval tvn;
 
@@ -507,15 +517,6 @@ native_sleep(rb_thread_t *th, struct timeval *tv, int deadlockable)
 	    ts.tv_sec += 1;
 	    ts.tv_nsec -= 1000000000;
         }
-    }
-
-    if (!tv && deadlockable) {
-	th->status = THREAD_STOPPED_FOREVER;
-	th->vm->sleeper++;
-	rb_check_deadlock(th->vm);
-    }
-    else {
-	th->status = THREAD_STOPPED;
     }
 
     thread_debug("native_sleep %ld\n", tv ? tv->tv_sec : -1);
@@ -555,9 +556,6 @@ native_sleep(rb_thread_t *th, struct timeval *tv, int deadlockable)
 	pthread_mutex_unlock(&th->interrupt_lock);
     }
     GVL_UNLOCK_END();
-    th->status = prev_status;
-    if (!tv && deadlockable) th->vm->sleeper--;
-    RUBY_VM_CHECK_INTS();
 
     thread_debug("native_sleep done\n");
 }
@@ -693,7 +691,8 @@ rb_thread_create_timer_thread(void)
 
 	pthread_attr_init(&attr);
 #ifdef PTHREAD_STACK_MIN
-	pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN);
+	pthread_attr_setstacksize(&attr,
+				  PTHREAD_STACK_MIN + (THREAD_DEBUG ? BUFSIZ : 0));
 #endif
 	err = pthread_create(&timer_thread_id, &attr, thread_timer, GET_VM());
 	if (err != 0) {

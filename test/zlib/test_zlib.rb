@@ -120,6 +120,14 @@ if defined? Zlib
       s = z.finish
       assert_equal("foobar", Zlib::Inflate.inflate(s))
 
+      data = ('a'..'z').to_a.join
+      z = Zlib::Deflate.new(Zlib::NO_COMPRESSION, Zlib::MAX_WBITS,
+                            Zlib::DEF_MEM_LEVEL, Zlib::DEFAULT_STRATEGY)
+      z << data[0, 10]
+      z.params(Zlib::BEST_COMPRESSION, Zlib::DEFAULT_STRATEGY)
+      z << data[10 .. -1]
+      assert_equal(data, Zlib::Inflate.inflate(z.finish))
+
       z = Zlib::Deflate.new
       s = z.deflate("foo", Zlib::FULL_FLUSH)
       z.avail_out = 0
@@ -132,6 +140,7 @@ if defined? Zlib
 
       z = Zlib::Deflate.new
       assert_raise(Zlib::StreamError) { z.params(10000, 10000) }
+      z.close # without this, outputs `zlib(finalizer): the stream was freed prematurely.'
     end
 
     def test_set_dictionary

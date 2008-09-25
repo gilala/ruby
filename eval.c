@@ -12,6 +12,7 @@
 **********************************************************************/
 
 #include "eval_intern.h"
+#include "iseq.h"
 
 VALUE proc_invoke(VALUE, VALUE, VALUE, VALUE);
 VALUE rb_binding_new(void);
@@ -24,7 +25,6 @@ VALUE rb_eSysStackError;
 #define exception_error GET_VM()->special_exceptions[ruby_error_reenter]
 
 #include "eval_error.c"
-#include "eval_safe.c"
 #include "eval_jump.c"
 
 /* initialize ruby */
@@ -75,7 +75,6 @@ ruby_init(void)
 #endif
 
 	ruby_prog_init();
-	ALLOW_INTS;
     }
     POP_TAG();
 
@@ -731,31 +730,6 @@ rb_ensure(VALUE (*b_proc)(ANYARGS), VALUE data1, VALUE (*e_proc)(ANYARGS), VALUE
     return result;
 }
 
-VALUE
-rb_with_disable_interrupt(VALUE (*proc)(ANYARGS), VALUE data)
-{
-    VALUE result = Qnil;	/* OK */
-    int status;
-
-    DEFER_INTS;
-    {
-	int thr_critical = rb_thread_critical;
-
-	rb_thread_critical = Qtrue;
-	PUSH_TAG();
-	if ((status = EXEC_TAG()) == 0) {
-	    result = (*proc) (data);
-	}
-	POP_TAG();
-	rb_thread_critical = thr_critical;
-    }
-    ENABLE_INTS;
-    if (status)
-	JUMP_TAG(status);
-
-    return result;
-}
-
 static ID
 frame_func_id(rb_control_frame_t *cfp)
 {
@@ -1155,9 +1129,6 @@ rb_f_method_name(void)
 void
 Init_eval(void)
 {
-    /* TODO: fix position */
-    GET_THREAD()->vm->mark_object_ary = rb_ary_new();
-
     rb_define_virtual_variable("$@", errat_getter, errat_setter);
     rb_define_virtual_variable("$!", errinfo_getter, 0);
 
@@ -1199,64 +1170,9 @@ Init_eval(void)
     rb_define_global_function("trace_var", rb_f_trace_var, -1);	/* in variable.c */
     rb_define_global_function("untrace_var", rb_f_untrace_var, -1);	/* in variable.c */
 
-    rb_define_virtual_variable("$SAFE", safe_getter, safe_setter);
-
     exception_error = rb_exc_new3(rb_eFatal,
 				  rb_obj_freeze(rb_str_new2("exception reentered")));
     rb_ivar_set(exception_error, idThrowState, INT2FIX(TAG_FATAL));
     OBJ_TAINT(exception_error);
     OBJ_FREEZE(exception_error);
 }
-
-
-/* for parser */
-
-int
-rb_dvar_defined(ID id)
-{
-    rb_thread_t *th = GET_THREAD();
-    rb_iseq_t *iseq;
-    if (th->base_block && (iseq = th->base_block->iseq)) {
-	while (iseq->type == ISEQ_TYPE_BLOCK ||
-	       iseq->type == ISEQ_TYPE_RESCUE ||
-	       iseq->type == ISEQ_TYPE_ENSURE ||
-	       iseq->type == ISEQ_TYPE_EVAL) {
-	    int i;
-
-	    for (i = 0; i < iseq->local_table_size; i++) {
-		if (iseq->local_table[i] == id) {
-		    return 1;
-		}
-	    }
-	    iseq = iseq->parent_iseq;
-	}
-    }
-    return 0;
-}
-
-int
-rb_local_defined(ID id)
-{
-    rb_thread_t *th = GET_THREAD();
-    rb_iseq_t *iseq;
-
-    if (th->base_block && th->base_block->iseq) {
-	int i;
-	iseq = th->base_block->iseq->local_iseq;
-
-	for (i=0; i<iseq->local_table_size; i++) {
-	    if (iseq->local_table[i] == id) {
-		return 1;
-	    }
-	}
-    }
-    return 0;
-}
-
-int
-rb_parse_in_eval(void)
-{
-    return GET_THREAD()->parse_in_eval != 0;
-}
-
-

@@ -87,10 +87,9 @@ static int
 char_casecmp(const char *p1, const char *p2, rb_encoding *enc, const int nocase)
 {
     const char *p1end, *p2end;
-    int c1, c2;
+    unsigned int c1, c2;
 
-    if (!*p1) return *p1;
-    if (!*p2) return -*p2;
+    if (!*p1 || !*p2) return !!*p1 - !!*p2;
     p1end = p1 + strlen(p1);
     p2end = p2 + strlen(p2);
     c1 = rb_enc_codepoint(p1, p1end, enc);
@@ -290,17 +289,21 @@ VALUE rb_cDir;
 
 struct dir_data {
     DIR *dir;
-    char *path;
-    rb_encoding *intenc;
-    rb_encoding *extenc;
+    VALUE path;
+    rb_encoding *enc;
 };
+
+static void
+mark_dir(struct dir_data *dir)
+{
+    rb_gc_mark(dir->path);
+}
 
 static void
 free_dir(struct dir_data *dir)
 {
     if (dir) {
 	if (dir->dir) closedir(dir->dir);
-	if (dir->path) xfree(dir->path);
     }
     xfree(dir);
 }
@@ -311,12 +314,11 @@ static VALUE
 dir_s_alloc(VALUE klass)
 {
     struct dir_data *dirp;
-    VALUE obj = Data_Make_Struct(klass, struct dir_data, 0, free_dir, dirp);
+    VALUE obj = Data_Make_Struct(klass, struct dir_data, mark_dir, free_dir, dirp);
 
     dirp->dir = NULL;
-    dirp->path = NULL;
-    dirp->intenc = NULL;
-    dirp->extenc = NULL;
+    dirp->path = Qnil;
+    dirp->enc = NULL;
 
     return obj;
 }
@@ -331,68 +333,36 @@ static VALUE
 dir_initialize(int argc, VALUE *argv, VALUE dir)
 {
     struct dir_data *dp;
-    static rb_encoding *fs_encoding;
-    rb_encoding  *intencoding, *extencoding;
+    rb_encoding  *fsenc;
     VALUE dirname, opt;
-    static VALUE sym_intenc, sym_extenc;
+    static VALUE sym_enc;
 
-    if (!sym_intenc) {
-	sym_intenc = ID2SYM(rb_intern("internal_encoding"));
-	sym_extenc = ID2SYM(rb_intern("external_encoding"));
-	fs_encoding = rb_filesystem_encoding();
+    if (!sym_enc) {
+	sym_enc = ID2SYM(rb_intern("encoding"));
     }
+    fsenc = rb_filesystem_encoding();
 
-    intencoding = NULL;
-    extencoding = fs_encoding;
     rb_scan_args(argc, argv, "11", &dirname, &opt);
 
     if (!NIL_P(opt)) {
-        VALUE v, extenc=Qnil, intenc=Qnil;
-        opt = rb_check_convert_type(opt, T_HASH, "Hash", "to_hash");
+        VALUE v, enc=Qnil;
+        opt = rb_convert_type(opt, T_HASH, "Hash", "to_hash");
 
-        v = rb_hash_aref(opt, sym_intenc);
-        if (!NIL_P(v)) intenc = v;
-        v = rb_hash_aref(opt, sym_extenc);
-        if (!NIL_P(v)) extenc = v;
+        v = rb_hash_aref(opt, sym_enc);
+        if (!NIL_P(v)) enc = v;
 
-	if (!NIL_P(extenc)) {
-	    extencoding = rb_to_encoding(extenc);
-	    if (!NIL_P(intenc)) {
-		intencoding = rb_to_encoding(intenc);
-		if (extencoding == intencoding) {
-		    rb_warn("Ignoring internal encoding '%s': it is identical to external encoding '%s'",
-			    RSTRING_PTR(rb_inspect(intenc)),
-			    RSTRING_PTR(rb_inspect(extenc)));
-		    intencoding = NULL;
-		}
-	    }
-	}
-	else if (!NIL_P(intenc)) {
-	    rb_raise(rb_eArgError, "External encoding must be specified when internal encoding is given");
+	if (!NIL_P(enc)) {
+	    fsenc = rb_to_encoding(enc);
 	}
     }
 
-    {
-	rb_encoding  *dirname_encoding = rb_enc_get(dirname);
-	if (rb_usascii_encoding() != dirname_encoding
-	    && rb_ascii8bit_encoding() != dirname_encoding
-#if defined __APPLE__
-	    && rb_utf8_encoding() != dirname_encoding
-#endif
-	    && extencoding != dirname_encoding) {
-	    if (!intencoding) intencoding = dirname_encoding;
-	    dirname = rb_str_transcode(dirname, rb_enc_from_encoding(extencoding));
-	}
-    }
     FilePathValue(dirname);
 
     Data_Get_Struct(dir, struct dir_data, dp);
     if (dp->dir) closedir(dp->dir);
-    if (dp->path) xfree(dp->path);
     dp->dir = NULL;
-    dp->path = NULL;
-    dp->intenc = intencoding;
-    dp->extenc = extencoding;
+    dp->path = Qnil;
+    dp->enc = fsenc;
     dp->dir = opendir(RSTRING_PTR(dirname));
     if (dp->dir == NULL) {
 	if (errno == EMFILE || errno == ENFILE) {
@@ -403,7 +373,7 @@ dir_initialize(int argc, VALUE *argv, VALUE dir)
 	    rb_sys_fail(RSTRING_PTR(dirname));
 	}
     }
-    dp->path = strdup(RSTRING_PTR(dirname));
+    dp->path = rb_str_dup_frozen(dirname);
 
     return dir;
 }
@@ -423,7 +393,7 @@ static VALUE
 dir_s_open(int argc, VALUE *argv, VALUE klass)
 {
     struct dir_data *dp;
-    VALUE dir = Data_Make_Struct(klass, struct dir_data, 0, free_dir, dp);
+    VALUE dir = Data_Make_Struct(klass, struct dir_data, mark_dir, free_dir, dp);
 
     dir_initialize(argc, argv, dir);
     if (rb_block_given_p()) {
@@ -442,8 +412,8 @@ dir_closed(void)
 static void
 dir_check(VALUE dir)
 {
-    if (!OBJ_TAINTED(dir) && rb_safe_level() >= 4)
-	rb_raise(rb_eSecurityError, "Insecure: operation on untainted Dir");
+    if (!OBJ_UNTRUSTED(dir) && rb_safe_level() >= 4)
+	rb_raise(rb_eSecurityError, "Insecure: operation on trusted Dir");
     rb_check_frozen(dir);
 }
 
@@ -454,13 +424,14 @@ dir_check(VALUE dir)
 } while (0)
 
 static VALUE
-dir_enc_str(VALUE str, struct dir_data *dirp)
+dir_enc_str_new(const char *p, long len, rb_encoding *enc)
 {
-    rb_enc_associate(str, dirp->extenc);
-    if (dirp->intenc) {
-        str = rb_str_transcode(str, rb_enc_from_encoding(dirp->intenc));
+    VALUE path = rb_tainted_str_new(p, len);
+    if (rb_enc_asciicompat(enc) && rb_enc_str_asciionly_p(path)) {
+	enc = rb_usascii_encoding();
     }
-    return str;
+    rb_enc_associate(path, enc);
+    return path;
 }
 
 /*
@@ -475,12 +446,9 @@ dir_inspect(VALUE dir)
     struct dir_data *dirp;
 
     Data_Get_Struct(dir, struct dir_data, dirp);
-    if (dirp->path) {
+    if (!NIL_P(dirp->path)) {
 	const char *c = rb_obj_classname(dir);
-	int len = strlen(c) + strlen(dirp->path) + 4;
-	VALUE s = rb_str_new(0, len);
-	snprintf(RSTRING_PTR(s), len+1, "#<%s:%s>", c, dirp->path);
-	return s;
+	return rb_sprintf("#<%s:%s>", c, RSTRING_PTR(dirp->path));
     }
     return rb_funcall(dir, rb_intern("to_s"), 0, 0);
 }
@@ -500,8 +468,8 @@ dir_path(VALUE dir)
     struct dir_data *dirp;
 
     Data_Get_Struct(dir, struct dir_data, dirp);
-    if (!dirp->path) return Qnil;
-    return dir_enc_str(rb_str_new2(dirp->path), dirp);
+    if (NIL_P(dirp->path)) return Qnil;
+    return rb_str_dup(dirp->path);
 }
 
 /*
@@ -526,7 +494,7 @@ dir_read(VALUE dir)
     errno = 0;
     dp = readdir(dirp->dir);
     if (dp) {
-	return dir_enc_str(rb_tainted_str_new(dp->d_name, NAMLEN(dp)), dirp);
+	return dir_enc_str_new(dp->d_name, NAMLEN(dp), dirp->enc);
     }
     else if (errno == 0) {	/* end of stream */
 	return Qnil;
@@ -564,7 +532,7 @@ dir_each(VALUE dir)
     GetDIR(dir, dirp);
     rewinddir(dirp->dir);
     for (dp = readdir(dirp->dir); dp != NULL; dp = readdir(dirp->dir)) {
-	rb_yield(dir_enc_str(rb_tainted_str_new(dp->d_name, NAMLEN(dp)), dirp));
+	rb_yield(dir_enc_str_new(dp->d_name, NAMLEN(dp), dirp->enc));
 	if (dirp->dir == NULL) dir_closed();
     }
     return dir;
@@ -664,7 +632,7 @@ dir_rewind(VALUE dir)
 {
     struct dir_data *dirp;
 
-    if (rb_safe_level() >= 4 && !OBJ_TAINTED(dir)) {
+    if (rb_safe_level() >= 4 && !OBJ_UNTRUSTED(dir)) {
 	rb_raise(rb_eSecurityError, "Insecure: can't close");
     }
     GetDIR(dir, dirp);
@@ -1468,9 +1436,7 @@ rb_glob(const char *path, void (*func)(const char *, VALUE, void *), VALUE arg)
 static void
 push_pattern(const char *path, VALUE ary, void *enc)
 {
-    VALUE vpath = rb_tainted_str_new2(path);
-    rb_enc_associate(vpath, enc);
-    rb_ary_push(ary, vpath);
+    rb_ary_push(ary, dir_enc_str_new(path, strlen(path), enc));
 }
 
 static int
@@ -1570,6 +1536,7 @@ push_glob(VALUE ary, VALUE str, int flags)
     struct glob_args args;
     rb_encoding *enc = rb_enc_get(str);
 
+    if (enc == rb_usascii_encoding()) enc = rb_filesystem_encoding();
     args.func = push_pattern;
     args.value = ary;
     args.enc = enc;

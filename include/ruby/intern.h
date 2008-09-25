@@ -26,7 +26,7 @@ extern "C" {
 #else
 # include <varargs.h>
 #endif
-#include <ruby/st.h>
+#include "ruby/st.h"
 
 /* 
  * Functions and variables that are used by more than one source file of
@@ -43,6 +43,7 @@ VALUE rb_ary_new(void);
 VALUE rb_ary_new2(long);
 VALUE rb_ary_new3(long,...);
 VALUE rb_ary_new4(long, const VALUE *);
+VALUE rb_ary_tmp_new(long);
 void rb_ary_free(VALUE);
 VALUE rb_ary_freeze(VALUE);
 VALUE rb_ary_aref(int, VALUE*, VALUE);
@@ -134,6 +135,7 @@ VALUE rb_complex_raw(VALUE, VALUE);
 VALUE rb_complex_new(VALUE, VALUE);
 #define rb_complex_new1(x) rb_complex_new(x, INT2FIX(0))
 #define rb_complex_new2(x,y) rb_complex_new(x, y)
+VALUE rb_complex_polar(VALUE, VALUE);
 VALUE rb_Complex(VALUE, VALUE);
 #define rb_Complex1(x) rb_Complex(x, INT2FIX(0))
 #define rb_Complex2(x,y) rb_Complex(x, y)
@@ -249,6 +251,7 @@ void rb_clear_cache_by_class(VALUE);
 void rb_alias(VALUE, ID, ID);
 void rb_attr(VALUE,ID,int,int,int);
 int rb_method_boundp(VALUE, ID, int);
+int rb_method_basic_definition_p(VALUE, ID);
 VALUE rb_eval_cmd(VALUE, VALUE, int);
 int rb_obj_respond_to(VALUE, ID, int);
 int rb_respond_to(VALUE, ID);
@@ -316,6 +319,8 @@ VALUE rb_exec_recursive(VALUE(*)(VALUE, VALUE, int),VALUE,VALUE);
 /* file.c */
 VALUE rb_file_s_expand_path(int, VALUE *);
 VALUE rb_file_expand_path(VALUE, VALUE);
+VALUE rb_file_s_absolute_path(int, VALUE *);
+VALUE rb_file_absolute_path(VALUE, VALUE);
 void rb_file_const(const char*, VALUE);
 int rb_find_file_ext(VALUE*, const char* const*);
 VALUE rb_find_file(VALUE);
@@ -328,7 +333,7 @@ VALUE rb_file_directory_p(VALUE,VALUE);
 void ruby_set_stack_size(size_t);
 NORETURN(void rb_memerror(void));
 int ruby_stack_check(void);
-int ruby_stack_length(VALUE**);
+size_t ruby_stack_length(VALUE**);
 int rb_during_gc(void);
 void rb_gc_mark_locations(VALUE*, VALUE*);
 void rb_mark_tbl(struct st_table*);
@@ -371,6 +376,7 @@ VALUE rb_io_write(VALUE, VALUE);
 VALUE rb_io_gets(VALUE);
 VALUE rb_io_getbyte(VALUE);
 VALUE rb_io_ungetc(VALUE, VALUE);
+VALUE rb_io_ungetbyte(VALUE, VALUE);
 VALUE rb_io_close(VALUE);
 VALUE rb_io_flush(VALUE);
 VALUE rb_io_eof(VALUE);
@@ -381,10 +387,10 @@ VALUE rb_io_print(int, VALUE*, VALUE);
 VALUE rb_io_puts(int, VALUE*, VALUE);
 VALUE rb_io_fdopen(int, int, const char*);
 VALUE rb_file_open(const char*, const char*);
+VALUE rb_file_open_str(VALUE, const char*);
 VALUE rb_gets(void);
 void rb_write_error(const char*);
 void rb_write_error2(const char*, long);
-int rb_io_mode_modenum(const char *mode);
 void rb_close_before_exec(int lowfd, int maxhint, VALUE noclose_fds);
 int rb_pipe(int *pipes);
 /* marshal.c */
@@ -523,40 +529,29 @@ void ruby_default_signal(int);
 VALUE rb_f_sprintf(int, const VALUE*);
 PRINTF_ARGS(VALUE rb_sprintf(const char*, ...), 1, 2);
 VALUE rb_vsprintf(const char*, va_list);
+PRINTF_ARGS(VALUE rb_str_catf(VALUE, const char*, ...), 2, 3);
+VALUE rb_str_vcatf(VALUE, const char*, va_list);
 VALUE rb_str_format(int, const VALUE *, VALUE);
 /* string.c */
 VALUE rb_str_new(const char*, long);
+VALUE rb_str_new_cstr(const char*);
 VALUE rb_str_new2(const char*);
+VALUE rb_str_new_shared(VALUE);
 VALUE rb_str_new3(VALUE);
+VALUE rb_str_new_frozen(VALUE);
 VALUE rb_str_new4(VALUE);
+VALUE rb_str_new_with_class(VALUE, const char*, long);
 VALUE rb_str_new5(VALUE, const char*, long);
+VALUE rb_tainted_str_new_cstr(const char*);
 VALUE rb_tainted_str_new(const char*, long);
 VALUE rb_tainted_str_new2(const char*);
 VALUE rb_str_buf_new(long);
+VALUE rb_str_buf_new_cstr(const char*);
 VALUE rb_str_buf_new2(const char*);
 VALUE rb_str_tmp_new(long);
 VALUE rb_usascii_str_new(const char*, long);
+VALUE rb_usascii_str_new_cstr(const char*);
 VALUE rb_usascii_str_new2(const char*);
-#if defined __GNUC__
-#define rb_str_new2(str) __extension__ (	\
-{						\
-    (__builtin_constant_p(str)) ?	       \
-	rb_str_new(str, strlen(str)) :		\
-	rb_str_new2(str);			\
-})
-#define rb_tainted_str_new2(str) __extension__ ( \
-{					       \
-    (__builtin_constant_p(str)) ?	       \
-	rb_tainted_str_new(str, strlen(str)) : \
-	rb_tainted_str_new2(str);	       \
-})
-#define rb_usascii_str_new2(str) __extension__ ( \
-{					       \
-    (__builtin_constant_p(str)) ?	       \
-	rb_usascii_str_new(str, strlen(str)) : \
-	rb_usascii_str_new2(str);	       \
-})
-#endif
 void rb_str_free(VALUE);
 void rb_str_shared_replace(VALUE, VALUE);
 VALUE rb_str_buf_append(VALUE, VALUE);
@@ -569,6 +564,7 @@ VALUE rb_str_dup(VALUE);
 VALUE rb_str_locktmp(VALUE);
 VALUE rb_str_unlocktmp(VALUE);
 VALUE rb_str_dup_frozen(VALUE);
+#define rb_str_dup_frozen rb_str_new_frozen
 VALUE rb_str_plus(VALUE, VALUE);
 VALUE rb_str_times(VALUE, VALUE);
 long rb_str_sublen(VALUE, long);
@@ -588,6 +584,7 @@ int rb_str_hash_cmp(VALUE,VALUE);
 int rb_str_comparable(VALUE, VALUE);
 int rb_str_cmp(VALUE, VALUE);
 VALUE rb_str_equal(VALUE str1, VALUE str2);
+VALUE rb_str_drop_bytes(VALUE, long);
 void rb_str_update(VALUE, long, long, VALUE);
 VALUE rb_str_inspect(VALUE);
 VALUE rb_str_dump(VALUE);
@@ -598,6 +595,53 @@ void rb_str_setter(VALUE, ID, VALUE*);
 VALUE rb_str_intern(VALUE);
 VALUE rb_sym_to_s(VALUE);
 VALUE rb_str_length(VALUE);
+size_t rb_str_capacity(VALUE);
+#if defined __GNUC__
+#define rb_str_new_cstr(str) __extension__ (	\
+{						\
+    (__builtin_constant_p(str)) ?		\
+	rb_str_new(str, strlen(str)) :		\
+	rb_str_new_cstr(str);			\
+})
+#define rb_tainted_str_new_cstr(str) __extension__ ( \
+{					       \
+    (__builtin_constant_p(str)) ?	       \
+	rb_tainted_str_new(str, strlen(str)) : \
+	rb_tainted_str_new_cstr(str);	       \
+})
+#define rb_usascii_str_new_cstr(str) __extension__ ( \
+{					       \
+    (__builtin_constant_p(str)) ?	       \
+	rb_usascii_str_new(str, strlen(str)) : \
+	rb_usascii_str_new_cstr(str);	       \
+})
+#define rb_str_buf_new_cstr(str) __extension__ ( \
+{						\
+    (__builtin_constant_p(str)) ?		\
+	rb_str_buf_cat(rb_str_buf_new(strlen(str)), \
+		       str, strlen(str)) :	\
+	rb_str_buf_new_cstr(str);		\
+})
+#define rb_str_buf_cat2(str, ptr) __extension__ ( \
+{						\
+    (__builtin_constant_p(ptr)) ?	        \
+	rb_str_buf_cat(str, ptr, strlen(ptr)) :	\
+	rb_str_buf_cat2(str, ptr);		\
+})
+#define rb_str_cat2(str, ptr) __extension__ (	\
+{						\
+    (__builtin_constant_p(ptr)) ?	        \
+	rb_str_cat(str, ptr, strlen(ptr)) :	\
+	rb_str_cat2(str, ptr);			\
+})
+#endif
+#define rb_str_new2 rb_str_new_cstr
+#define rb_str_new3 rb_str_new_shared
+#define rb_str_new4 rb_str_new_frozen
+#define rb_str_new5 rb_str_new_with_class
+#define rb_tainted_str_new2 rb_tainted_str_new_cstr
+#define rb_str_buf_new2 rb_str_buf_new_cstr
+#define rb_usascii_str_new2 rb_usascii_str_new_cstr
 /* struct.c */
 VALUE rb_struct_new(VALUE, ...);
 VALUE rb_struct_define(const char*, ...);
@@ -614,9 +658,12 @@ VALUE rb_struct_define_without_accessor(const char *, VALUE, rb_alloc_func_t, ..
 /* thread.c */
 typedef void rb_unblock_function_t(void *);
 typedef VALUE rb_blocking_function_t(void *);
+void rb_thread_check_ints(void);
+int rb_thread_interrupted(VALUE thval);
 VALUE rb_thread_blocking_region(rb_blocking_function_t *func, void *data1,
 				rb_unblock_function_t *ubf, void *data2);
-#define RB_UBF_DFL ((rb_unblock_function_t *)-1)
+#define RUBY_UBF_IO ((rb_unblock_function_t *)-1)
+#define RUBY_UBF_PROCESS ((rb_unblock_function_t *)-1)
 VALUE rb_mutex_new(void);
 VALUE rb_mutex_locked_p(VALUE mutex);
 VALUE rb_mutex_try_lock(VALUE mutex);

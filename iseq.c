@@ -10,11 +10,11 @@
 **********************************************************************/
 
 #include "ruby/ruby.h"
-#include "ruby/node.h"
 
 /* #define MARK_FREE_DEBUG 1 */
 #include "gc.h"
 #include "vm_core.h"
+#include "iseq.h"
 
 #include "insns.inc"
 #include "insns_info.inc"
@@ -48,20 +48,22 @@ iseq_free(void *ptr)
 
     if (ptr) {
 	iseq = ptr;
-	/* It's possible that strings are freed
-         * GC_INFO("%s @ %s\n", RSTRING_PTR(iseq->name),
-         *                      RSTRING_PTR(iseq->filename));
-	 */
-	if (iseq->iseq != iseq->iseq_encoded) {
-	    RUBY_FREE_UNLESS_NULL(iseq->iseq_encoded);
-	}
+	if (!iseq->orig) {
+	    /* It's possible that strings are freed
+	     * GC_INFO("%s @ %s\n", RSTRING_PTR(iseq->name),
+	     *                      RSTRING_PTR(iseq->filename));
+	     */
+	    if (iseq->iseq != iseq->iseq_encoded) {
+		RUBY_FREE_UNLESS_NULL(iseq->iseq_encoded);
+	    }
 
-	RUBY_FREE_UNLESS_NULL(iseq->iseq);
-	RUBY_FREE_UNLESS_NULL(iseq->insn_info_table);
-	RUBY_FREE_UNLESS_NULL(iseq->local_table);
-	RUBY_FREE_UNLESS_NULL(iseq->catch_table);
-	RUBY_FREE_UNLESS_NULL(iseq->arg_opt_table);
-	compile_data_free(iseq->compile_data);
+	    RUBY_FREE_UNLESS_NULL(iseq->iseq);
+	    RUBY_FREE_UNLESS_NULL(iseq->insn_info_table);
+	    RUBY_FREE_UNLESS_NULL(iseq->local_table);
+	    RUBY_FREE_UNLESS_NULL(iseq->catch_table);
+	    RUBY_FREE_UNLESS_NULL(iseq->arg_opt_table);
+	    compile_data_free(iseq->compile_data);
+	}
 	ruby_xfree(ptr);
     }
     RUBY_FREE_LEAVE("iseq");
@@ -84,6 +86,7 @@ iseq_mark(void *ptr)
 	RUBY_MARK_UNLESS_NULL(iseq->coverage);
 /* 	RUBY_MARK_UNLESS_NULL((VALUE)iseq->node); */
 /*	RUBY_MARK_UNLESS_NULL(iseq->cached_special_block); */
+	RUBY_MARK_UNLESS_NULL(iseq->orig);
 
 	if (iseq->compile_data != 0) {
 	    RUBY_MARK_UNLESS_NULL(iseq->compile_data->mark_ary);
@@ -304,6 +307,13 @@ rb_iseq_new(NODE *node, VALUE name, VALUE filename,
 				&COMPILE_OPTION_DEFAULT);
 }
 
+VALUE
+rb_iseq_new_top(NODE *node, VALUE name, VALUE filename, VALUE parent)
+{
+    return rb_iseq_new_with_opt(node, name, filename, parent, ISEQ_TYPE_TOP,
+				&COMPILE_OPTION_DEFAULT);
+}
+
 static VALUE
 rb_iseq_new_with_bopt_and_opt(NODE *node, VALUE name, VALUE filename,
 				VALUE parent, VALUE type, VALUE bopt,
@@ -497,9 +507,10 @@ iseq_s_compile_file(int argc, VALUE *argv, VALUE self)
 
     rb_secure(1);
     rb_scan_args(argc, argv, "11", &file, &opt);
+    FilePathValue(file);
     fname = StringValueCStr(file);
 
-    f = rb_file_open(fname, "r");
+    f = rb_file_open_str(file, "r");
 
     parser = rb_parser_new();
     node = rb_parser_compile_file(parser, fname, f, NUM2INT(line));
@@ -545,15 +556,18 @@ iseq_eval(VALUE self)
 static VALUE
 iseq_inspect(VALUE self)
 {
-    char buff[0x100];
-    rb_iseq_t *iseq = iseq_check(self);
+    rb_iseq_t *iseq;
+    GetISeqPtr(self, iseq);
+    if (!iseq->name) {
+        return rb_sprintf("#<%s: uninitialized>", rb_obj_classname(self));
+    }
 
-    snprintf(buff, sizeof(buff), "<ISeq:%s@%s>",
-	     RSTRING_PTR(iseq->name), RSTRING_PTR(iseq->filename));
-
-    return rb_str_new2(buff);
+    return rb_sprintf("<%s:%s@%s>",
+                      rb_obj_classname(self),
+		      RSTRING_PTR(iseq->name), RSTRING_PTR(iseq->filename));
 }
 
+static
 VALUE iseq_data_to_ary(rb_iseq_t *iseq);
 
 static VALUE
@@ -562,6 +576,12 @@ iseq_to_a(VALUE self)
     rb_iseq_t *iseq = iseq_check(self);
     rb_secure(1);
     return iseq_data_to_ary(iseq);
+}
+
+int
+rb_iseq_first_lineno(rb_iseq_t *iseq)
+{
+    return iseq->insn_info_table[0].line_no;
 }
 
 /* TODO: search algorithm is brute force.
@@ -622,17 +642,14 @@ insn_operand_intern(rb_iseq_t *iseq,
     const char *types = insn_op_types(insn);
     char type = types[op_no];
     VALUE ret;
-    char buff[0x100];
 
     switch (type) {
       case TS_OFFSET:		/* LONG */
-	snprintf(buff, sizeof(buff), "%ld", pos + len + op);
-	ret = rb_str_new2(buff);
+	ret = rb_sprintf("%ld", pos + len + op);
 	break;
 
       case TS_NUM:		/* ULONG */
-	snprintf(buff, sizeof(buff), "%lu", op);
-	ret = rb_str_new2(buff);
+	ret = rb_sprintf("%lu", op);
 	break;
 
       case TS_LINDEX:
@@ -728,23 +745,19 @@ ruby_iseq_disasm_insn(VALUE ret, VALUE *iseq, int pos,
 {
     int insn = iseq[pos];
     int len = insn_len(insn);
-    int i, j;
+    int j;
     const char *types = insn_op_types(insn);
     VALUE str = rb_str_new(0, 0);
-    char buff[0x100];
-    char insn_name_buff[0x100];
+    const char *insn_name_buff;
 
-    strcpy(insn_name_buff, insn_name(insn));
-    if (0) {
-	for (i = 0; insn_name_buff[i]; i++) {
-	    if (insn_name_buff[i] == '_') {
-		insn_name_buff[i] = 0;
-	    }
-	}
+    insn_name_buff = insn_name(insn);
+    if (1) {
+	rb_str_catf(str, "%04d %-16s ", pos, insn_name_buff);
     }
-
-    snprintf(buff, sizeof(buff), "%04d %-16s ", pos, insn_name_buff);
-    rb_str_cat2(str, buff);
+    else {
+	rb_str_catf(str, "%04d %-16.*s ", pos,
+		    (int)strcspn(insn_name_buff, "_"), insn_name_buff);
+    }
 
     for (j = 0; types[j]; j++) {
 	const char *types = insn_op_types(insn);
@@ -762,17 +775,18 @@ ruby_iseq_disasm_insn(VALUE ret, VALUE *iseq, int pos,
 	int line_no = find_line_no(iseqdat, pos);
 	int prev = find_prev_line_no(iseqdat, pos);
 	if (line_no && line_no != prev) {
-	    snprintf(buff, sizeof(buff), "%-70s(%4d)", RSTRING_PTR(str),
-		     line_no);
-	    str = rb_str_new2(buff);
+	    long slen = RSTRING_LEN(str);
+	    slen = (slen > 70) ? 0 : (70 - slen);
+	    str = rb_str_catf(str, "%*s(%4d)", (int)slen, "", line_no);
 	}
     }
     else {
 	/* for debug */
 	struct iseq_insn_info_entry *entry = get_insn_info(iseqdat, pos);
-	snprintf(buff, sizeof(buff), "%-60s(line: %d, sp: %d)",
-		 RSTRING_PTR(str), entry->line_no, entry->sp);
-	str = rb_str_new2(buff);
+	long slen = RSTRING_LEN(str);
+	slen = (slen > 60) ? 0 : (60 - slen);
+	str = rb_str_catf(str, "%*s(line: %d, sp: %d)",
+			  (int)slen, "", entry->line_no, entry->sp);
     }
 
     if (ret) {
@@ -817,7 +831,6 @@ ruby_iseq_disasm(VALUE self)
     unsigned long size;
     int i;
     ID *tbl;
-    char buff[0x200];
     enum {header_minlen = 72};
 
     rb_secure(1);
@@ -840,11 +853,10 @@ ruby_iseq_disasm(VALUE self)
     }
     for (i = 0; i < iseqdat->catch_table_size; i++) {
 	struct iseq_catch_table_entry *entry = &iseqdat->catch_table[i];
-	sprintf(buff,
-		"| catch type: %-6s st: %04d ed: %04d sp: %04d cont: %04d\n",
-		catch_type((int)entry->type), (int)entry->start,
-		(int)entry->end, (int)entry->sp, (int)entry->cont);
-	rb_str_cat2(str, buff);
+	rb_str_catf(str,
+		    "| catch type: %-6s st: %04d ed: %04d sp: %04d cont: %04d\n",
+		    catch_type((int)entry->type), (int)entry->start,
+		    (int)entry->end, (int)entry->sp, (int)entry->cont);
 	if (entry->iseq) {
 	    rb_str_concat(str, ruby_iseq_disasm(entry->iseq));
 	}
@@ -858,14 +870,13 @@ ruby_iseq_disasm(VALUE self)
     tbl = iseqdat->local_table;
 
     if (tbl) {
-	snprintf(buff, sizeof(buff),
-		 "local table (size: %d, argc: %d "
-		 "[opts: %d, rest: %d, post: %d, block: %d] s%d)\n",
-		 iseqdat->local_size, iseqdat->argc,
-		 iseqdat->arg_opts, iseqdat->arg_rest,
-		 iseqdat->arg_post_len, iseqdat->arg_block,
-		 iseqdat->arg_simple);
-	rb_str_cat2(str, buff);
+	rb_str_catf(str,
+		    "local table (size: %d, argc: %d "
+		    "[opts: %d, rest: %d, post: %d, block: %d] s%d)\n",
+		    iseqdat->local_size, iseqdat->argc,
+		    iseqdat->arg_opts, iseqdat->arg_rest,
+		    iseqdat->arg_post_len, iseqdat->arg_block,
+		    iseqdat->arg_simple);
 
 	for (i = 0; i < iseqdat->local_table_size; i++) {
 	    const char *name = rb_id2name(tbl[i]);
@@ -893,10 +904,7 @@ ruby_iseq_disasm(VALUE self)
 	    snprintf(info, sizeof(info), "%s%s%s%s", name ? name : "?",
 		     *argi ? "<" : "", argi, *argi ? ">" : "");
 
-	    snprintf(buff, sizeof(buff), "[%2d] %-11s",
-		     iseqdat->local_size - i, info);
-
-	    rb_str_cat2(str, buff);
+	    rb_str_catf(str, "[%2d] %-11s", iseqdat->local_size - i, info);
 	}
 	rb_str_cat2(str, "\n");
     }
@@ -925,7 +933,7 @@ iseq_s_disasm(VALUE klass, VALUE body)
 
     if ((node = rb_method_body(body)) != 0) {
 	if (nd_type(node) == RUBY_VM_METHOD_NODE) {
-	    VALUE iseqval = (VALUE)node->nd_body;
+ 	    VALUE iseqval = (VALUE)node->nd_body;
 	    ret = ruby_iseq_disasm(iseqval);
 	}
     }
@@ -954,9 +962,9 @@ static VALUE
 register_label(struct st_table *table, int idx)
 {
     VALUE sym;
-    char buff[0x20];
+    char buff[8 + (sizeof(idx) * CHAR_BIT * 32 / 100)];
 
-    snprintf(buff, 0x20, "label_%u", idx);
+    snprintf(buff, sizeof(buff), "label_%u", idx);
     sym = ID2SYM(rb_intern(buff));
     st_insert(table, idx, sym);
     return sym;
@@ -987,7 +995,7 @@ cdhash_each(VALUE key, VALUE value, VALUE ary)
     return ST_CONTINUE;
 }
 
-VALUE
+static VALUE
 iseq_data_to_ary(rb_iseq_t *iseq)
 {
     int i, pos, line = 0;
@@ -1240,6 +1248,30 @@ insn_make_insn_table(void)
     }
 
     return table;
+}
+
+VALUE
+rb_iseq_clone(VALUE iseqval, VALUE newcbase)
+{
+    VALUE newiseq = iseq_alloc(rb_cISeq);
+    rb_iseq_t *iseq0, *iseq1;
+
+    GetISeqPtr(iseqval, iseq0);
+    GetISeqPtr(newiseq, iseq1);
+
+    *iseq1 = *iseq0;
+    iseq1->self = newiseq;
+    if (!iseq1->orig) {
+	iseq1->orig = iseqval;
+    }
+    if (newcbase) {
+	iseq1->cref_stack = NEW_BLOCK(newcbase);
+	if (iseq0->cref_stack->nd_next) {
+	    iseq1->cref_stack->nd_next = iseq0->cref_stack->nd_next;
+	}
+    }
+
+    return newiseq;
 }
 
 /* ruby2cext */

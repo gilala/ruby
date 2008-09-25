@@ -423,7 +423,7 @@ static VALUE
 ossl_config_inspect(VALUE self)
 {
     VALUE str, ary = ossl_config_get_sections(self);
-    char *cname = rb_class2name(rb_obj_class(self));
+    const char *cname = rb_class2name(rb_obj_class(self));
 
     str = rb_str_new2("#<");
     rb_str_cat2(str, cname);
@@ -440,11 +440,14 @@ ossl_config_inspect(VALUE self)
 void
 Init_ossl_config()
 {
+    char *default_config_file;
     eConfigError = rb_define_class_under(mOSSL, "ConfigError", eOSSLError);
     cConfig = rb_define_class_under(mOSSL, "Config", rb_cObject);
 
+    default_config_file = CONF_get1_default_config_file();
     rb_define_const(cConfig, "DEFAULT_CONFIG_FILE",
-		    rb_str_new2(CONF_get1_default_config_file()));
+		    rb_str_new2(default_config_file));
+    OPENSSL_free(default_config_file);
     rb_include_module(cConfig, rb_mEnumerable);
     rb_define_singleton_method(cConfig, "parse", ossl_config_s_parse, 1);
     rb_define_alias(CLASS_OF(cConfig), "load", "new");

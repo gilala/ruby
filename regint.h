@@ -85,6 +85,10 @@
 /* escape other system UChar definition */
 #ifndef RUBY_DEFINES_H
 #include "ruby/ruby.h"
+#undef xmalloc
+#undef xrealloc
+#undef xcalloc
+#undef xfree
 #endif
 #ifdef ONIG_ESCAPE_UCHAR_COLLISION
 #undef ONIG_ESCAPE_UCHAR_COLLISION
@@ -111,8 +115,7 @@
 
 #ifdef RUBY
 
-#include "vm_core.h"
-#define CHECK_INTERRUPT_IN_MATCH_AT RUBY_VM_CHECK_INTS()
+#define CHECK_INTERRUPT_IN_MATCH_AT rb_thread_check_ints()
 #define onig_st_init_table                  st_init_table
 #define onig_st_init_table_with_size        st_init_table_with_size
 #define onig_st_init_numtable               st_init_numtable
@@ -213,13 +216,7 @@
 
 #include <ctype.h>
 #ifdef HAVE_SYS_TYPES_H
-#ifndef __BORLANDC__
 #include <sys/types.h>
-#endif
-#endif
-
-#ifdef __BORLANDC__
-#include <malloc.h>
 #endif
 
 #ifdef ONIG_DEBUG
@@ -813,7 +810,7 @@ extern int  onig_is_code_in_cc_len P_((int enclen, OnigCodePoint code, CClassNod
 /* strend hash */
 typedef void hash_table_type;
 #ifdef RUBY
-#include <ruby/st.h>
+#include "ruby/st.h"
 typedef st_data_t hash_data_type;
 #else
 typedef unsigned long hash_data_type;

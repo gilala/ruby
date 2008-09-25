@@ -11,7 +11,6 @@
 
 #include "ruby/ruby.h"
 #include "ruby/io.h"
-#include "ruby/signal.h"
 #include "ruby/util.h"
 #include <stdio.h>
 #include <sys/types.h>
@@ -29,7 +28,7 @@
 #endif
 
 #ifndef _WIN32
-#if defined(__BEOS__)
+#if defined(__BEOS__) && !defined(__HAIKU__) && !defined(BONE)
 # include <net/socket.h>
 #else
 # include <sys/socket.h>
@@ -102,7 +101,7 @@ int Rconnect();
 #endif
 #endif
 
-#define BLOCKING_REGION(func, arg) (long)rb_thread_blocking_region((func), (arg), RB_UBF_DFL, 0)
+#define BLOCKING_REGION(func, arg) (long)rb_thread_blocking_region((func), (arg), RUBY_UBF_IO, 0)
 
 #define INET_CLIENT 0
 #define INET_SERVER 1
@@ -132,8 +131,8 @@ struct sockaddr_storage {
 #endif
 
 #if defined(INET6) && (defined(LOOKUP_ORDER_HACK_INET) || defined(LOOKUP_ORDER_HACK_INET6))
-#define LOOKUP_ORDERS		3
-static int lookup_order_table[LOOKUP_ORDERS] = {
+#define LOOKUP_ORDERS (sizeof(lookup_order_table) / sizeof(lookup_order_table[0]))
+static const int lookup_order_table[] = {
 #if defined(LOOKUP_ORDER_HACK_INET)
     PF_INET, PF_INET6, PF_UNSPEC,
 #elif defined(LOOKUP_ORDER_HACK_INET6)
@@ -403,9 +402,11 @@ bsock_setsockopt(VALUE sock, VALUE lev, VALUE optname, VALUE val)
 	break;
     }
 
+#define rb_sys_fail_path(path) rb_sys_fail(NIL_P(path) ? 0 : RSTRING_PTR(path))
+
     GetOpenFile(sock, fptr);
     if (setsockopt(fptr->fd, level, option, v, vlen) < 0)
-	rb_sys_fail(fptr->path);
+	rb_sys_fail_path(fptr->pathv);
 
     return INT2FIX(0);
 }
@@ -466,7 +467,7 @@ bsock_getsockopt(VALUE sock, VALUE lev, VALUE optname)
 
     GetOpenFile(sock, fptr);
     if (getsockopt(fptr->fd, level, option, buf, &len) < 0)
-	rb_sys_fail(fptr->path);
+	rb_sys_fail_path(fptr->pathv);
 
     return rb_str_new(buf, len);
 #else
@@ -551,7 +552,8 @@ bsock_send(int argc, VALUE *argv, VALUE sock)
     GetOpenFile(sock, fptr);
     arg.fd = fptr->fd;
     arg.flags = NUM2INT(flags);
-    while ((n = (int)BLOCKING_REGION(func, &arg)) < 0) {
+    while (rb_thread_fd_writable(arg.fd),
+	   (n = (int)BLOCKING_REGION(func, &arg)) < 0) {
 	if (rb_io_wait_writable(arg.fd)) {
 	    continue;
 	}
@@ -640,6 +642,7 @@ s_recvfrom(VALUE sock, int argc, VALUE *argv, enum sock_recv_type from)
     RBASIC(str)->klass = 0;
 
     while (rb_io_check_closed(fptr),
+	   rb_thread_wait_fd(arg.fd),
 	   (slen = BLOCKING_REGION(recvfrom_blocking, &arg)) < 0) {
 	if (RBASIC(str)->klass || RSTRING_LEN(str) != buflen) {
 	    rb_raise(rb_eRuntimeError, "buffer string modified");
@@ -883,8 +886,8 @@ host_str(VALUE host, char *hbuf, size_t len)
 	    make_inetaddr(INADDR_BROADCAST, hbuf, len);
 	}
 	else if (strlen(name) >= len) {
-	    rb_raise(rb_eArgError, "hostname too long (%"PRIuVALUE")",
-                (VALUE)strlen(name));
+	    rb_raise(rb_eArgError, "hostname too long (%"PRIuSIZE")",
+                strlen(name));
 	}
 	else {
 	    strcpy(hbuf, name);
@@ -909,8 +912,8 @@ port_str(VALUE port, char *pbuf, size_t len)
 	SafeStringValue(port);
 	serv = RSTRING_PTR(port);
 	if (strlen(serv) >= len) {
-	    rb_raise(rb_eArgError, "service name too long (%"PRIuVALUE")",
-                (VALUE)strlen(serv));
+	    rb_raise(rb_eArgError, "service name too long (%"PRIuSIZE")",
+                strlen(serv));
 	}
 	strcpy(pbuf, serv);
 	return pbuf;
@@ -918,10 +921,10 @@ port_str(VALUE port, char *pbuf, size_t len)
 }
 
 #ifndef NI_MAXHOST
-# define 1025
+# define NI_MAXHOST 1025
 #endif
 #ifndef NI_MAXSERV
-# define 32
+# define NI_MAXSERV 32
 #endif
 
 static struct addrinfo*
@@ -1550,7 +1553,8 @@ s_accept(VALUE klass, int fd, struct sockaddr *sockaddr, socklen_t *len)
     arg.sockaddr = sockaddr;
     arg.len = len;
   retry:
-    fd2 = (int)BLOCKING_REGION(accept_blocking, &arg);
+    rb_thread_wait_fd(fd);
+    fd2 = BLOCKING_REGION(accept_blocking, &arg);
     if (fd2 < 0) {
 	switch (errno) {
 	  case EMFILE:
@@ -1697,7 +1701,7 @@ init_unixsock(VALUE sock, VALUE path, int server)
     init_sock(sock, fd);
     if (server) {
 	GetOpenFile(sock, fptr);
-        fptr->path = strdup(RSTRING_PTR(path));
+        fptr->pathv = rb_str_new_frozen(path);
     }
 
     return sock;
@@ -1852,6 +1856,7 @@ udp_send(int argc, VALUE *argv, VALUE sock)
       retry:
 	arg.to = res->ai_addr;
 	arg.tolen = res->ai_addrlen;
+	rb_thread_fd_writable(arg.fd);
 	n = (int)BLOCKING_REGION(sendto_blocking, &arg);
 	if (n >= 0) {
 	    freeaddrinfo(res0);
@@ -1934,14 +1939,14 @@ unix_path(VALUE sock)
     rb_io_t *fptr;
 
     GetOpenFile(sock, fptr);
-    if (fptr->path == 0) {
+    if (NIL_P(fptr->pathv)) {
 	struct sockaddr_un addr;
 	socklen_t len = sizeof(addr);
 	if (getsockname(fptr->fd, (struct sockaddr*)&addr, &len) < 0)
 	    rb_sys_fail(0);
-	fptr->path = strdup(unixpath(&addr, len));
+	fptr->pathv = rb_obj_freeze(rb_str_new_cstr(unixpath(&addr, len)));
     }
-    return rb_str_new2(fptr->path);
+    return rb_str_dup(fptr->pathv);
 }
 
 static VALUE
@@ -2036,6 +2041,7 @@ unix_send_io(VALUE sock, VALUE val)
 #endif
 
     arg.fd = fptr->fd;
+    rb_thread_fd_writable(arg.fd);
     if ((int)BLOCKING_REGION(sendmsg_blocking, &arg) == -1)
 	rb_sys_fail("sendmsg(2)");
 
@@ -2102,6 +2108,7 @@ unix_recv_io(int argc, VALUE *argv, VALUE sock)
 #endif
 
     arg.fd = fptr->fd;
+    rb_thread_wait_fd(arg.fd);
     if ((int)BLOCKING_REGION(recvmsg_blocking, &arg) == -1)
 	rb_sys_fail("recvmsg(2)");
 
@@ -2141,11 +2148,10 @@ unix_recv_io(int argc, VALUE *argv, VALUE sock)
     if (klass == Qnil)
 	return INT2FIX(fd);
     else {
-	static ID for_fd = 0;
+	ID for_fd;
 	int ff_argc;
 	VALUE ff_argv[2];
-	if (!for_fd)
-	    for_fd = rb_intern("for_fd");
+	CONST_ID(for_fd, "for_fd");
 	ff_argc = mode == Qnil ? 1 : 2;
 	ff_argv[0] = INT2FIX(fd);
 	ff_argv[1] = mode;
@@ -3553,14 +3559,13 @@ sock_s_unpack_sockaddr_un(VALUE self, VALUE addr)
 }
 #endif
 
-static VALUE mConst;
-
 static void
-sock_define_const(const char *name, int value)
+sock_define_const(const char *name, int value, VALUE mConst)
 {
     rb_define_const(rb_cSocket, name, INT2FIX(value));
     rb_define_const(mConst, name, INT2FIX(value));
 }
+#define sock_define_const(name, value) sock_define_const(name, value, mConst)
 
 /*
  * Class +Socket+ provides access to the underlying operating system
@@ -3590,6 +3595,8 @@ sock_define_const(const char *name, int value)
 void
 Init_socket()
 {
+    VALUE mConst;
+
     rb_eSocket = rb_define_class("SocketError", rb_eStandardError);
 
     rb_cBasicSocket = rb_define_class("BasicSocket", rb_cIO);

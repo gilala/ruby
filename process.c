@@ -12,7 +12,6 @@
 **********************************************************************/
 
 #include "ruby/ruby.h"
-#include "ruby/signal.h"
 #include "ruby/io.h"
 #include "ruby/util.h"
 #include "vm_core.h"
@@ -163,8 +162,8 @@ get_pid(void)
  *  call-seq:
  *     Process.ppid   => fixnum
  *
- *  Returns the process id of the parent of this process. Always
- *  returns 0 on NT. Not available on all platforms.
+ *  Returns the process id of the parent of this process. Returns
+ *  untrustworthy value on Win32/64. Not available on all platforms.
  *
  *     puts "I am #{Process.pid}"
  *     Process.fork { puts "Dad is #{Process.ppid}" }
@@ -218,23 +217,22 @@ static VALUE rb_cProcessStatus;
 VALUE
 rb_last_status_get(void)
 {
-    return GET_VM()->last_status;
+    return GET_THREAD()->last_status;
 }
 
 void
 rb_last_status_set(int status, rb_pid_t pid)
 {
-    rb_vm_t *vm = GET_VM();
-    vm->last_status = rb_obj_alloc(rb_cProcessStatus);
-    rb_iv_set(vm->last_status, "status", INT2FIX(status));
-    rb_iv_set(vm->last_status, "pid", PIDT2NUM(pid));
+    rb_thread_t *th = GET_THREAD();
+    th->last_status = rb_obj_alloc(rb_cProcessStatus);
+    rb_iv_set(th->last_status, "status", INT2FIX(status));
+    rb_iv_set(th->last_status, "pid", PIDT2NUM(pid));
 }
 
 static void
 rb_last_status_clear(void)
 {
-    rb_vm_t *vm = GET_VM();
-    vm->last_status = Qnil;
+    GET_THREAD()->last_status = Qnil;
 }
 
 /*
@@ -272,40 +270,35 @@ pst_to_i(VALUE st)
 static VALUE
 pst_pid(VALUE st)
 {
-    return rb_iv_get(st, "pid");
+    return rb_attr_get(st, rb_intern("pid"));
 }
 
 static void
 pst_message(VALUE str, rb_pid_t pid, int status)
 {
-    char buf[256];
-    snprintf(buf, sizeof(buf), "pid %ld", (long)pid);
-    rb_str_cat2(str, buf);
+    rb_str_catf(str, "pid %ld", (long)pid);
     if (WIFSTOPPED(status)) {
 	int stopsig = WSTOPSIG(status);
 	const char *signame = ruby_signal_name(stopsig);
 	if (signame) {
-	    snprintf(buf, sizeof(buf), " stopped SIG%s (signal %d)", signame, stopsig);
+	    rb_str_catf(str, " stopped SIG%s (signal %d)", signame, stopsig);
 	}
 	else {
-	    snprintf(buf, sizeof(buf), " stopped signal %d", stopsig);
+	    rb_str_catf(str, " stopped signal %d", stopsig);
 	}
-	rb_str_cat2(str, buf);
     }
     if (WIFSIGNALED(status)) {
 	int termsig = WTERMSIG(status);
 	const char *signame = ruby_signal_name(termsig);
 	if (signame) {
-	    snprintf(buf, sizeof(buf), " SIG%s (signal %d)", signame, termsig);
+	    rb_str_catf(str, " SIG%s (signal %d)", signame, termsig);
 	}
 	else {
-	    snprintf(buf, sizeof(buf), " signal %d", termsig);
+	    rb_str_catf(str, " signal %d", termsig);
 	}
-	rb_str_cat2(str, buf);
     }
     if (WIFEXITED(status)) {
-	snprintf(buf, sizeof(buf), " exit %d", WEXITSTATUS(status));
-	rb_str_cat2(str, buf);
+	rb_str_catf(str, " exit %d", WEXITSTATUS(status));
     }
 #ifdef WCOREDUMP
     if (WCOREDUMP(status)) {
@@ -350,9 +343,13 @@ pst_inspect(VALUE st)
 {
     rb_pid_t pid;
     int status;
-    VALUE str;
+    VALUE vpid, str;
 
-    pid = NUM2LONG(pst_pid(st));
+    vpid = pst_pid(st);
+    if (NIL_P(vpid)) {
+        return rb_sprintf("#<%s: uninitialized>", rb_class2name(CLASS_OF(st)));
+    }
+    pid = NUM2LONG(vpid);
     status = PST2INT(st);
 
     str = rb_sprintf("#<%s: ", rb_class2name(CLASS_OF(st)));
@@ -612,7 +609,6 @@ rb_waitpid_blocking(void *data)
     struct waitpid_arg *arg = data;
 #endif
 
-    TRAP_BEG;
 #if defined NO_WAITPID
     result = wait(data);
 #elif defined HAVE_WAITPID
@@ -620,7 +616,7 @@ rb_waitpid_blocking(void *data)
 #else  /* HAVE_WAIT4 */
     result = wait4(arg->pid, arg->st, arg->flags, NULL);
 #endif
-    TRAP_END;
+
     return (VALUE)result;
 }
 
@@ -635,7 +631,7 @@ rb_waitpid(rb_pid_t pid, int *st, int flags)
     arg.st = st;
     arg.flags = flags;
     result = (rb_pid_t)rb_thread_blocking_region(rb_waitpid_blocking, &arg,
-						 RB_UBF_DFL, 0);
+						 RUBY_UBF_PROCESS, 0);
     if (result < 0) {
 #if 0
 	if (errno == EINTR) {
@@ -658,7 +654,7 @@ rb_waitpid(rb_pid_t pid, int *st, int flags)
 
     for (;;) {
 	result = (rb_pid_t)rb_thread_blocking_region(rb_waitpid_blocking,
-						     st, RB_UBF_DFL);
+						     st, RUBY_UBF_PROCESS);
 	if (result < 0) {
 	    if (errno == EINTR) {
 		rb_thread_schedule();
@@ -1325,7 +1321,7 @@ check_exec_redirect(VALUE key, VALUE val, VALUE options)
         if (NIL_P(flags))
             flags = INT2NUM(O_RDONLY);
         else if (TYPE(flags) == T_STRING)
-            flags = INT2NUM(rb_io_mode_modenum(StringValueCStr(flags)));
+            flags = INT2NUM(rb_io_modestr_oflags(StringValueCStr(flags)));
         else
             flags = rb_to_int(flags);
         perm = rb_ary_entry(val, 2);
@@ -1959,11 +1955,11 @@ run_exec_dup2(VALUE ary, VALUE save)
             goto fail;
     }
 
+    xfree(pairs);
     return 0;
 
-fail:
-    if (pairs)
-        xfree(pairs);
+  fail:
+    xfree(pairs);
     return -1;
 }
 
@@ -5051,10 +5047,10 @@ rb_proc_times(VALUE obj)
 
     times(&buf);
     return rb_struct_new(rb_cProcessTms,
-			 utime = DOUBLE2NUM(buf.tms_utime / hertz),
-			 stime = DOUBLE2NUM(buf.tms_stime / hertz),
-			 cutime = DOUBLE2NUM(buf.tms_cutime / hertz),
-			 sctime = DOUBLE2NUM(buf.tms_cstime / hertz));
+			 utime = DBL2NUM(buf.tms_utime / hertz),
+			 stime = DBL2NUM(buf.tms_stime / hertz),
+			 cutime = DBL2NUM(buf.tms_cutime / hertz),
+			 sctime = DBL2NUM(buf.tms_cstime / hertz));
 #else
     rb_notimplement();
 #endif

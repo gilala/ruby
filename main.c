@@ -11,6 +11,7 @@
 
 #undef RUBY_EXPORT
 #include "ruby.h"
+#include "debug.h"
 #ifdef HAVE_LOCALE_H
 #include <locale.h>
 #endif
@@ -18,7 +19,7 @@
 RUBY_GLOBAL_SETUP
 
 int
-main(int argc, char **argv, char **envp)
+main(int argc, char **argv)
 {
 #ifdef RUBY_DEBUG_ENV
     ruby_set_debug_option(getenv("RUBY_DEBUG"));
