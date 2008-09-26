@@ -26,8 +26,7 @@ class Ricsin
 
   def run
     raise unless @out_so
-    require @out_so
-    ::RICSIN_ISEQMAP[@so_basename].eval
+    require @out_rb
   end
 
   def generate
@@ -43,7 +42,7 @@ class Ricsin
 
   def generate_rb
     open(@out_rb, 'wb'){|f|
-      f.puts "require '#{@so_basename}.so'"
+      f.puts "require_relative '#{@so_basename}.so'"
       f.puts "$0 = '#{@basename}.rcb' if $0 == __FILE__"
       f.puts "::RICSIN_ISEQMAP['#{@so_basename}'].eval"
     }
