@@ -49,8 +49,8 @@ class Ricsin
   end
 
   def preprocess file
-    # #C cexpr => __Cx__ %q{ cexpr }, 0
-    # #C:10 cexpr => __Cx__ %q{ cexpr }, 10
+    # #C cexpr => __Ccont__ %q{ cexpr }, 0
+    # #C:10 cexpr => __Ccont__ %q{ cexpr }, 10
 
     # kill __END__ lines
     src = File.read(file).sub(/^__END__.+/m, '')
@@ -63,7 +63,7 @@ class Ricsin
           raise line.dump
         end
       }.join("\\\n")
-      "__Cx__(#{csrc}, 0)\n"
+      "__Ccont__(#{csrc}, 0)\n"
     }
     # .gsub(/^\s*=begin C\s*$(.+)^\s*=end\s*$/m){
     #  #/^\s*=begin C$.+^\s*=end$/m

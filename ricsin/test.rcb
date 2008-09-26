@@ -24,7 +24,7 @@ class TestRcsin < Test::Unit::TestCase
     assert_equal('@iv', __C__('return rb_str_new2("@iv");'))
   end
 
-  def test_cx
+  def test_cont
     v = nil
     #C v = INT2FIX(42);
     assert_equal(42, v)

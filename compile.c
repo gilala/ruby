@@ -4132,7 +4132,7 @@ iseq_compile_each(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE * node, int poped)
 		    }
 		    break;
 		}
-		else if (mid == rb_intern("__Cx__")) {
+		else if (mid == rb_intern("__Ccont__")) {
 		    if (ricsin_mode == 1) {
 			/* ricsin compile mode */
 			ricsin_compile(iseq, ret, node, 1);
