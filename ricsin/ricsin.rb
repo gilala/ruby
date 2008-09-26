@@ -15,8 +15,8 @@ class Ricsin
     @basename = File.basename(file, '.rcb')
     @output_dir = option[:output_dir]
     @src_rcb = file
-    @out_rb = File.join(@output_dir, "#{@basename}.rb")
-    @out_c  = File.join(@output_dir, "#{@basename}.c")
+    @out_rb = File.join(@output_dir, "ricsin_#{@basename}.rb")
+    @out_c  = File.join(@output_dir, "ricsin_#{@basename}.c")
     @out_so = nil
     @so_basename = "ricsin_#{@basename}"
     @src = nil
@@ -27,6 +27,7 @@ class Ricsin
   def run
     raise unless @out_so
     require @out_so
+    ::RICSIN_ISEQMAP[@so_basename].eval
   end
 
   def generate
@@ -37,6 +38,15 @@ class Ricsin
 
     generate_csrc
     generate_dll
+    generate_rb
+  end
+
+  def generate_rb
+    open(@out_rb, 'wb'){|f|
+      f.puts "require '#{@so_basename}.so'"
+      f.puts "$0 = '#{@basename}.rcb' if $0 == __FILE__"
+      f.puts "::RICSIN_ISEQMAP['#{@so_basename}'].eval"
+    }
   end
 
   def preprocess file
@@ -75,7 +85,7 @@ class Ricsin
         system("#{ruby} extconf.rb")
       else
         cmd = "#{ruby} -r mkmf -e "\
-              "'$objs=[#{(File.basename(@src_rcb, '.rcb')+'.o').dump}]; " \
+              "'$objs=[#{(File.basename(@out_c, '.c')+'.o').dump}]; " \
               "create_makefile(#{@so_basename.dump})'"
         system(cmd)
       end or raise "extconf"
@@ -152,6 +162,7 @@ Init_#{@so_basename}(void)
   VALUE file = rb_str_new2("#{File.basename(@src_rcb)}");
   VALUE line = INT2FIX(1);
   VALUE opt = rb_hash_new();
+  VALUE map;
   VALUE iseq;
 
   #{
@@ -176,7 +187,14 @@ Init_#{@so_basename}(void)
     rb_io_puts(1, &disasm_str, rb_stdout);
   }
 
-  rb_iseq_eval(iseq);
+  if (rb_const_defined(rb_cObject, rb_intern("RICSIN_ISEQMAP"))) {
+    map = rb_const_get(rb_cObject, rb_intern("RICSIN_ISEQMAP"));
+  }
+  else {
+    map = rb_hash_new();
+    rb_const_set(rb_cObject, rb_intern("RICSIN_ISEQMAP"), map);
+  }
+  rb_hash_aset(map, rb_str_new2("#{@so_basename}"), iseq);
 }
 EOS
   end

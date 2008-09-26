@@ -1,3 +1,11 @@
+p $0
+p $0 == __FILE__
+
+__END__
+p $0
+p $"
+
+__END__
 
 $foo = 42
 p __C__('return $foo; /* $foo */')
