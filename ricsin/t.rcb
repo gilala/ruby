@@ -1,3 +1,23 @@
+v = true
+__Ccont__('while (v != Qnil) {') # (a)
+  v = nil                        # (b)
+__Ccont__('  rb_p(v);')          # (c)
+__Ccont__('}')                   # (d)
+__END__
+
+__END__
+v = 42
+r = __C__(%q{
+  return INT2FIX(FIX2INT(v) + 1);
+})
+p r #=> 43 ‚Æ•\Ž¦
+__END__
+
+p [1, 2, 3].map(&__Cb__(%q{
+  return INT2FIX(FIX2INT(arg) * 2);
+}))
+__END__
+
 p $0
 p $0 == __FILE__
 

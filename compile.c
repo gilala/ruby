@@ -3029,13 +3029,18 @@ ricsin_compile(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE *node, int cx)
     if (cx) {
 	args = args->nd_next;
 
-	if (nd_type(args->nd_head) == NODE_LIT) {
-	    rb_ary_push(ary, args->nd_head->nd_lit);
-	    rb_ary_push(ary, (VALUE)iseq | 0x01 /* iseq id */);
+	if (args) {
+	    if (nd_type(args->nd_head) == NODE_LIT) {
+		rb_ary_push(ary, args->nd_head->nd_lit);
+		rb_ary_push(ary, (VALUE)iseq | 0x01 /* iseq id */);
+	    }
+	    else {
+		rb_bug("boo...: %s", ruby_node_name(nd_type(args->nd_head)));
+	    }
 	}
 	else {
-	    
-	    rb_bug("boo...: %s", ruby_node_name(nd_type(args->nd_head)));
+	    rb_ary_push(ary, INT2FIX(0));
+	    rb_ary_push(ary, (VALUE)iseq | 0x01 /* iseq id */);
 	}
 
 	args = args->nd_next;

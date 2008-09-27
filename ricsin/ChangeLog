@@ -1,3 +1,7 @@
+Sat Sep 27 21:40:44 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* compile.c (ricsin_compile): fix to skip __Ccont__ 2nd argument.
+
 Fri Sep 26 13:39:46 2008  Koichi Sasada  <ko1@atdot.net>
 
 	* compile.c, ricsin/ricsin.rb: rename __Cx__ to __Ccont__.
