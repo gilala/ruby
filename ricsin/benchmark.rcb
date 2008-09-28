@@ -35,28 +35,24 @@ def bench1
   puts [cm-lo, ri-lo].join("\t")
 end
 
-bench1()
-
-__END__
-
 __Cdecl__ %q{
   #define FIX_PP(i) i += 2
   #define FIX_CMP_LT(x, y) ((SIGNED_VALUE)(x) < (SIGNED_VALUE)(y))
 }
 
 class Array
-  def each2
+  def each_ricsin
     return self.enum_for(:each) unless block_given?
     i = 0
     e = nil
     #C for (; FIX2LONG(i) < RARRAY_LEN(self); FIX_PP(i)) {
     #C   e = RARRAY_PTR(self)[FIX2LONG(i)];
-         yield e
+      yield e
     #C }
     self
   end
 
-  def each3
+  def each_ruby
     i = 0
     while i < self.length
       yield self[i]
@@ -66,7 +62,8 @@ class Array
 end
 
 class Fixnum
-  def times2
+  alias each times
+  def each_ricsin
     return self.enum_for(:times) unless block_given?
     i = 0
     #C  for (; FIX_CMP_LT(i, self); FIX_PP(i)) {
@@ -75,7 +72,7 @@ class Fixnum
     i
   end
 
-  def times3
+  def each_ruby
     i = 0
     while i < self
       yield i
@@ -86,7 +83,7 @@ class Fixnum
 end
 
 class Range
-  def each2
+  def each_ricsin
     return self.enum_for(:each) unless block_given?
     i = self.first
     e = self.last
@@ -99,7 +96,7 @@ class Range
     self
   end
 
-  def each3
+  def each_ruby
     i = self.first
     e = self.last
     e += 1 if self.exclude_end?
@@ -113,7 +110,39 @@ class Range
   end
 end
 
+def bench2
+  max = 10_000_000
+  [[Array.new(max), :each], [(1..max), :each], [max, :times]].each{|obj, mid|
+    begin
+      bm 'cfunc' do
+        obj.each{}
+      end
+      bm 'ricsin' do
+        obj.each_ricsin{}
+      end
+      bm 'ruby' do
+        obj.each_ruby{}
+      end
 
+      bm 'cfunc+cb' do
+        obj.each(&__Cb__(''))
+      end
+      bm 'ricsin+cb' do
+        obj.each_ricsin(&__Cb__(''))
+      end
+      bm 'ruby+cb' do
+        obj.each_ruby(&__Cb__(''))
+      end
+    ensure
+      #
+    end
+  }
+end
+
+#bench1()
+bench2()
+
+__END__
 ###
 
 require 'benchmark'
