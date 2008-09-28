@@ -139,9 +139,109 @@ def bench2
   }
 end
 
-#bench1()
-bench2()
+require 'matrix'
 
+class Matrix
+  def *(m) # m is matrix or vector or number
+    case(m)
+    when Numeric
+      rows = @rows.collect {
+        |row|
+        row.collect {
+          |e|
+          e * m
+        }
+      }
+      return Matrix.rows(rows, false)
+    when Vector
+      m = Matrix.column_vector(m)
+      r = self * m
+      return r.column(0)
+    when Matrix
+      Matrix.Raise ErrDimensionMismatch if column_size != m.row_size
+
+      if true
+        rs = row_size
+        cs = column_size
+        mary = m.instance_eval{@rows}
+        sary = @rows
+        rows = __C__ %q{
+          int row_size = FIX2INT(rs);
+          int column_size = FIX2INT(cs);
+          int ci=0, cj=0, ck=0;
+          VALUE crows = rb_ary_new();
+          for (ci=0; ci<row_size; ci++) {
+            VALUE ccols = rb_ary_new();
+            for (cj=0; cj<column_size; cj++) {
+              int cvij = 0;
+	      double d = 0;
+              for (ck=0; ck<column_size; ck++) {
+                #define REF(m, i, j) RARRAY_PTR(RARRAY_PTR(m)[i])[j]
+                VALUE a = REF(sary, ci, ck);
+                VALUE b = REF(mary, ck, cj);
+
+                if (FIXNUM_P(a) && FIXNUM_P(b)) {
+		    cvij += FIX2INT(a) * FIX2INT(b);
+                }
+                else if (BUILTIN_TYPE(a) == T_FLOAT &&
+			 BUILTIN_TYPE(b) == T_FLOAT) {
+		    d += RFLOAT_VALUE(a) * RFLOAT_VALUE(b);
+		}
+                else {
+                  rb_bug("unsupported\n");
+                }
+              }
+	      if (d != 0) {
+		  rb_ary_push(ccols, DBL2NUM(d + cvij));
+	      }
+	      else {
+		  rb_ary_push(ccols, INT2NUM(cvij));
+	      }
+            }
+            rb_ary_push(crows, ccols);
+          }
+          return crows;
+        }
+      else
+        rows = (0 .. row_size - 1).collect {
+          |i|
+          (0 .. m.column_size - 1).collect {
+            |j|
+            vij = 0
+            0.upto(column_size - 1) do
+              |k|
+              vij += self[i, k] * m[k, j]
+            end
+            vij
+          }
+        }
+      end
+      return Matrix.rows(rows, false)
+    else
+      x, y = m.coerce(self)
+      return x * y
+    end
+  end
+end
+
+def bench3
+  max = 1000
+  m1 = Matrix[*Array.new(max){|i|
+    Array.new(max){|j|
+      i + j
+    }
+  }]
+  bm 'matrix' do
+    (m1 * m1)
+  end
+end
+
+bench3()
+
+__END__
+
+bench1()
+bench2()
 __END__
 ###
 
