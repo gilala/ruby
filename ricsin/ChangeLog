@@ -1,3 +1,13 @@
+Sun Sep 28 19:55:54 2008  Koichi Sasada  <ko1@atdot.net>
+
+	* ricsin/benchmark.rcb: add some benchmarks.
+
+	* ricsin/ricsin.rb: fix to skip strange local name.
+
+	* ricsin/t.rcb: removed.
+
+	* vm.c (null_func): added.
+
 Sat Sep 27 21:40:44 2008  Koichi Sasada  <ko1@atdot.net>
 
 	* compile.c (ricsin_compile): fix to skip __Ccont__ 2nd argument.

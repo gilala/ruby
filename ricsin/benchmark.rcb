@@ -1,4 +1,44 @@
 
+require 'benchmark'
+$max_trial = 10
+
+def bm msg
+  real = (1..$max_trial).map{
+    Benchmark.measure{
+      yield
+    }.real
+  }.min
+
+  puts "#{msg}\t#{real}"
+  real
+end
+
+def bench1
+  max = 10_000_000
+  cm = bm 'c-method' do
+    max.times{
+      null_func()
+    }
+  end
+
+  ri = bm 'ricsin' do
+    max.times{
+      __C__('')
+    }
+  end
+
+  lo = bm 'loop' do
+    max.times{
+    }
+  end
+
+  puts [cm-lo, ri-lo].join("\t")
+end
+
+bench1()
+
+__END__
+
 __Cdecl__ %q{
   #define FIX_PP(i) i += 2
   #define FIX_CMP_LT(x, y) ((SIGNED_VALUE)(x) < (SIGNED_VALUE)(y))

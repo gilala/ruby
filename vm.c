@@ -1777,12 +1777,21 @@ nsdr(void)
     return ary;
 }
 
+static VALUE
+null_func(VALUE self)
+{
+    return Qnil;
+}
+
 void
 Init_VM(void)
 {
     VALUE opts;
     VALUE klass;
     VALUE fcore;
+
+    /* null_func() for evaluation */
+    rb_define_global_function("null_func", null_func, 0);
 
     /* ::VM */
     rb_cRubyVM = rb_define_class("RubyVM", rb_cObject);

@@ -207,21 +207,25 @@ EOS
     # write header
 
     lvtbl.each{|(v, i)|
-      if true
-        f.puts "#define #{v} RICSIN_RUBY_VAR__#{v}"
+      if /[^\d\w]/ !~ v
+        if true
+          f.puts "#define #{v} RICSIN_RUBY_VAR__#{v}"
+        end
         undefs << v
+        f.puts "#define RICSIN_RUBY_VAR__#{v} RICSIN_RUBY_LVAR_ACCESS(#{i})"
+        undefs << "RICSIN_RUBY_VAR__#{v}"
       end
-      f.puts "#define RICSIN_RUBY_VAR__#{v} RICSIN_RUBY_LVAR_ACCESS(#{i})"
-      undefs << "RICSIN_RUBY_VAR__#{v}"
     }
 
     dvtbl.each_with_index{|(v, lev, i)|
-      if true
-        f.puts "#define #{v} RICSIN_RUBY_VAR__#{v}"
-        undefs << v
+      if /[^\d\w]/ !~ v
+        if true
+          f.puts "#define #{v} RICSIN_RUBY_VAR__#{v}"
+          undefs << v
+        end
+        f.puts "#define RICSIN_RUBY_VAR__#{v} RICSIN_RUBY_DVAR_ACCESS(#{lev}, #{i})"
+        undefs << "RICSIN_RUBY_VAR__#{v}"
       end
-      f.puts "#define RICSIN_RUBY_VAR__#{v} RICSIN_RUBY_DVAR_ACCESS(#{lev}, #{i})"
-      undefs << "RICSIN_RUBY_VAR__#{v}"
     }
 
     # write body
