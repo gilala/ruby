@@ -1,6 +1,6 @@
 #
 #   irb.rb - irb main module
-#   	$Release Version: 0.9.5 $
+#   	$Release Version: 0.9.6 $
 #   	$Revision$
 #   	by Keiju ISHITSUKA(keiju@ruby-lang.org)
 #
@@ -64,11 +64,19 @@ module IRB
     trap("SIGINT") do
       irb.signal_handle
     end
-    
-    catch(:IRB_EXIT) do
-      irb.eval_input
+
+    begin
+      catch(:IRB_EXIT) do
+	irb.eval_input
+      end
+    ensure
+      irb_at_exit
     end
 #    print "\n"
+  end
+
+  def IRB.irb_at_exit
+    @CONF[:AT_EXIT].each{|hook| hook.call}
   end
 
   def IRB.irb_exit(irb, ret)
@@ -84,7 +92,7 @@ module IRB
   end
 
   #
-  # irb interpreter main routine 
+  # irb interpreter main routine
   #
   class Irb
     def initialize(workspace = nil, input_method = nil, output_method = nil)
@@ -107,7 +115,7 @@ module IRB
 	  f = @context.prompt_c
 	elsif indent > 0
 	  f = @context.prompt_n
-	else @context.prompt_i
+	else
 	  f = @context.prompt_i
 	end
 	f = "" unless f
@@ -125,7 +133,7 @@ module IRB
 	  end
 	end
       end
-       
+
       @scanner.set_input(@context.io) do
 	signal_status(:IN_INPUT) do
 	  if l = @context.io.gets
@@ -158,7 +166,7 @@ module IRB
 	    print exc.class, ": ", exc, "\n"
 	    if exc.backtrace[0] =~ /irb(2)?(\/.*|-.*|\.rb)?:/ && exc.class.to_s !~ /^IRB/ &&
                 !(SyntaxError === exc)
-	      irb_bug = true 
+	      irb_bug = true
 	    else
 	      irb_bug = false
 	    end
@@ -174,7 +182,7 @@ module IRB
 		else
 		  lasts.push "\tfrom "+m
 		  if lasts.size > @context.back_trace_limit
-		    lasts.shift 
+		    lasts.shift
 		    levels += 1
 		  end
 		end
@@ -279,13 +287,13 @@ module IRB
 	when "l"
 	  ltype
 	when "i"
-	  if $1 
+	  if $1
 	    format("%" + $1 + "d", indent)
 	  else
 	    indent.to_s
 	  end
 	when "n"
-	  if $1 
+	  if $1
 	    format("%" + $1 + "d", line_no)
 	  else
 	    line_no.to_s
@@ -298,11 +306,7 @@ module IRB
     end
 
     def output_value
-      if @context.inspect?
-        printf @context.return_format, @context.last_value.inspect
-      else
-        printf @context.return_format, @context.last_value
-      end
+      printf @context.return_format, @context.inspect_last_value
     end
 
     def inspect

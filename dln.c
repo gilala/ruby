@@ -16,12 +16,6 @@
 # include <stdlib.h>
 #endif
 
-#ifdef __CHECKER__
-#undef HAVE_DLOPEN
-#undef USE_DLN_A_OUT
-#undef USE_DLN_DLOPEN
-#endif
-
 #ifdef USE_DLN_A_OUT
 char *dln_argv0;
 #endif
@@ -45,7 +39,7 @@ void *xrealloc();
 #define free(x) xfree(x)
 
 #include <stdio.h>
-#if defined(_WIN32) || defined(__VMS)
+#if defined(_WIN32)
 #include "missing/file.h"
 #endif
 #include <sys/types.h>
@@ -70,18 +64,6 @@ void *xrealloc();
 char *getenv();
 #endif
 
-#if defined(__VMS)
-#pragma builtins
-#include <dlfcn.h>
-#endif
-
-#ifdef __MACOS__
-# include <TextUtils.h>
-# include <CodeFragments.h>
-# include <Aliases.h>
-# include "macruby_private.h"
-#endif
-
 #if defined(__APPLE__) && defined(__MACH__)   /* Mac OS X */
 # if defined(HAVE_DLOPEN)
    /* Mac OS X with dlopen (10.3 or later) */
@@ -103,27 +85,23 @@ char *getenv();
 #endif
 
 #ifndef FUNCNAME_PATTERN
-# if defined(__hp9000s300) ||  (defined(__NetBSD__) && !defined(__ELF__)) || defined(__BORLANDC__) || (defined(__FreeBSD__) && !defined(__ELF__)) || (defined(__OpenBSD__) && !defined(__ELF__)) || defined(NeXT) || defined(__WATCOMC__) || defined(MACOSX_DYLD)
+# if defined(__hp9000s300) || ((defined(__NetBSD__) || defined(__FreeBSD__) || defined(__OpenBSD__)) && !defined(__ELF__)) || defined(__BORLANDC__) || defined(NeXT) || defined(__WATCOMC__) || defined(MACOSX_DYLD)
 #  define FUNCNAME_PATTERN "_Init_%s"
 # else
 #  define FUNCNAME_PATTERN "Init_%s"
 # endif
 #endif
 
-static int
+static size_t
 init_funcname_len(char **buf, const char *file)
 {
     char *p;
     const char *slash;
-    int len;
+    size_t len;
 
     /* Load the file as an object one */
     for (slash = file-1; *file; file++) /* Find position of last '/' */
-#ifdef __MACOS__
-	if (*file == ':') slash = file;
-#else
 	if (*file == '/') slash = file;
-#endif
 
     len = strlen(FUNCNAME_PATTERN) + strlen(slash + 1);
     *buf = xmalloc(len);
@@ -137,13 +115,13 @@ init_funcname_len(char **buf, const char *file)
 }
 
 #define init_funcname(buf, file) do {\
-    int len = init_funcname_len(buf, file);\
+    size_t len = init_funcname_len(buf, file);\
     char *tmp = ALLOCA_N(char, len+1);\
     if (!tmp) {\
 	free(*buf);\
 	rb_memerror();\
     }\
-    strcpy(tmp, *buf);\
+    strlcpy(tmp, *buf, len + 1);\
     free(*buf);\
     *buf = tmp;\
 } while (0)
@@ -461,14 +439,14 @@ undef_print(char *key, char *value)
 }
 
 static void
-dln_print_undef()
+dln_print_undef(void)
 {
     fprintf(stderr, " Undefined symbols:\n");
     st_foreach(undef_tbl, undef_print, NULL);
 }
 
 static void
-dln_undefined()
+dln_undefined(void)
 {
     if (undef_tbl->num_entries > 0) {
 	fprintf(stderr, "dln: Calling undefined function\n");
@@ -782,7 +760,7 @@ load_1(int fd, long disp, const char *need_init)
 		}
 	    } /* end.. look it up */
 	    else { /* is static */
-		switch (R_SYMBOL(rel)) { 
+		switch (R_SYMBOL(rel)) {
 		  case N_TEXT:
 		  case N_DATA:
 		    datum = block;
@@ -1116,15 +1094,6 @@ dln_sym(const char *name)
 #include <windows.h>
 #endif
 
-#ifdef _WIN32_WCE
-#undef FormatMessage
-#define FormatMessage FormatMessageA
-#undef LoadLibrary
-#define LoadLibrary LoadLibraryA
-#undef GetProcAddress
-#define GetProcAddress GetProcAddressA
-#endif
-
 static const char *
 dln_strerror(void)
 {
@@ -1183,7 +1152,7 @@ aix_loaderror(const char *pathname)
     char *message[8], errbuf[1024];
     int i,j;
 
-    struct errtab { 
+    struct errtab {
 	int errnum;
 	char *errstr;
     } load_errtab[] = {
@@ -1206,7 +1175,7 @@ aix_loaderror(const char *pathname)
 
     snprintf(errbuf, 1024, "load failed - %s ", pathname);
 
-    if (!loadquery(1, &message[0], sizeof(message))) 
+    if (!loadquery(1, &message[0], sizeof(message)))
 	ERRBUF_APPEND(strerror(errno));
     for(i = 0; message[i] && *message[i]; i++) {
 	int nerr = atoi(message[i]);
@@ -1214,7 +1183,7 @@ aix_loaderror(const char *pathname)
            if (nerr == load_errtab[i].errnum && load_errtab[i].errstr)
 		ERRBUF_APPEND(load_errtab[i].errstr);
 	}
-	while (isdigit(*message[i])) message[i]++; 
+	while (isdigit(*message[i])) message[i]++;
 	ERRBUF_APPEND(message[i]);
 	ERRBUF_APPEND("\n");
     }
@@ -1249,7 +1218,7 @@ dln_load(const char *file)
     /* Load the file as an object one */
     init_funcname(&buf, file);
 
-    strcpy(winfile, file);
+    strlcpy(winfile, file, sizeof(winfile));
 
     /* Load file */
     if ((handle = LoadLibrary(winfile)) == NULL) {
@@ -1300,6 +1269,11 @@ dln_load(const char *file)
 	}
 
 	init_fct = (void(*)())dlsym(handle, buf);
+#if defined __SYMBIAN32__
+	if (init_fct == NULL) {
+	    init_fct = (void(*)())dlsym(handle, "1"); /* Some Symbian versions do not support symbol table in DLL, ordinal numbers only */
+	}
+#endif
 	if (init_fct == NULL) {
 	    error = DLN_ERROR();
 	    dlclose(handle);
@@ -1359,7 +1333,7 @@ dln_load(const char *file)
 #define DLN_DEFINED
 /*----------------------------------------------------
    By SHIROYAMA Takayuki Psi@fortune.nest.or.jp
- 
+
    Special Thanks...
     Yu tomoak-i@is.aist-nara.ac.jp,
     Mi hisho@tasihara.nest.or.jp,
@@ -1374,9 +1348,9 @@ dln_load(const char *file)
 	char *object_files[2] = {NULL, NULL};
 
 	void (*init_fct)();
-	
+
 	object_files[0] = (char*)file;
-	
+
 	s = NXOpenFile(2,NX_WRITEONLY);
 
 	/* Load object file, if return value ==0 ,  load failed*/
@@ -1423,7 +1397,7 @@ dln_load(const char *file)
 	/* lookup the initial function */
 	if(!NSIsSymbolNameDefined(buf)) {
 	    rb_loaderror("Failed to lookup Init function %.200s",file);
-	}	
+	}
 	init_fct = NSAddressOfSymbol(NSLookupAndBindSymbol(buf));
 	(*init_fct)();
 
@@ -1445,7 +1419,7 @@ dln_load(const char *file)
 	rb_loaderror("Failed to load add_on %.200s error_code=%x",
 	  file, img_id);
       }
-      
+
       /* find symbol for module initialize function. */
       /* The Be Book KernelKit Images section described to use
 	 B_SYMBOL_TYPE_TEXT for symbol of function, not
@@ -1458,8 +1432,8 @@ dln_load(const char *file)
       if (err_stat != B_NO_ERROR) {
 	char real_name[MAXPATHLEN];
 
-	strcpy(real_name, buf);
-	strcat(real_name, "__Fv");
+	strlcpy(real_name, buf, MAXPATHLEN);
+	strlcat(real_name, "__Fv", MAXPATHLEN);
         err_stat = get_image_symbol(img_id, real_name,
 				    B_SYMBOL_TYPE_TEXT, (void **)&init_fct);
       }
@@ -1480,82 +1454,6 @@ dln_load(const char *file)
     }
 #endif /* __BEOS__*/
 
-#ifdef __MACOS__   /* Mac OS 9 or before */
-# define DLN_DEFINED
-    {
-      OSErr err;
-      FSSpec libspec;
-      CFragConnectionID connID;
-      Ptr mainAddr;
-      char errMessage[1024];
-      Boolean isfolder, didsomething;
-      Str63 fragname;
-      Ptr symAddr;
-      CFragSymbolClass class;
-      void (*init_fct)();
-      char fullpath[MAXPATHLEN];
-
-      strcpy(fullpath, file);
-
-      /* resolve any aliases to find the real file */
-      c2pstr(fullpath);
-      (void)FSMakeFSSpec(0, 0, fullpath, &libspec);
-      err = ResolveAliasFile(&libspec, 1, &isfolder, &didsomething);
-      if (err) {
-	  rb_loaderror("Unresolved Alias - %s", file);
-      }
-
-      /* Load the fragment (or return the connID if it is already loaded */
-      fragname[0] = 0;
-      err = GetDiskFragment(&libspec, 0, 0, fragname, 
-			    kLoadCFrag, &connID, &mainAddr,
-			    errMessage);
-      if (err) {
-	  p2cstr(errMessage);
-	  rb_loaderror("%s - %s",errMessage , file);
-      }
-
-      /* Locate the address of the correct init function */
-      c2pstr(buf);
-      err = FindSymbol(connID, buf, &symAddr, &class);
-      if (err) {
-	  rb_loaderror("Unresolved symbols - %s" , file);
-      }
-      init_fct = (void (*)())symAddr;
-      (*init_fct)();
-      return (void*)init_fct;
-    }
-#endif /* __MACOS__ */
-
-#if defined(__VMS)
-#define DLN_DEFINED
-    {
-	void *handle, (*init_fct)();
-	char *fname, *p1, *p2;
-
-	fname = (char *)__alloca(strlen(file)+1);
-	strcpy(fname,file);
-	if (p1 = strrchr(fname,'/'))
-	    fname = p1 + 1;
-	if (p2 = strrchr(fname,'.'))
-	    *p2 = '\0';
-
-	if ((handle = (void*)dlopen(fname, 0)) == NULL) {
-	    error = dln_strerror();
-	    goto failed;
-	}
-
-	if ((init_fct = (void (*)())dlsym(handle, buf)) == NULL) {
-	    error = DLN_ERROR();
-	    dlclose(handle);
-	    goto failed;
-	}
-	/* Call the init code */
-	(*init_fct)();
-	return handle;
-    }
-#endif /* __VMS */
-
 #ifndef DLN_DEFINED
     rb_notimplement();
 #endif
@@ -1571,17 +1469,17 @@ dln_load(const char *file)
     return 0;			/* dummy return */
 }
 
-static char *dln_find_1(const char *fname, const char *path, char *buf, int size, int exe_flag);
+static char *dln_find_1(const char *fname, const char *path, char *buf, size_t size, int exe_flag);
 
 char *
-dln_find_exe_r(const char *fname, const char *path, char *buf, int size)
+dln_find_exe_r(const char *fname, const char *path, char *buf, size_t size)
 {
     if (!path) {
 	path = getenv(PATH_ENV);
     }
 
     if (!path) {
-#if defined(MSDOS) || defined(_WIN32) || defined(__human68k__) || defined(__MACOS__)
+#if defined(_WIN32)
 	path = "/usr/local/bin;/usr/ucb;/usr/bin;/bin;.";
 #else
 	path = "/usr/local/bin:/usr/ucb:/usr/bin:/bin:.";
@@ -1591,15 +1489,10 @@ dln_find_exe_r(const char *fname, const char *path, char *buf, int size)
 }
 
 char *
-dln_find_file_r(const char *fname, const char *path, char *buf, int size)
+dln_find_file_r(const char *fname, const char *path, char *buf, size_t size)
 {
-#ifndef __MACOS__
     if (!path) path = ".";
     return dln_find_1(fname, path, buf, size, 0);
-#else
-    if (!path) path = ".";
-    return _macruby_path_conv_posix_to_macos(dln_find_1(fname, path, buf, size, 0));
-#endif
 }
 
 static char fbuf[MAXPATHLEN];
@@ -1617,38 +1510,90 @@ dln_find_file(const char *fname, const char *path)
 }
 
 static char *
-dln_find_1(const char *fname, const char *path, char *fbuf, int size,
+dln_find_1(const char *fname, const char *path, char *fbuf, size_t size,
 	   int exe_flag /* non 0 if looking for executable. */)
 {
     register const char *dp;
     register const char *ep;
     register char *bp;
     struct stat st;
-#ifdef __MACOS__
-    const char* mac_fullpath;
+    size_t i, fspace;
+#ifdef DOSISH
+    static const char extension[][5] = {
+	".exe", ".com", ".cmd", ".bat",
+    };
+    size_t j;
+    int is_abs = 0, has_path = 0;
+    const char *ext = 0;
+    const char *p = fname;
 #endif
 
 #define RETURN_IF(expr) if (expr) return (char *)fname;
 
     RETURN_IF(!fname);
+#ifdef DOSISH
+# ifndef CharNext
+# define CharNext(p) ((p)+1)
+# endif
+# ifdef DOSISH_DRIVE_LETTER
+    if (((p[0] | 0x20) - 'a') < 26  && p[1] == ':') {
+	p += 2;
+	is_abs = 1;
+    }
+# endif
+    switch (*p) {
+      case '/': case '\\':
+	is_abs = 1;
+	p++;
+    }
+    has_path = is_abs;
+    while (*p) {
+	switch (*p) {
+	  case '/': case '\\':
+	    has_path = 1;
+	    ext = 0;
+	    p++;
+	    break;
+	  case '.':
+	    ext = p;
+	    p++;
+	    break;
+	  default:
+	    p = CharNext(p);
+	}
+    }
+    if (ext) {
+	for (j = 0; STRCASECMP(ext, extension[j]); ) {
+	    if (++j == sizeof(extension) / sizeof(extension[0])) {
+		ext = 0;
+		break;
+	    }
+	}
+    }
+    ep = bp = 0;
+    if (!exe_flag) {
+	RETURN_IF(is_abs);
+    }
+    else if (has_path) {
+	RETURN_IF(ext);
+	i = p - fname;
+	if (i + 1 > size) goto toolong;
+	fspace = size - i - 1;
+	bp = fbuf;
+	ep = p;
+	memcpy(fbuf, fname, i + 1);
+	goto needs_extension;
+    }
+#endif
+
     RETURN_IF(fname[0] == '/');
     RETURN_IF(strncmp("./", fname, 2) == 0 || strncmp("../", fname, 3) == 0);
     RETURN_IF(exe_flag && strchr(fname, '/'));
-#ifdef DOSISH
-    RETURN_IF(fname[0] == '\\');
-# ifdef DOSISH_DRIVE_LETTER
-    RETURN_IF(strlen(fname) > 2 && fname[1] == ':');
-# endif
-    RETURN_IF(strncmp(".\\", fname, 2) == 0 || strncmp("..\\", fname, 3) == 0);
-    RETURN_IF(exe_flag && strchr(fname, '\\'));
-#endif
 
 #undef RETURN_IF
 
     for (dp = path;; dp = ++ep) {
-	register int l;
-	int i;
-	int fspace;
+	register size_t l;
 
 	/* extract a component */
 	ep = strchr(dp, PATH_SEP[0]);
@@ -1670,7 +1615,7 @@ dln_find_1(const char *fname, const char *path, char *fbuf, int size,
 
 	    if (*dp == '~' && (l == 1 ||
 #if defined(DOSISH)
-			       dp[1] == '\\' || 
+			       dp[1] == '\\' ||
 #endif
 			       dp[1] == '/')) {
 		char *home;
@@ -1678,8 +1623,9 @@ dln_find_1(const char *fname, const char *path, char *fbuf, int size,
 		home = getenv("HOME");
 		if (home != NULL) {
 		    i = strlen(home);
-		    if ((fspace -= i) < 0)
+		    if (fspace < i)
 			goto toolong;
+		    fspace -= i;
 		    memcpy(bp, home, i);
 		    bp += i;
 		}
@@ -1687,8 +1633,9 @@ dln_find_1(const char *fname, const char *path, char *fbuf, int size,
 		l--;
 	    }
 	    if (l > 0) {
-		if ((fspace -= l) < 0)
+		if (fspace < l)
 		    goto toolong;
+		fspace -= l;
 		memcpy(bp, dp, l);
 		bp += l;
 	    }
@@ -1700,7 +1647,7 @@ dln_find_1(const char *fname, const char *path, char *fbuf, int size,
 
 	/* now append the file name */
 	i = strlen(fname);
-	if ((fspace -= i) < 0) {
+	if (fspace < i) {
 	  toolong:
 	    fprintf(stderr, "openpath: pathname too long (ignored)\n");
 	    *bp = '\0';
@@ -1708,26 +1655,12 @@ dln_find_1(const char *fname, const char *path, char *fbuf, int size,
 	    fprintf(stderr, "\tFile \"%s\"\n", fname);
 	    goto next;
 	}
+	fspace -= i;
 	memcpy(bp, fname, i + 1);
 
 #if defined(DOSISH)
-	if (exe_flag) {
-	    static const char extension[][5] = {
-#if defined(MSDOS)
-		".com", ".exe", ".bat",
-#if defined(DJGPP)
-		".btm", ".sh", ".ksh", ".pl", ".sed",
-#endif
-#elif defined(__EMX__) || defined(_WIN32)
-		".exe", ".com", ".cmd", ".bat",
-/* end of __EMX__ or _WIN32 */
-#else
-		".r", ".R", ".x", ".X", ".bat", ".BAT",
-/* __human68k__ */
-#endif
-	    };
-	    int j;
-
+	if (exe_flag && !ext) {
+	  needs_extension:
 	    for (j = 0; j < sizeof(extension) / sizeof(extension[0]); j++) {
 		if (fspace < strlen(extension[j])) {
 		    fprintf(stderr, "openpath: pathname too long (ignored)\n");
@@ -1735,38 +1668,20 @@ dln_find_1(const char *fname, const char *path, char *fbuf, int size,
 		    fprintf(stderr, "\tFile \"%s%s\"\n", fname, extension[j]);
 		    continue;
 		}
-		strcpy(bp + i, extension[j]);
-#ifndef __MACOS__
+		strlcpy(bp + i, extension[j], fspace);
 		if (stat(fbuf, &st) == 0)
 		    return fbuf;
-#else
-		if (mac_fullpath = _macruby_exist_file_in_libdir_as_posix_name(fbuf))
-		    return mac_fullpath;
-
-#endif
 	    }
 	    goto next;
 	}
-#endif /* MSDOS or _WIN32 or __human68k__ or __EMX__ */
+#endif /* _WIN32 or __EMX__ */
 
-#ifndef __MACOS__
 	if (stat(fbuf, &st) == 0) {
 	    if (exe_flag == 0) return fbuf;
 	    /* looking for executable */
 	    if (!S_ISDIR(st.st_mode) && eaccess(fbuf, X_OK) == 0)
 		return fbuf;
 	}
-#else
-	if (mac_fullpath = _macruby_exist_file_in_libdir_as_posix_name(fbuf)) {
-	    if (exe_flag == 0) return mac_fullpath;
-	    /* looking for executable */
-	    if (stat(mac_fullpath, &st) == 0) {
-		if (!S_ISDIR(st.st_mode) && eaccess(mac_fullpath, X_OK) == 0)
-		    return mac_fullpath;
-	    }
-	}
-#endif
-
       next:
 	/* if not, and no other alternatives, life is bleak */
 	if (*ep == '\0') {

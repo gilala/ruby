@@ -29,7 +29,12 @@ class Tempfile < DelegateClass(File)
   # Dir::tmpdir provided by 'tmpdir.rb'.
   # When $SAFE > 0 and the given tmpdir is tainted, it uses
   # /tmp. (Note that ENV values are tainted by default)
-  def initialize(basename, tmpdir=Dir::tmpdir)
+  def initialize(basename, *rest)
+    # I wish keyword argument settled soon.
+    if opts = Hash.try_convert(rest[-1])
+      rest.pop
+    end
+    tmpdir = rest[0] || Dir::tmpdir
     if $SAFE > 0 and tmpdir.tainted?
       tmpdir = '/tmp'
     end
@@ -56,7 +61,12 @@ class Tempfile < DelegateClass(File)
     @clean_proc = Tempfile.callback(@data)
     ObjectSpace.define_finalizer(self, @clean_proc)
 
-    @tmpfile = File.open(tmpname, File::RDWR|File::CREAT|File::EXCL, 0600)
+    if opts.nil?
+      opts = []
+    else
+      opts = [opts]
+    end
+    @tmpfile = File.open(tmpname, File::RDWR|File::CREAT|File::EXCL, 0600, *opts)
     @tmpname = tmpname
     @@cleanlist << @tmpname
     @data[1] = @tmpfile
@@ -77,7 +87,7 @@ class Tempfile < DelegateClass(File)
     else
       prefix, suffix = basename, ''
     end
- 
+
     t = Time.now.strftime("%Y%m%d")
     path = "#{prefix}#{t}-#{$$}-#{rand(0x100000000).to_s(36)}-#{n}#{suffix}"
   end
@@ -126,7 +136,10 @@ class Tempfile < DelegateClass(File)
   def unlink
     # keep this order for thread safeness
     begin
-      File.unlink(@tmpname) if File.exist?(@tmpname)
+      if File.exist?(@tmpname)
+        closed? or close
+        File.unlink(@tmpname)
+      end
       @@cleanlist.delete(@tmpname)
       @data = @tmpname = nil
       ObjectSpace.undefine_finalizer(self)
@@ -157,7 +170,7 @@ class Tempfile < DelegateClass(File)
     def callback(data)	# :nodoc:
       pid = $$
       Proc.new {
-	if pid == $$ 
+	if pid == $$
 	  path, tmpfile, cleanlist = *data
 
 	  print "removing ", path, "..." if $DEBUG
@@ -177,7 +190,7 @@ class Tempfile < DelegateClass(File)
     #
     # If a block is given, it will be passed tempfile as an argument,
     # and the tempfile will automatically be closed when the block
-    # terminates.  In this case, open() returns nil.
+    # terminates.  The call returns the value of the block.
     def open(*args)
       tempfile = new(*args)
 

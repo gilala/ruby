@@ -22,14 +22,14 @@ require 'rdoc/stats'
 # following incantation
 #
 #   require "rdoc/parser"
-#   
+#
 #   class RDoc::Parser::Xyz < RDoc::Parser
 #     parse_files_matching /\.xyz$/ # <<<<
-#   
+#
 #     def initialize(file_name, body, options)
 #       ...
 #     end
-#   
+#
 #     def scan
 #       ...
 #     end
@@ -63,12 +63,11 @@ class RDoc::Parser
   end
 
   ##
-  # Shamelessly stolen from the ptools gem (since RDoc cannot depend on
-  # the gem).
+  # Return _true_ if the +file+ seems like binary.
 
   def self.binary?(file)
-    s = (File.read(file, File.stat(file).blksize) || "").split(//)
-    ((s.size - s.grep(" ".."~").size) / s.size.to_f) > 0.30
+    s = File.read(file, 1024) or return false
+    s.count("^ -~\t\r\n").fdiv(s.size) > 0.3 || s.index("\x00")
   end
   private_class_method :binary?
 
@@ -105,6 +104,13 @@ class RDoc::Parser
     end
 
     parser = can_parse file_name
+
+    #
+    # This method must return a parser.
+    #
+    if !parser then
+      parser = RDoc::Parser::Simple
+    end
 
     parser.new top_level, file_name, body, options, stats
   end

@@ -1,4 +1,3 @@
-require 'test/unit'
 require File.join(File.expand_path(File.dirname(__FILE__)), 'gemutilities')
 require 'rubygems/ext'
 
@@ -17,7 +16,7 @@ class TestGemExtConfigureBuilder < RubyGemTestCase
   end
 
   def test_self_build
-    return if RUBY_PLATFORM =~ /mswin/ # HACK
+    skip("test_self_build skipped on MS Windows (VC++)") if vc_windows?
 
     File.open File.join(@ext, './configure'), 'w' do |configure|
       configure.puts "#!/bin/sh\necho \"#{@makefile_body}\" > Makefile"
@@ -38,31 +37,36 @@ class TestGemExtConfigureBuilder < RubyGemTestCase
   end
 
   def test_self_build_fail
-    return if RUBY_PLATFORM =~ /mswin/ # HACK
+    skip("test_self_build_fail skipped on MS Windows (VC++)") if vc_windows?
     output = []
 
-    error = assert_raise Gem::InstallError do
+    error = assert_raises Gem::InstallError do
       Dir.chdir @ext do
         Gem::Ext::ConfigureBuilder.build nil, nil, @dest_path, output
       end
     end
 
-    shell_error_msg = %r{(\./configure: .*)|(Can't open \./configure)}
+    shell_error_msg = %r{(\./configure: .*)|(Can't open \./configure(?:: No such file or directory)?)}
     sh_prefix_configure = "sh ./configure --prefix="
 
     expected = %r(configure failed:
 
 #{Regexp.escape sh_prefix_configure}#{Regexp.escape @dest_path}
-.*?: #{shell_error_msg})
+.*?: #{shell_error_msg}
+)
 
     assert_match expected, error.message
 
     assert_equal "#{sh_prefix_configure}#{@dest_path}", output.shift
-    assert_match %r(#{shell_error_msg}\n), output.shift
+    assert_match %r(#{shell_error_msg}), output.shift
     assert_equal true, output.empty?
   end
 
   def test_self_build_has_makefile
+    if vc_windows? && !nmake_found?
+      skip("test_self_build_has_makefile skipped - nmake not found")
+    end
+
     File.open File.join(@ext, 'Makefile'), 'w' do |makefile|
       makefile.puts @makefile_body
     end
@@ -72,14 +76,8 @@ class TestGemExtConfigureBuilder < RubyGemTestCase
       Gem::Ext::ConfigureBuilder.build nil, nil, @dest_path, output
     end
 
-    case RUBY_PLATFORM
-    when /mswin/ then
-      assert_equal 'nmake', output[0]
-      assert_equal 'nmake install', output[2]
-    else
-      assert_equal 'make', output[0]
-      assert_equal 'make install', output[2]
-    end
+    assert_equal make_command, output[0]
+    assert_equal "#{make_command} install", output[2]
   end
 
 end

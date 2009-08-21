@@ -1,7 +1,19 @@
 @echo off
 :: usage: ifchange target temporary
 
-if "%1" == "" goto :end
+set timestamp=
+:optloop
+for %%I in (%1) do set opt=%%~I
+if "%opt%" == "--timestamp" (
+    set timestamp=.
+    shift
+    goto :optloop
+) else if "%opt:~0,12%" == "--timestamp=" (
+    set timestamp=%opt:~12%
+    shift
+    goto :optloop
+)
+if "%opt%" == "" goto :end
 
 set dest=%1
 set src=%2
@@ -47,13 +59,19 @@ goto :end
 if not exist %src% goto :end
 if exist %dest% (
     fc.exe %dest% %src% > nul && (
-	echo %dest% unchanged.
+	echo %1 unchanged.
 	del %src%
-	goto :end
+	goto :nt_end
     )
 )
-echo %dest% updated.
+echo %1 updated.
 copy %src% %dest% > nul
 del %src%
 
+:nt_end
+if "%timestamp%" == "" goto :end
+    if "%timestamp%" == "." (
+        for %%I in ("%dest%") do set timestamp=%%~dpI.time.%%~nxI
+    )
+    goto :end > "%timestamp%"
 :end

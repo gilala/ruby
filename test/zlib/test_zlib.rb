@@ -363,6 +363,34 @@ if defined? Zlib
         assert_equal(3, gz.tell)
       end
     end
+
+    def test_path
+      t = Tempfile.new("test_zlib_gzip_file")
+      t.close
+
+      gz = Zlib::GzipWriter.open(t.path)
+      gz.print("foo")
+      assert_equal(t.path, gz.path)
+      gz.close
+      assert_equal(t.path, gz.path)
+
+      f = Zlib::GzipReader.open(t.path)
+      assert_equal(t.path, f.path)
+      f.close
+      assert_equal(t.path, f.path)
+
+      s = ""
+      sio = StringIO.new(s)
+      gz = Zlib::GzipWriter.new(sio)
+      gz.print("foo")
+      assert_raise(NoMethodError) { gz.path }
+      gz.close
+
+      sio = StringIO.new(s)
+      f = Zlib::GzipReader.new(sio)
+      assert_raise(NoMethodError) { f.path }
+      f.close
+    end
   end
 
   class TestZlibGzipReader < Test::Unit::TestCase
@@ -470,8 +498,18 @@ if defined? Zlib
       Zlib::GzipWriter.open(t.path) {|gz| gz.print("foobar") }
 
       f = Zlib::GzipReader.open(t.path)
-      "foobar".each_byte {|c| assert_equal(c, f.getc) }
+      "foobar".each_char {|c| assert_equal(c, f.getc) }
       assert_nil(f.getc)
+    end
+
+    def test_getbyte
+      t = Tempfile.new("test_zlib_gzip_reader")
+      t.close
+      Zlib::GzipWriter.open(t.path) {|gz| gz.print("foobar") }
+
+      f = Zlib::GzipReader.open(t.path)
+      "foobar".each_byte {|c| assert_equal(c, f.getbyte) }
+      assert_nil(f.getbyte)
     end
 
     def test_readchar
@@ -480,7 +518,7 @@ if defined? Zlib
       Zlib::GzipWriter.open(t.path) {|gz| gz.print("foobar") }
 
       f = Zlib::GzipReader.open(t.path)
-      "foobar".each_byte {|c| assert_equal(c, f.readchar) }
+      "foobar".each_byte {|c| assert_equal(c, f.readchar.ord) }
       assert_raise(EOFError) { f.readchar }
     end
 

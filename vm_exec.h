@@ -9,8 +9,8 @@
 
 **********************************************************************/
 
-#ifndef RUBY_VM_H
-#define RUBY_VM_H
+#ifndef RUBY_VM_EXEC_H
+#define RUBY_VM_EXEC_H
 
 typedef long OFFSET;
 typedef unsigned long lindex_t;
@@ -58,9 +58,6 @@ typedef rb_iseq_t *ISEQ;
 
 #define throwdebug if(0)printf
 /* #define throwdebug printf */
-
-#define SDR2(cfp) vm_stack_dump_raw(GET_THREAD(), (cfp))
-
 
 /************************************************/
 #if   DISPATCH_XXX
@@ -184,4 +181,4 @@ default:                        \
 
 #define SCREG(r) (reg_##r)
 
-#endif /* RUBY_VM_H */
+#endif /* RUBY_VM_EXEC_H */

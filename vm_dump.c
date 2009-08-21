@@ -25,6 +25,7 @@ control_frame_dump(rb_thread_t *th, rb_control_frame_t *cfp)
     ptrdiff_t dfp = cfp->dfp - th->stack;
     char lfp_in_heap = ' ', dfp_in_heap = ' ';
     char posbuf[MAX_POSBUF+1];
+    int nopos = 0;
 
     const char *magic, *iseq_name = "-", *selfstr = "-", *biseq_name = "-";
     VALUE tmp;
@@ -33,11 +34,11 @@ control_frame_dump(rb_thread_t *th, rb_control_frame_t *cfp)
 	biseq_name = "";	/* RSTRING(cfp->block_iseq->name)->ptr; */
     }
 
-    if (lfp < 0 || lfp > th->stack_size) {
+    if (lfp < 0 || (size_t)lfp > th->stack_size) {
 	lfp = (ptrdiff_t)cfp->lfp;
 	lfp_in_heap = 'p';
     }
-    if (dfp < 0 || dfp > th->stack_size) {
+    if (dfp < 0 || (size_t)dfp > th->stack_size) {
 	dfp = (ptrdiff_t)cfp->dfp;
 	dfp_in_heap = 'p';
     }
@@ -60,6 +61,7 @@ control_frame_dump(rb_thread_t *th, rb_control_frame_t *cfp)
 	break;
       case VM_FRAME_MAGIC_FINISH:
 	magic = "FINISH";
+	nopos = 1;
 	break;
       case VM_FRAME_MAGIC_CFUNC:
 	magic = "CFUNC";
@@ -92,26 +94,27 @@ control_frame_dump(rb_thread_t *th, rb_control_frame_t *cfp)
 	selfstr = "";
     }
 
-    if (cfp->iseq != 0) {
+    if (nopos) {
+	/* no name */
+    }
+    else if (cfp->iseq != 0) {
 	if (RUBY_VM_IFUNC_P(cfp->iseq)) {
 	    iseq_name = "<ifunc>";
 	}
 	else {
-	    int vm_get_sourceline(rb_control_frame_t *);
+	    int rb_vm_get_sourceline(rb_control_frame_t *);
 
 	    pc = cfp->pc - cfp->iseq->iseq_encoded;
 	    iseq_name = RSTRING_PTR(cfp->iseq->name);
-	    line = vm_get_sourceline(cfp);
+	    line = rb_vm_get_sourceline(cfp);
 	    if (line) {
-		char fn[MAX_POSBUF+1];
-		snprintf(fn, MAX_POSBUF, "%s", RSTRING_PTR(cfp->iseq->filename));
-		snprintf(posbuf, MAX_POSBUF, "%s:%d", fn, line);
+		snprintf(posbuf, MAX_POSBUF, "%s:%d", RSTRING_PTR(cfp->iseq->filename), line);
 	    }
 	}
     }
-    else if (cfp->method_id) {
-	iseq_name = rb_id2name(cfp->method_id);
-	snprintf(posbuf, MAX_POSBUF, ":%s", rb_id2name(cfp->method_id));
+    else if (cfp->me) {
+	iseq_name = rb_id2name(cfp->me->original_id);
+	snprintf(posbuf, MAX_POSBUF, ":%s", rb_id2name(cfp->me->original_id));
 	line = -1;
     }
 
@@ -126,12 +129,12 @@ control_frame_dump(rb_thread_t *th, rb_control_frame_t *cfp)
     fprintf(stderr, "s:%04"PRIdPTRDIFF" b:%04d ", (cfp->sp - th->stack), bp);
     fprintf(stderr, lfp_in_heap == ' ' ? "l:%06"PRIdPTRDIFF" " : "l:%06"PRIxPTRDIFF" ", lfp % 10000);
     fprintf(stderr, dfp_in_heap == ' ' ? "d:%06"PRIdPTRDIFF" " : "d:%06"PRIxPTRDIFF" ", dfp % 10000);
-    fprintf(stderr, "%-6s ", magic);
-    if (line) {
-	fprintf(stderr, "%s", posbuf);
+    fprintf(stderr, "%-6s", magic);
+    if (line && !nopos) {
+	fprintf(stderr, " %s", posbuf);
     }
     if (0) {
-	fprintf(stderr, "             \t");
+	fprintf(stderr, "              \t");
 	fprintf(stderr, "iseq: %-24s ", iseq_name);
 	fprintf(stderr, "self: %-24s ", selfstr);
 	fprintf(stderr, "%-1s ", biseq_name);
@@ -140,7 +143,7 @@ control_frame_dump(rb_thread_t *th, rb_control_frame_t *cfp)
 }
 
 void
-vm_stack_dump_raw(rb_thread_t *th, rb_control_frame_t *cfp)
+rb_vmdebug_stack_dump_raw(rb_thread_t *th, rb_control_frame_t *cfp)
 {
 #if 0
     VALUE *sp = cfp->sp, *bp = cfp->bp;
@@ -177,14 +180,14 @@ vm_stack_dump_raw(rb_thread_t *th, rb_control_frame_t *cfp)
 }
 
 void
-vm_stack_dump_raw_current(void)
+rb_vmdebug_stack_dump_raw_current(void)
 {
     rb_thread_t *th = GET_THREAD();
-    vm_stack_dump_raw(th, th->cfp);
+    rb_vmdebug_stack_dump_raw(th, th->cfp);
 }
 
 void
-vm_env_dump_raw(rb_env_t *env, VALUE *lfp, VALUE *dfp)
+rb_vmdebug_env_dump_raw(rb_env_t *env, VALUE *lfp, VALUE *dfp)
 {
     int i;
     fprintf(stderr, "-- env --------------------\n");
@@ -193,7 +196,7 @@ vm_env_dump_raw(rb_env_t *env, VALUE *lfp, VALUE *dfp)
 	fprintf(stderr, "--\n");
 	for (i = 0; i < env->env_size; i++) {
 	    fprintf(stderr, "%04d: %08lx (%p)", -env->local_size + i, env->env[i],
-		   &env->env[i]);
+		   (void *)&env->env[i]);
 	    if (&env->env[i] == lfp)
 		fprintf(stderr, " <- lfp");
 	    if (&env->env[i] == dfp)
@@ -212,7 +215,7 @@ vm_env_dump_raw(rb_env_t *env, VALUE *lfp, VALUE *dfp)
 }
 
 void
-vm_proc_dump_raw(rb_proc_t *proc)
+rb_vmdebug_proc_dump_raw(rb_proc_t *proc)
 {
     rb_env_t *env;
     char *selfstr;
@@ -222,18 +225,19 @@ vm_proc_dump_raw(rb_proc_t *proc)
     fprintf(stderr, "-- proc -------------------\n");
     fprintf(stderr, "self: %s\n", selfstr);
     GetEnvPtr(proc->envval, env);
-    vm_env_dump_raw(env, proc->block.lfp, proc->block.dfp);
+    rb_vmdebug_env_dump_raw(env, proc->block.lfp, proc->block.dfp);
 }
 
 void
-vm_stack_dump_th(VALUE thval)
+rb_vmdebug_stack_dump_th(VALUE thval)
 {
     rb_thread_t *th;
     GetThreadPtr(thval, th);
-    vm_stack_dump_raw(th, th->cfp);
+    rb_vmdebug_stack_dump_raw(th, th->cfp);
 }
 
-void
+#if VMDEBUG > 2
+static void
 vm_stack_dump_each(rb_thread_t *th, rb_control_frame_t *cfp)
 {
     int i;
@@ -243,24 +247,19 @@ vm_stack_dump_each(rb_thread_t *th, rb_control_frame_t *cfp)
     VALUE *lfp = cfp->lfp;
     VALUE *dfp = cfp->dfp;
 
-    int argc = 0, local_size;
+    int argc = 0, local_size = 0;
     const char *name;
     rb_iseq_t *iseq = cfp->iseq;
 
     if (iseq == 0) {
 	if (RUBYVM_CFUNC_FRAME_P(cfp)) {
-	    argc = 0;
-	    local_size = 0;
-	    name = rb_id2name(cfp->method_id);
+	    name = rb_id2name(cfp->me->original_id);
 	}
 	else {
 	    name = "?";
-	    local_size = 0;
 	}
     }
     else if (RUBY_VM_IFUNC_P(iseq)) {
-	argc = 0;
-	local_size = 0;
 	name = "<ifunc>";
     }
     else {
@@ -292,12 +291,12 @@ vm_stack_dump_each(rb_thread_t *th, rb_control_frame_t *cfp)
 	for (i = 0; i < argc; i++) {
 	    rstr = rb_inspect(*ptr);
 	    fprintf(stderr, "  arg   %2d: %8s (%p)\n", i, StringValueCStr(rstr),
-		   ptr++);
+		   (void *)ptr++);
 	}
 	for (; i < local_size - 1; i++) {
 	    rstr = rb_inspect(*ptr);
 	    fprintf(stderr, "  local %2d: %8s (%p)\n", i, StringValueCStr(rstr),
-		   ptr++);
+		   (void *)ptr++);
 	}
 
 	ptr = cfp->bp;
@@ -324,10 +323,10 @@ vm_stack_dump_each(rb_thread_t *th, rb_control_frame_t *cfp)
 	rb_bug("unsupport frame type: %08lx", VM_FRAME_TYPE(cfp));
     }
 }
-
+#endif
 
 void
-vm_debug_print_register(rb_thread_t *th)
+rb_vmdebug_debug_print_register(rb_thread_t *th)
 {
     rb_control_frame_t *cfp = th->cfp;
     int pc = -1;
@@ -339,9 +338,9 @@ vm_debug_print_register(rb_thread_t *th)
 	pc = cfp->pc - cfp->iseq->iseq_encoded;
     }
 
-    if (lfp < 0 || lfp > th->stack_size)
+    if (lfp < 0 || (size_t)lfp > th->stack_size)
 	lfp = -1;
-    if (dfp < 0 || dfp > th->stack_size)
+    if (dfp < 0 || (size_t)dfp > th->stack_size)
 	dfp = -1;
 
     cfpi = ((rb_control_frame_t *)(th->stack + th->stack_size)) - cfp;
@@ -350,15 +349,15 @@ vm_debug_print_register(rb_thread_t *th)
 }
 
 void
-vm_thread_dump_regs(VALUE thval)
+rb_vmdebug_thread_dump_regs(VALUE thval)
 {
     rb_thread_t *th;
     GetThreadPtr(thval, th);
-    vm_debug_print_register(th);
+    rb_vmdebug_debug_print_register(th);
 }
 
 void
-vm_debug_print_pre(rb_thread_t *th, rb_control_frame_t *cfp)
+rb_vmdebug_debug_print_pre(rb_thread_t *th, rb_control_frame_t *cfp)
 {
     rb_iseq_t *iseq = cfp->iseq;
 
@@ -367,17 +366,17 @@ vm_debug_print_pre(rb_thread_t *th, rb_control_frame_t *cfp)
 	int pc = cfp->pc - iseq->iseq_encoded;
 
 	printf("%3"PRIdPTRDIFF" ", VM_CFP_CNT(th, cfp));
-	ruby_iseq_disasm_insn(0, seq, pc, iseq, 0);
+	rb_iseq_disasm_insn(0, seq, pc, iseq, 0);
     }
 
 #if VMDEBUG > 3
     fprintf(stderr, "        (1)");
-    vm_debug_print_register(th);
+    rb_vmdebug_debug_print_register(th);
 #endif
 }
 
 void
-vm_debug_print_post(rb_thread_t *th, rb_control_frame_t *cfp
+rb_vmdebug_debug_print_post(rb_thread_t *th, rb_control_frame_t *cfp
 #if OPT_STACK_CACHING
 		 , VALUE reg_a, VALUE reg_b
 #endif
@@ -389,7 +388,7 @@ vm_debug_print_post(rb_thread_t *th, rb_control_frame_t *cfp
 
 #if VMDEBUG > 3
     fprintf(stderr, "        (2)");
-    vm_debug_print_register(th);
+    rb_vmdebug_debug_print_register(th);
 #endif
     /* stack_dump_raw(th, cfp); */
 
@@ -551,7 +550,7 @@ vm_analysis_register(int reg, int isset)
 #endif
 
 VALUE
-vm_thread_dump_state(VALUE self)
+rb_vmdebug_thread_dump_state(VALUE self)
 {
     rb_thread_t *th;
     rb_control_frame_t *cfp;
@@ -559,43 +558,56 @@ vm_thread_dump_state(VALUE self)
     cfp = th->cfp;
 
     fprintf(stderr, "Thread state dump:\n");
-    fprintf(stderr, "pc : %p, sp : %p\n", cfp->pc, cfp->sp);
-    fprintf(stderr, "cfp: %p, lfp: %p, dfp: %p\n", cfp, cfp->lfp, cfp->dfp);
+    fprintf(stderr, "pc : %p, sp : %p\n", (void *)cfp->pc, (void *)cfp->sp);
+    fprintf(stderr, "cfp: %p, lfp: %p, dfp: %p\n", (void *)cfp, (void *)cfp->lfp, (void *)cfp->dfp);
 
     return Qnil;
 }
 
-VALUE rb_make_backtrace(void);
+static int
+bugreport_backtrace(void *arg, VALUE file, int line, VALUE method)
+{
+    if (!*(int *)arg) {
+	fprintf(stderr, "-- Ruby level backtrace information"
+		"-----------------------------------------\n");
+	*(int *)arg = 1;
+    }
+    fprintf(stderr, "%s:%d:in `%s'\n", RSTRING_PTR(file), line, RSTRING_PTR(method));
+    return 0;
+}
 
+#if HAVE_BACKTRACE
+#include <execinfo.h>
+#endif
 void
 rb_vm_bugreport(void)
 {
-    VALUE bt;
-
     if (GET_THREAD()->vm) {
 	int i;
 	SDR();
 
-	bt = rb_make_backtrace();
-	if (TYPE(bt) == T_ARRAY)
-	for (i = 0; i < RARRAY_LEN(bt); i++) {
-	    dp(RARRAY_PTR(bt)[i]);
+	if (rb_backtrace_each(bugreport_backtrace, &i)) {
+	    fputs("\n", stderr);
 	}
     }
 
 #if HAVE_BACKTRACE
-#include <execinfo.h>
 #define MAX_NATIVE_TRACE 1024
     {
 	static void *trace[MAX_NATIVE_TRACE];
 	int n = backtrace(trace, MAX_NATIVE_TRACE);
+	char **syms = backtrace_symbols(trace, n);
 	int i;
 
-	fprintf(stderr, "-- backtrace of native function call (Use addr2line) --\n");
-	for (i=0; i<n; i++) {
-	    fprintf(stderr, "%p\n", trace[i]);
+	fprintf(stderr, "-- C level backtrace information "
+		"-------------------------------------------\n");
+	if (syms) {
+	    for (i=0; i<n; i++) {
+		fprintf(stderr, "%s\n", syms[i]);
+	    }
+	    free(syms);
 	}
-	fprintf(stderr, "-------------------------------------------------------\n");
+	fprintf(stderr, "\n");
     }
 #endif
 }

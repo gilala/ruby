@@ -60,7 +60,7 @@ class TestRubyOptions < Test::Unit::TestCase
 
   def test_verbose
     assert_in_out_err(%w(-vve) + [""]) do |r, e|
-      assert_match(/^ruby #{RUBY_VERSION} .*? \[#{RUBY_PLATFORM}\]$/, r.join)
+      assert_match(/^ruby #{RUBY_VERSION}(?:[p ]|dev).*? \[#{RUBY_PLATFORM}\]$/, r.join)
       assert_equal RUBY_DESCRIPTION, r.join.chomp
       assert_equal([], e)
     end
@@ -106,7 +106,7 @@ class TestRubyOptions < Test::Unit::TestCase
 
   def test_version
     assert_in_out_err(%w(--version)) do |r, e|
-      assert_match(/^ruby #{RUBY_VERSION} .*? \[#{RUBY_PLATFORM}\]$/, r.join)
+      assert_match(/^ruby #{RUBY_VERSION}(?:[p ]|dev).*? \[#{RUBY_PLATFORM}\]$/, r.join)
       assert_equal RUBY_DESCRIPTION, r.join.chomp
       assert_equal([], e)
     end
@@ -208,8 +208,8 @@ class TestRubyOptions < Test::Unit::TestCase
     ENV['RUBYOPT'] = '-T4'
     assert_in_out_err([], "", [], /no program input from stdin allowed in tainted mode \(SecurityError\)/)
 
-    ENV['RUBYOPT'] = '-KN -Eus-ascii'
-    assert_in_out_err(%w(-KU -Eutf-8), "p '\u3042'") do |r, e|
+    ENV['RUBYOPT'] = '-Eus-ascii -KN'
+    assert_in_out_err(%w(-Eutf-8 -KU), "p '\u3042'") do |r, e|
       assert_equal("\"\u3042\"", r.join.force_encoding(Encoding::UTF_8))
       assert_equal([], e)
     end
@@ -258,10 +258,10 @@ class TestRubyOptions < Test::Unit::TestCase
 
   def test_shebang
     assert_in_out_err([], "#! /test_r_u_b_y_test_r_u_b_y_options_foobarbazqux\r\np 1\r\n",
-                      [], /Can't exec [\/\\]test_r_u_b_y_test_r_u_b_y_options_foobarbazqux \(fatal\)/)
+                      [], /: no Ruby script found in input/)
 
     assert_in_out_err([], "#! /test_r_u_b_y_test_r_u_b_y_options_foobarbazqux -foo -bar\r\np 1\r\n",
-                      [], /Can't exec [\/\\]test_r_u_b_y_test_r_u_b_y_options_foobarbazqux \(fatal\)/)
+                      [], /: no Ruby script found in input/)
 
     assert_in_out_err([], "#!ruby -KU -Eutf-8\r\np \"\u3042\"\r\n") do |r, e|
       assert_equal("\"\u3042\"", r.join.force_encoding(Encoding::UTF_8))
@@ -279,5 +279,16 @@ class TestRubyOptions < Test::Unit::TestCase
 
     assert_in_out_err(%w(- -#=foo), "#!ruby -s\n", [],
                       /invalid name for global variable - -# \(NameError\)/)
+  end
+
+  def test_indentation_check
+    t = Tempfile.new(["test_ruby_test_rubyoption", ".rb"])
+    t.puts "begin"
+    t.puts " end"
+    t.close
+    assert_in_out_err(["-w", t.path], "", [], /:2: warning: mismatched indentations at 'end' with 'begin' at 1/)
+    assert_in_out_err(["-wr", t.path, "-e", ""], "", [], /:2: warning: mismatched indentations at 'end' with 'begin' at 1/)
+  ensure
+    t.close(true) if t
   end
 end

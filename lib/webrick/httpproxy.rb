@@ -64,7 +64,7 @@ module WEBrick
 
     def proxy_service(req, res)
       # Proxy Authentication
-      proxy_auth(req, res)      
+      proxy_auth(req, res)
 
       begin
         self.send("do_#{req.request_method}", req, res)
@@ -81,7 +81,7 @@ module WEBrick
         handler.call(req, res)
       end
     end
-  
+
     def do_CONNECT(req, res)
       # Proxy Authentication
       proxy_auth(req, res)
@@ -146,11 +146,11 @@ module WEBrick
         while fds = IO::select([ua, os])
           if fds[0].member?(ua)
             buf = ua.sysread(1024);
-            @logger.debug("CONNECT: #{buf.size} byte from User-Agent")
+            @logger.debug("CONNECT: #{buf.bytesize} byte from User-Agent")
             os.syswrite(buf)
           elsif fds[0].member?(os)
             buf = os.sysread(1024);
-            @logger.debug("CONNECT: #{buf.size} byte from #{host}:#{port}")
+            @logger.debug("CONNECT: #{buf.bytesize} byte from #{host}:#{port}")
             ua.syswrite(buf)
           end
         end
@@ -264,7 +264,7 @@ module WEBrick
       http = Net::HTTP.new(uri.host, uri.port, upstream.host, upstream.port)
       http.start do
         if @config[:ProxyTimeout]
-          ##################################   these issues are 
+          ##################################   these issues are
           http.open_timeout = 30   # secs  #   necessary (maybe bacause
           http.read_timeout = 60   # secs  #   Ruby's bug, but why?)
           ##################################

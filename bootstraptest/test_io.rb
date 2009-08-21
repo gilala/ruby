@@ -11,19 +11,22 @@ assert_finish 5, %q{
 assert_finish 10, %q{
   begin
     require "io/nonblock"
-    r, w = IO.pipe
-    w.nonblock = true
-    w.write_nonblock("a" * 100000)
-    w.nonblock = false
-    t1 = Thread.new { w.write("b" * 4096) }
-    t2 = Thread.new { w.write("c" * 4096) }
-    sleep 0.5
-    r.sysread(4096).length
-    sleep 0.5
-    r.sysread(4096).length
-    t1.join
-    t2.join
-  rescue LoadError
+    require "timeout"
+    timeout(3) do
+      r, w = IO.pipe
+      w.nonblock = true
+      w.write_nonblock("a" * 100000)
+      w.nonblock = false
+      t1 = Thread.new { w.write("b" * 4096) }
+      t2 = Thread.new { w.write("c" * 4096) }
+      sleep 0.5
+      r.sysread(4096).length
+      sleep 0.5
+      r.sysread(4096).length
+      t1.join
+      t2.join
+    end
+  rescue LoadError, TimeoutError
   end
 }, '[ruby-dev:32566]'
 
@@ -92,3 +95,9 @@ assert_normal_exit %q{
     r1.close; w1.close
   }, '', ["INT"] or break
 end
+
+assert_normal_exit %q{
+  r, w = IO.pipe
+  STDOUT.reopen(w)
+  STDOUT.reopen(__FILE__, "r")
+}, '[ruby-dev:38131]'

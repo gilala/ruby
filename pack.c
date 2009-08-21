@@ -10,6 +10,7 @@
 **********************************************************************/
 
 #include "ruby/ruby.h"
+#include "ruby/encoding.h"
 #include <sys/types.h>
 #include <ctype.h>
 #include <errno.h>
@@ -362,7 +363,7 @@ num2i32(VALUE x)
 #endif
 static const char toofew[] = "too few arguments";
 
-static void encodes(VALUE,const char*,long,int);
+static void encodes(VALUE,const char*,long,int,int);
 static void qpencode(VALUE,VALUE,long);
 
 static unsigned long utf8_to_uv(const char*,long*);
@@ -414,7 +415,8 @@ static unsigned long utf8_to_uv(const char*,long*);
  *       L     |  Unsigned long
  *       l     |  Long
  *       M     |  Quoted printable, MIME encoding (see RFC2045)
- *       m     |  Base64 encoded string
+ *       m     |  Base64 encoded string (see RFC 2045, count is width)
+ *             |  (if count is 0, no line feed are added, see RFC 4648)
  *       N     |  Long, network (big-endian) byte order
  *       n     |  Short, network (big-endian) byte-order
  *       P     |  Pointer to a structure (fixed-length string)
@@ -442,6 +444,7 @@ pack_pack(VALUE ary, VALUE fmt)
     char type;
     long items, len, idx, plen;
     const char *ptr;
+    int enc_info = 1;		/* 0 - BINARY, 1 - US-ASCII, 2 - UTF-8 */
 #ifdef NATINT_PACK
     int natint;		/* native integer */
 #endif
@@ -488,7 +491,9 @@ pack_pack(VALUE ary, VALUE fmt)
 	    }
 	}
 	if (*p == '*') {	/* set data length */
-	    len = strchr("@Xxu", type) ? 0 : items;
+	    len = strchr("@Xxu", type) ? 0
+                : strchr("PMm", type) ? 1
+                : items;
 	    p++;
 	}
 	else if (ISDIGIT(*p)) {
@@ -502,6 +507,19 @@ pack_pack(VALUE ary, VALUE fmt)
 	    len = 1;
 	}
 
+	switch (type) {
+	  case 'U':
+	    /* if encoding is US-ASCII, upgrade to UTF-8 */
+	    if (enc_info == 1) enc_info = 2;
+	    break;
+	  case 'm': case 'M': case 'u':
+	    /* keep US-ASCII (do nothing) */
+	    break;
+	  default:
+	    /* fall back to BINARY */
+	    enc_info = 0;
+	    break;
+	}
 	switch (type) {
 	  case 'A': case 'a': case 'Z':
 	  case 'B': case 'b':
@@ -608,7 +626,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		    long i, j = 0;
 
 		    if (len > plen) {
-			j = (len - plen + 1)/2;
+			j = (len + 1) / 2 - (plen + 1) / 2;
 			len = plen;
 		    }
 		    for (i=0; i++ < len; ptr++) {
@@ -639,7 +657,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		    long i, j = 0;
 
 		    if (len > plen) {
-			j = (len - plen + 1)/2;
+			j = (len + 1) / 2 - (plen + 1) / 2;
 			len = plen;
 		    }
 		    for (i=0; i++ < len; ptr++) {
@@ -672,7 +690,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		char c;
 
 		from = NEXTFROM;
-		c = num2i32(from);
+		c = (char)num2i32(from);
 		rb_str_buf_cat(res, &c, sizeof(char));
 	    }
 	    break;
@@ -683,7 +701,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		short s;
 
 		from = NEXTFROM;
-		s = num2i32(from);
+		s = (short)num2i32(from);
 		rb_str_buf_cat(res, OFF16(&s), NATINT_LEN(short,2));
 	    }
 	    break;
@@ -726,7 +744,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		unsigned short s;
 
 		from = NEXTFROM;
-		s = num2i32(from);
+		s = (unsigned short)num2i32(from);
 		s = NATINT_HTONS(s);
 		rb_str_buf_cat(res, OFF16(&s), NATINT_LEN(short,2));
 	    }
@@ -748,7 +766,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		unsigned short s;
 
 		from = NEXTFROM;
-		s = num2i32(from);
+		s = (unsigned short)num2i32(from);
 		s = NATINT_HTOVS(s);
 		rb_str_buf_cat(res, OFF16(&s), NATINT_LEN(short,2));
 	    }
@@ -771,7 +789,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		float f;
 
 		from = NEXTFROM;
-		f = RFLOAT_VALUE(rb_Float(from));
+		f = (float)RFLOAT_VALUE(rb_to_float(from));
 		rb_str_buf_cat(res, (char*)&f, sizeof(float));
 	    }
 	    break;
@@ -782,7 +800,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		FLOAT_CONVWITH(ftmp);
 
 		from = NEXTFROM;
-		f = RFLOAT_VALUE(rb_Float(from));
+		f = (float)RFLOAT_VALUE(rb_to_float(from));
 		f = HTOVF(f,ftmp);
 		rb_str_buf_cat(res, (char*)&f, sizeof(float));
 	    }
@@ -794,7 +812,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		DOUBLE_CONVWITH(dtmp);
 
 		from = NEXTFROM;
-		d = RFLOAT_VALUE(rb_Float(from));
+		d = RFLOAT_VALUE(rb_to_float(from));
 		d = HTOVD(d,dtmp);
 		rb_str_buf_cat(res, (char*)&d, sizeof(double));
 	    }
@@ -806,7 +824,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		double d;
 
 		from = NEXTFROM;
-		d = RFLOAT_VALUE(rb_Float(from));
+		d = RFLOAT_VALUE(rb_to_float(from));
 		rb_str_buf_cat(res, (char*)&d, sizeof(double));
 	    }
 	    break;
@@ -817,7 +835,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		FLOAT_CONVWITH(ftmp);
 
 		from = NEXTFROM;
-		f = RFLOAT_VALUE(rb_Float(from));
+		f = (float)RFLOAT_VALUE(rb_to_float(from));
 		f = HTONF(f,ftmp);
 		rb_str_buf_cat(res, (char*)&f, sizeof(float));
 	    }
@@ -829,7 +847,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		DOUBLE_CONVWITH(dtmp);
 
 		from = NEXTFROM;
-		d = RFLOAT_VALUE(rb_Float(from));
+		d = RFLOAT_VALUE(rb_to_float(from));
 		d = HTOND(d,dtmp);
 		rb_str_buf_cat(res, (char*)&d, sizeof(double));
 	    }
@@ -887,6 +905,11 @@ pack_pack(VALUE ary, VALUE fmt)
 	    ptr = RSTRING_PTR(from);
 	    plen = RSTRING_LEN(from);
 
+	    if (len == 0 && type == 'm') {
+		encodes(res, ptr, plen, type, 0);
+		ptr += plen;
+		break;
+	    }
 	    if (len <= 2)
 		len = 45;
 	    else
@@ -898,7 +921,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		    todo = len;
 		else
 		    todo = plen;
-		encodes(res, ptr, todo, type);
+		encodes(res, ptr, todo, type, 1);
 		plen -= todo;
 		ptr += todo;
 	    }
@@ -967,7 +990,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		}
 
 		while (ul) {
-		    c = ((ul & 0x7f) | 0x80);
+		    c = (char)(ul & 0x7f) | 0x80;
 		    rb_str_buf_cat(buf, &c, sizeof(char));
 		    ul >>=  7;
 		}
@@ -998,6 +1021,18 @@ pack_pack(VALUE ary, VALUE fmt)
     if (associates) {
 	rb_str_associate(res, associates);
     }
+    OBJ_INFECT(res, fmt);
+    switch (enc_info) {
+      case 1:
+	ENCODING_CODERANGE_SET(res, rb_usascii_encindex(), ENC_CODERANGE_7BIT);
+	break;
+      case 2:
+	rb_enc_set_index(res, rb_utf8_encindex());
+	break;
+      default:
+	/* do nothing, keep ASCII-8BIT */
+	break;
+    }
     return res;
 }
 
@@ -1007,7 +1042,7 @@ static const char b64_table[] =
 "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 static void
-encodes(VALUE str, const char *s, long len, int type)
+encodes(VALUE str, const char *s, long len, int type, int tail_lf)
 {
     char buff[4096];
     long i = 0;
@@ -1015,7 +1050,7 @@ encodes(VALUE str, const char *s, long len, int type)
     int padding;
 
     if (type == 'u') {
-	buff[i++] = len + ' ';
+	buff[i++] = (char)len + ' ';
 	padding = '`';
     }
     else {
@@ -1048,7 +1083,7 @@ encodes(VALUE str, const char *s, long len, int type)
 	buff[i++] = padding;
 	buff[i++] = padding;
     }
-    buff[i++] = '\n';
+    if (tail_lf) buff[i++] = '\n';
     rb_str_buf_cat(str, buff, i);
 }
 
@@ -1127,7 +1162,7 @@ hex2num(char c)
 
 #define PACK_LENGTH_ADJUST_SIZE(sz) do {	\
     tmp = 0;					\
-    if (len > (send-s)/sz) {			\
+    if (len > (long)((send-s)/sz)) {		\
         if (!star) {				\
 	    tmp = len-(send-s)/sz;		\
         }					\
@@ -1242,7 +1277,8 @@ infected_str_new(const char *ptr, long len, VALUE str)
  *     -------+---------+-----------------------------------------
  *       M    | String  | quoted-printable
  *     -------+---------+-----------------------------------------
- *       m    | String  | base64-encoded
+ *       m    | String  | base64-encoded (RFC 2045) (default)
+ *            |         | base64-encoded (RFC 4648) if followed by 0
  *     -------+---------+-----------------------------------------
  *       N    | Integer | treat four characters as an unsigned
  *            |         | long in network byte order
@@ -1771,9 +1807,9 @@ pack_unpack(VALUE str, VALUE fmt)
 			    d = (*s++ - ' ') & 077;
 			else
 			    d = 0;
-			hunk[0] = a << 2 | b >> 4;
-			hunk[1] = b << 4 | c >> 2;
-			hunk[2] = c << 6 | d;
+			hunk[0] = (char)(a << 2 | b >> 4);
+			hunk[1] = (char)(b << 4 | c >> 2);
+			hunk[2] = (char)(c << 6 | d);
 			memcpy(ptr, hunk, mlen);
 			ptr += mlen;
 			len -= mlen;
@@ -1793,7 +1829,7 @@ pack_unpack(VALUE str, VALUE fmt)
 	    {
 		VALUE buf = infected_str_new(0, (send - s)*3/4, str);
 		char *ptr = RSTRING_PTR(buf);
-		int a = -1,b = -1,c = 0,d;
+		int a = -1,b = -1,c = 0,d = 0;
 		static signed char b64_xtable[256];
 
 		if (b64_xtable['/'] <= 0) {
@@ -1806,30 +1842,62 @@ pack_unpack(VALUE str, VALUE fmt)
 			b64_xtable[(unsigned char)b64_table[i]] = i;
 		    }
 		}
-		while (s < send) {
-		    a = b = c = d = -1;
-		    while ((a = b64_xtable[(unsigned char)*s]) == -1 && s < send) {s++;}
-		    if (s >= send) break;
-		    s++;
-		    while ((b = b64_xtable[(unsigned char)*s]) == -1 && s < send) {s++;}
-		    if (s >= send) break;
-		    s++;
-		    while ((c = b64_xtable[(unsigned char)*s]) == -1 && s < send) {if (*s == '=') break; s++;}
-		    if (*s == '=' || s >= send) break;
-		    s++;
-		    while ((d = b64_xtable[(unsigned char)*s]) == -1 && s < send) {if (*s == '=') break; s++;}
-		    if (*s == '=' || s >= send) break;
-		    s++;
-		    *ptr++ = a << 2 | b >> 4;
-		    *ptr++ = b << 4 | c >> 2;
-		    *ptr++ = c << 6 | d;
-		}
-		if (a != -1 && b != -1) {
-		    if (c == -1 && *s == '=')
-			*ptr++ = a << 2 | b >> 4;
-		    else if (c != -1 && *s == '=') {
+		if (len == 0) {
+		    while (s < send) {
+			a = b = c = d = -1;
+			a = b64_xtable[(unsigned char)*s++];
+			if (s >= send || a == -1) rb_raise(rb_eArgError, "invalid base64");
+			b = b64_xtable[(unsigned char)*s++];
+			if (s >= send || b == -1) rb_raise(rb_eArgError, "invalid base64");
+			if (*s == '=') {
+			    if (s + 2 == send && *(s + 1) == '=') break;
+			    rb_raise(rb_eArgError, "invalid base64");
+			}
+			c = b64_xtable[(unsigned char)*s++];
+			if (s >= send || c == -1) rb_raise(rb_eArgError, "invalid base64");
+			if (s + 1 == send && *s == '=') break;
+			d = b64_xtable[(unsigned char)*s++];
+			if (d == -1) rb_raise(rb_eArgError, "invalid base64");
 			*ptr++ = a << 2 | b >> 4;
 			*ptr++ = b << 4 | c >> 2;
+			*ptr++ = c << 6 | d;
+		    }
+		    if (c == -1) {
+			*ptr++ = a << 2 | b >> 4;
+			if (b & 0xf) rb_raise(rb_eArgError, "invalid base64");
+		    }
+		    else if (d == -1) {
+			*ptr++ = a << 2 | b >> 4;
+			*ptr++ = b << 4 | c >> 2;
+			if (c & 0x3) rb_raise(rb_eArgError, "invalid base64");
+		    }
+		}
+		else {
+		    while (s < send) {
+			a = b = c = d = -1;
+			while ((a = b64_xtable[(unsigned char)*s]) == -1 && s < send) {s++;}
+			if (s >= send) break;
+			s++;
+			while ((b = b64_xtable[(unsigned char)*s]) == -1 && s < send) {s++;}
+			if (s >= send) break;
+			s++;
+			while ((c = b64_xtable[(unsigned char)*s]) == -1 && s < send) {if (*s == '=') break; s++;}
+			if (*s == '=' || s >= send) break;
+			s++;
+			while ((d = b64_xtable[(unsigned char)*s]) == -1 && s < send) {if (*s == '=') break; s++;}
+			if (*s == '=' || s >= send) break;
+			s++;
+			*ptr++ = a << 2 | b >> 4;
+			*ptr++ = b << 4 | c >> 2;
+			*ptr++ = c << 6 | d;
+		    }
+		    if (a != -1 && b != -1) {
+			if (c == -1 && *s == '=')
+			    *ptr++ = a << 2 | b >> 4;
+			else if (c != -1 && *s == '=') {
+			    *ptr++ = a << 2 | b >> 4;
+			    *ptr++ = b << 4 | c >> 2;
+			}
 		    }
 		}
 		rb_str_set_len(buf, ptr - RSTRING_PTR(buf));
@@ -1861,6 +1929,7 @@ pack_unpack(VALUE str, VALUE fmt)
 		    s++;
 		}
 		rb_str_set_len(buf, ptr - RSTRING_PTR(buf));
+		ENCODING_CODERANGE_SET(buf, rb_usascii_encindex(), ENC_CODERANGE_7BIT);
 		UNPACK_PUSH(buf);
 	    }
 	    break;
@@ -1921,7 +1990,7 @@ pack_unpack(VALUE str, VALUE fmt)
 	    break;
 
 	  case 'p':
-	    if (len > (send - s) / sizeof(char *))
+	    if (len > (long)((send - s) / sizeof(char *)))
 		len = (send - s) / sizeof(char *);
 	    while (len-- > 0) {
 		if (send - s < sizeof(char *))
@@ -2006,38 +2075,38 @@ rb_uv_to_utf8(char buf[6], unsigned long uv)
 	return 1;
     }
     if (uv <= 0x7ff) {
-	buf[0] = ((uv>>6)&0xff)|0xc0;
-	buf[1] = (uv&0x3f)|0x80;
+	buf[0] = (char)((uv>>6)&0xff)|0xc0;
+	buf[1] = (char)(uv&0x3f)|0x80;
 	return 2;
     }
     if (uv <= 0xffff) {
-	buf[0] = ((uv>>12)&0xff)|0xe0;
-	buf[1] = ((uv>>6)&0x3f)|0x80;
-	buf[2] = (uv&0x3f)|0x80;
+	buf[0] = (char)((uv>>12)&0xff)|0xe0;
+	buf[1] = (char)((uv>>6)&0x3f)|0x80;
+	buf[2] = (char)(uv&0x3f)|0x80;
 	return 3;
     }
     if (uv <= 0x1fffff) {
-	buf[0] = ((uv>>18)&0xff)|0xf0;
-	buf[1] = ((uv>>12)&0x3f)|0x80;
-	buf[2] = ((uv>>6)&0x3f)|0x80;
-	buf[3] = (uv&0x3f)|0x80;
+	buf[0] = (char)((uv>>18)&0xff)|0xf0;
+	buf[1] = (char)((uv>>12)&0x3f)|0x80;
+	buf[2] = (char)((uv>>6)&0x3f)|0x80;
+	buf[3] = (char)(uv&0x3f)|0x80;
 	return 4;
     }
     if (uv <= 0x3ffffff) {
-	buf[0] = ((uv>>24)&0xff)|0xf8;
-	buf[1] = ((uv>>18)&0x3f)|0x80;
-	buf[2] = ((uv>>12)&0x3f)|0x80;
-	buf[3] = ((uv>>6)&0x3f)|0x80;
-	buf[4] = (uv&0x3f)|0x80;
+	buf[0] = (char)((uv>>24)&0xff)|0xf8;
+	buf[1] = (char)((uv>>18)&0x3f)|0x80;
+	buf[2] = (char)((uv>>12)&0x3f)|0x80;
+	buf[3] = (char)((uv>>6)&0x3f)|0x80;
+	buf[4] = (char)(uv&0x3f)|0x80;
 	return 5;
     }
     if (uv <= 0x7fffffff) {
-	buf[0] = ((uv>>30)&0xff)|0xfc;
-	buf[1] = ((uv>>24)&0x3f)|0x80;
-	buf[2] = ((uv>>18)&0x3f)|0x80;
-	buf[3] = ((uv>>12)&0x3f)|0x80;
-	buf[4] = ((uv>>6)&0x3f)|0x80;
-	buf[5] = (uv&0x3f)|0x80;
+	buf[0] = (char)((uv>>30)&0xff)|0xfc;
+	buf[1] = (char)((uv>>24)&0x3f)|0x80;
+	buf[2] = (char)((uv>>18)&0x3f)|0x80;
+	buf[3] = (char)((uv>>12)&0x3f)|0x80;
+	buf[4] = (char)((uv>>6)&0x3f)|0x80;
+	buf[5] = (char)(uv&0x3f)|0x80;
 	return 6;
     }
     rb_raise(rb_eRangeError, "pack(U): value out of range");

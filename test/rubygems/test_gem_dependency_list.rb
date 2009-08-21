@@ -1,12 +1,9 @@
-#!/usr/bin/env ruby
 #--
 # Copyright 2006 by Chad Fowler, Rich Kilmer, Jim Weirich and others.
 # All rights reserved.
 # See LICENSE.txt for permissions.
 #++
 
-
-require 'test/unit'
 require File.join(File.expand_path(File.dirname(__FILE__)), 'gemutilities')
 require 'rubygems/dependency_list'
 
@@ -108,7 +105,7 @@ class TestGemDependencyList < RubyGemTestCase
 
     @deplist.add @b2
 
-    assert ! @deplist.ok?, 'unsatisfied dependency'
+    refute @deplist.ok?, 'unsatisfied dependency'
 
     @deplist.add @a1
 
@@ -147,7 +144,7 @@ class TestGemDependencyList < RubyGemTestCase
 
     @deplist.add @b2
 
-    assert ! @deplist.ok_to_remove?("a-1")
+    refute @deplist.ok_to_remove?("a-1")
 
     @deplist.add @a2
 
@@ -164,7 +161,7 @@ class TestGemDependencyList < RubyGemTestCase
 
     @deplist.remove_by_name("a-1")
 
-    assert ! @deplist.ok_to_remove?("a-2")
+    refute @deplist.ok_to_remove?("a-2")
   end
 
   def test_remove_by_name
@@ -172,7 +169,7 @@ class TestGemDependencyList < RubyGemTestCase
 
     @deplist.remove_by_name "a-1"
 
-    assert ! @deplist.ok?
+    refute @deplist.ok?
   end
 
   def test_tsort_each_node
@@ -184,7 +181,7 @@ class TestGemDependencyList < RubyGemTestCase
       assert_equal order.shift, node.full_name
     end
 
-    assert order.empty?
+    assert_empty order
   end
 
   def test_tsort_each_child
@@ -196,7 +193,7 @@ class TestGemDependencyList < RubyGemTestCase
       assert_equal order.shift, node.full_name
     end
 
-    assert order.empty?
+    assert_empty order
   end
 
   # d1 -> b1 -> a1

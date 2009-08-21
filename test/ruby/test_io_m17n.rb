@@ -59,7 +59,7 @@ EOT
     with_tmpdir {
       generate_file('tmp', "")
       open("tmp", "rb") {|f|
-        assert_equal(Encoding.default_external, f.external_encoding)
+        assert_equal(Encoding.find("ASCII-8BIT"), f.external_encoding)
         assert_equal(nil, f.internal_encoding)
       }
     }
@@ -137,7 +137,7 @@ EOT
   def test_open_wb
     with_tmpdir {
       open("tmp", "wb") {|f|
-        assert_equal(nil, f.external_encoding)
+        assert_equal(Encoding.find("ASCII-8BIT"), f.external_encoding)
         assert_equal(nil, f.internal_encoding)
       }
     }
@@ -576,7 +576,7 @@ EOT
       with_pipe(enc) {|r, w|
         w << "\xc2\xa1"
         w.close
-        s = r.getc 
+        s = r.getc
         assert_equal(enc, s.encoding)
       }
     }
@@ -677,8 +677,7 @@ EOT
   end
 
   def test_getc_invalid3
-    with_pipe("utf-16le:euc-jp") {|r, w|
-      w.binmode
+    with_pipe("utf-16le:euc-jp", binmode: true) {|r, w|
       before1 = "\x42\x30".force_encoding("utf-16le")
       before2 = "\x44\x30".force_encoding("utf-16le")
       invalid = "\x00\xd8".force_encoding("utf-16le")
@@ -898,7 +897,7 @@ EOT
           STDIN.reopen(io)
           STDIN.external_encoding
           STDIN.write "\u3042"
-          STDIN.flush 
+          STDIN.flush
         End
         Process.wait pid
         f.rewind
@@ -1315,7 +1314,7 @@ EOT
       #   0xA1F1        0xC2A2          U+00A2
 
       open("t","rt") {|f| assert_equal("a\nb\nc\n\xc2\xa2".force_encoding(Encoding.default_external), f.read) }
-      open("t","rb") {|f| assert_equal("a\rb\r\nc\n\xc2\xa2".force_encoding(Encoding.default_external), f.read) }
+      open("t","rb") {|f| assert_equal("a\rb\r\nc\n\xc2\xa2".force_encoding(Encoding::ASCII_8BIT), f.read) }
 
       open("t","rt:euc-jp") {|f| assert_equal("a\nb\nc\n\xc2\xa2".force_encoding("EUC-JP"), f.read) }
       open("t","rb:euc-jp") {|f| assert_equal("a\rb\r\nc\n\xc2\xa2".force_encoding("EUC-JP"), f.read) }
@@ -1361,7 +1360,7 @@ EOT
       }
       content = File.read("t", :mode=>"rb:ascii-8bit")
       assert_equal(expected.dup.force_encoding("ascii-8bit"),
-                   content.force_encoding("ascii-8bit")) 
+                   content.force_encoding("ascii-8bit"))
     }
   end
 
@@ -1539,6 +1538,20 @@ EOT
     }
   end
 
+  def test_binmode3
+    with_tmpdir {
+      src = "\u3042\r\n"
+      generate_file("t.txt", src)
+      srcbin = src.dup.force_encoding("ascii-8bit")
+      open("t.txt", "rt:utf-8:euc-jp") {|f|
+        f.binmode
+        result = f.read
+        assert_str_equal(srcbin, result)
+        assert_equal(Encoding::ASCII_8BIT, result.encoding)
+      }
+    }
+  end
+
   def test_invalid_r
     with_tmpdir {
       generate_file("t.txt", "a\x80b")
@@ -1569,11 +1582,11 @@ EOT
         assert_equal("ab", f.read)
       }
       open("t.txt", "r:utf-8:euc-jp", :invalid => :replace) {|f|
-        assert_raise(Encoding::ConversionUndefinedError) { f.read }
+        assert_raise(Encoding::UndefinedConversionError) { f.read }
         assert_equal("b", f.read)
       }
       open("t.txt", "r:utf-8:euc-jp", :invalid => :replace, :replace => "") {|f|
-        assert_raise(Encoding::ConversionUndefinedError) { f.read }
+        assert_raise(Encoding::UndefinedConversionError) { f.read }
         assert_equal("b", f.read)
       }
     }
@@ -1613,10 +1626,10 @@ EOT
       }
       assert_equal("ab", File.read("t.txt"))
       open("t.txt", "w:euc-jp:utf-8", :invalid => :replace) {|f|
-        assert_raise(Encoding::ConversionUndefinedError) { f.write "a\uFFFDb" }
+        assert_raise(Encoding::UndefinedConversionError) { f.write "a\uFFFDb" }
       }
       open("t.txt", "w:euc-jp:utf-8", :invalid => :replace, :replace => "") {|f|
-        assert_raise(Encoding::ConversionUndefinedError) { f.write "a\uFFFDb" }
+        assert_raise(Encoding::UndefinedConversionError) { f.write "a\uFFFDb" }
       }
     }
   end
@@ -1633,10 +1646,10 @@ EOT
       }
       assert_equal("ab", File.read("t.txt"))
       open("t.txt", "w:iso-2022-jp:utf-8", :invalid => :replace) {|f|
-        assert_raise(Encoding::ConversionUndefinedError) { f.write "a\uFFFDb" }
+        assert_raise(Encoding::UndefinedConversionError) { f.write "a\uFFFDb" }
       }
       open("t.txt", "w:iso-2022-jp:utf-8", :invalid => :replace, :replace => "") {|f|
-        assert_raise(Encoding::ConversionUndefinedError) { f.write "a\uFFFDb" }
+        assert_raise(Encoding::UndefinedConversionError) { f.write "a\uFFFDb" }
       }
     }
   end
@@ -1676,6 +1689,20 @@ EOT
       }
       content = File.read("iso-2022-jp.txt", :mode=>"rb:ascii-8bit")
       assert_equal("\"&#x4E02;\"".force_encoding("ascii-8bit"), content)
+    }
+  end
+
+  def test_strip_bom
+    with_tmpdir {
+      text = "\uFEFFa"
+      %w/UTF-8 UTF-16BE UTF-16LE UTF-32BE UTF-32LE/.each do |name|
+        path = '%s-bom.txt' % name
+        content = text.encode(name)
+        generate_file(path, content)
+        result = File.read(path, mode: 'rb:BOM|UTF-8')
+        assert_equal(content[1].force_encoding("ascii-8bit"),
+                     result.force_encoding("ascii-8bit"))
+      end
     }
   end
 end

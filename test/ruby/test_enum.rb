@@ -48,6 +48,7 @@ class TestEnumerable < Test::Unit::TestCase
     assert_equal(1, @obj.find_index {|x| x % 2 == 0 })
     assert_equal(nil, @obj.find_index {|x| false })
     assert_raise(ArgumentError) { @obj.find_index(0, 1) }
+    assert_equal(1, @obj.find_index(2) {|x| x == 1 })
   end
 
   def test_find_all
@@ -211,6 +212,18 @@ class TestEnumerable < Test::Unit::TestCase
     a = []
     @obj.zip([:a, :b, :c]) {|x,y| a << [x, y] }
     assert_equal([[1,:a],[2,:b],[3,:c],[1,nil],[2,nil]], a)
+
+    a = []
+    @obj.zip({a: "A", b: "B", c: "C"}) {|x,y| a << [x, y] }
+    assert_equal([[1,[:a,"A"]],[2,[:b,"B"]],[3,[:c,"C"]],[1,nil],[2,nil]], a)
+
+    ary = Object.new
+    def ary.to_a;   [1, 2]; end
+    assert_raise(NoMethodError){ %w(a b).zip(ary) }
+    def ary.each; [3, 4].each{|e|yield e}; end
+    assert_equal([[1, 3], [2, 4], [3, nil], [1, nil], [2, nil]], @obj.zip(ary))
+    def ary.to_ary; [5, 6]; end
+    assert_equal([[1, 5], [2, 6], [3, nil], [1, nil], [2, nil]], @obj.zip(ary))
   end
 
   def test_take
@@ -265,5 +278,41 @@ class TestEnumerable < Test::Unit::TestCase
       [o, o, o].sort_by {|x| x }
       c.call
     end
+  end
+
+  def test_reverse_each
+    assert_equal([2,1,3,2,1], @obj.reverse_each.to_a)
+  end
+
+  def test_join
+    ofs = $,
+    assert_equal("abc", ("a".."c").join(""))
+    assert_equal("a-b-c", ("a".."c").join("-"))
+    $, = "-"
+    assert_equal("a-b-c", ("a".."c").join())
+    $, = nil
+    assert_equal("abc", ("a".."c").join())
+    assert_equal("123", (1..3).join())
+    assert_raise(TypeError, '[ruby-core:24172]') {("a".."c").join(1)}
+    class << (e = Object.new.extend(Enumerable))
+      def each
+        yield self
+      end
+    end
+    assert_raise(ArgumentError){e.join("")}
+    assert_raise(ArgumentError){[e].join("")}
+    e = Class.new {
+      include Enumerable
+      def initialize(*args)
+        @e = args
+      end
+      def each
+        @e.each {|e| yield e}
+      end
+    }
+    e = e.new(1, e.new(2, e.new(3, e.new(4, 5))))
+    assert_equal("1:2:3:4:5", e.join(':'), '[ruby-core:24196]')
+  ensure
+    $, = ofs
   end
 end

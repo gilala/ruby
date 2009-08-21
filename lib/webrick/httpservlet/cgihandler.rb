@@ -1,11 +1,11 @@
-# 
+#
 # cgihandler.rb -- CGIHandler Class
-#       
+#
 # Author: IPR -- Internet Programming with Ruby -- writers
 # Copyright (c) 2001 TAKAHASHI Masayoshi, GOTOU Yuuzou
 # Copyright (c) 2002 Internet Programming with Ruby writers. All rights
 # reserved.
-#   
+#
 # $IPR: cgihandler.rb,v 1.27 2003/03/21 19:56:01 gotoyuzo Exp $
 
 require 'rbconfig'
@@ -48,14 +48,14 @@ module WEBrick
           end
           dump = Marshal.dump(meta)
 
-          cgi_in.write("%8d" % cgi_out.path.size)
+          cgi_in.write("%8d" % cgi_out.path.bytesize)
           cgi_in.write(cgi_out.path)
-          cgi_in.write("%8d" % cgi_err.path.size)
+          cgi_in.write("%8d" % cgi_err.path.bytesize)
           cgi_in.write(cgi_err.path)
-          cgi_in.write("%8d" % dump.size)
+          cgi_in.write("%8d" % dump.bytesize)
           cgi_in.write(dump)
 
-          if req.body and req.body.size > 0
+          if req.body and req.body.bytesize > 0
             cgi_in.write(req.body)
           end
         ensure
@@ -65,19 +65,19 @@ module WEBrick
           data = cgi_out.read
           cgi_out.close(true)
           if errmsg = cgi_err.read
-            if errmsg.size > 0
+            if errmsg.bytesize > 0
               @logger.error("CGIHandler: #{@script_filename}:\n" + errmsg)
             end
-          end 
+          end
           cgi_err.close(true)
         end
-        
+
         if status != 0
           @logger.error("CGIHandler: #{@script_filename} exit with #{status}")
         end
 
         data = "" unless data
-        raw_header, body = data.split(/^[\xd\xa]+/, 2) 
+        raw_header, body = data.split(/^[\xd\xa]+/, 2)
         raise HTTPStatus::InternalServerError,
           "Premature end of script headers: #{@script_filename}" if body.nil?
 

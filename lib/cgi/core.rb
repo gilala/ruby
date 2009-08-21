@@ -13,7 +13,7 @@ class CGI
 
   REVISION = '$Id$' #:nodoc:
 
-  NEEDS_BINMODE = true if /WIN/i.match(RUBY_PLATFORM) 
+  NEEDS_BINMODE = true if /WIN/i.match(RUBY_PLATFORM)
 
   # Path separators in different environments.
   PATH_SEPARATOR = {'UNIX'=>'/', 'WINDOWS'=>'\\', 'MACINTOSH'=>':'}
@@ -33,7 +33,7 @@ class CGI
     "METHOD_NOT_ALLOWED"  => "405 Method Not Allowed",
     "NOT_ACCEPTABLE"      => "406 Not Acceptable",
     "LENGTH_REQUIRED"     => "411 Length Required",
-    "PRECONDITION_FAILED" => "412 Rrecondition Failed",
+    "PRECONDITION_FAILED" => "412 Precondition Failed",
     "SERVER_ERROR"        => "500 Internal Server Error",
     "NOT_IMPLEMENTED"     => "501 Method Not Implemented",
     "BAD_GATEWAY"         => "502 Bad Gateway",
@@ -48,7 +48,7 @@ class CGI
 
   # :startdoc:
 
-  def env_table 
+  def env_table
     ENV
   end
 
@@ -79,7 +79,7 @@ class CGI
   # status:: the HTTP status code, returned as the Status header.  See the
   #          list of available status codes below.
   # server:: the server software, returned as the Server header.
-  # connection:: the connection type, returned as the Connection header (for 
+  # connection:: the connection type, returned as the Connection header (for
   #              instance, "close".
   # length:: the length of the content that will be sent, returned as the
   #          Content-Length header.
@@ -89,19 +89,19 @@ class CGI
   #           object, returned as the Expires header.
   # cookie:: a cookie or cookies, returned as one or more Set-Cookie headers.
   #          The value can be the literal string of the cookie; a CGI::Cookie
-  #          object; an Array of literal cookie strings or Cookie objects; or a 
+  #          object; an Array of literal cookie strings or Cookie objects; or a
   #          hash all of whose values are literal cookie strings or Cookie objects.
   #          These cookies are in addition to the cookies held in the
   #          @output_cookies field.
   #
   # Other header lines can also be set; they are appended as key: value.
-  # 
+  #
   #   header
   #     # Content-Type: text/html
-  # 
+  #
   #   header("text/plain")
   #     # Content-Type: text/plain
-  # 
+  #
   #   header("nph"        => true,
   #          "status"     => "OK",  # == "200 OK"
   #            # "status"     => "200 GOOD",
@@ -116,9 +116,9 @@ class CGI
   #          "cookie"     => [cookie1, cookie2],
   #          "my_header1" => "my_value"
   #          "my_header2" => "my_value")
-  # 
+  #
   # The status codes are:
-  # 
+  #
   #   "OK"                  --> "200 OK"
   #   "PARTIAL_CONTENT"     --> "206 Partial Content"
   #   "MULTIPLE_CHOICES"    --> "300 Multiple Choices"
@@ -137,8 +137,8 @@ class CGI
   #   "NOT_IMPLEMENTED"     --> "501 Method Not Implemented"
   #   "BAD_GATEWAY"         --> "502 Bad Gateway"
   #   "VARIANT_ALSO_VARIES" --> "506 Variant Also Negotiates"
-  # 
-  # This method does not perform charset conversion. 
+  #
+  # This method does not perform charset conversion.
   def header(options='text/html')
     if options.is_a?(String)
       content_type = options
@@ -277,13 +277,13 @@ class CGI
   #     # Content-Length: 6
   #     #
   #     # string
-  # 
+  #
   #   cgi.out("text/plain") { "string" }
   #     # Content-Type: text/plain
   #     # Content-Length: 6
   #     #
   #     # string
-  # 
+  #
   #   cgi.out("nph"        => true,
   #           "status"     => "OK",  # == "200 OK"
   #           "server"     => ENV['SERVER_SOFTWARE'],
@@ -296,16 +296,16 @@ class CGI
   #           "cookie"     => [cookie1, cookie2],
   #           "my_header1" => "my_value",
   #           "my_header2" => "my_value") { "string" }
-  # 
+  #
   # Content-Length is automatically calculated from the size of
   # the String returned by the content block.
   #
   # If ENV['REQUEST_METHOD'] == "HEAD", then only the header
   # is outputted (the content block is still required, but it
   # is ignored).
-  # 
+  #
   # If the charset is "iso-2022-jp" or "euc-jp" or "shift_jis" then
-  # the content is converted to this charset, and the language is set 
+  # the content is converted to this charset, and the language is set
   # to "ja".
   def out(options = "text/html") # :yield:
 
@@ -337,15 +337,28 @@ class CGI
     params = {}
     query.split(/[&;]/).each do |pairs|
       key, value = pairs.split('=',2).collect{|v| CGI::unescape(v) }
-      params.has_key?(key) ? params[key].push(value) : params[key] = [value]
+      if key && value
+        params.has_key?(key) ? params[key].push(value) : params[key] = [value]
+      elsif key
+        params[key]=[]
+      end
     end
     params.default=[].freeze
     params
   end
 
+  # Maximum content length of post data
+  ##MAX_CONTENT_LENGTH  = 2 * 1024 * 1024
+
+  # Maximum content length of multipart data
+  MAX_MULTIPART_LENGTH  = 128 * 1024 * 1024
+
+  # Maximum number of request parameters when multipart
+  MAX_MULTIPART_COUNT = 128
+
   # Mixin module. It provides the follow functionality groups:
   #
-  # 1. Access to CGI environment variables as methods.  See 
+  # 1. Access to CGI environment variables as methods.  See
   #    documentation to the CGI class for a list of these variables.
   #
   # 2. Access to cookies, including the cookies attribute.
@@ -395,6 +408,9 @@ class CGI
     # values is an Array.
     attr_reader :params
 
+    # Get the uploaed files as a hash of name=>values pairs
+    attr_reader :files
+
     # Set all the parameters.
     def params=(hash)
       @params.clear
@@ -402,98 +418,130 @@ class CGI
     end
 
     def read_multipart(boundary, content_length)
-      params = Hash.new([])
-      boundary = "--" + boundary
-      quoted_boundary = Regexp.quote(boundary)
-      buf = ""
+      ## read first boundary
+      stdin = $stdin
+      first_line = "--#{boundary}#{EOL}"
+      content_length -= first_line.bytesize
+      status = stdin.read(first_line.bytesize)
+      raise EOFError.new("no content body")  unless status
+      raise EOFError.new("bad content body") unless first_line == status
+      ## parse and set params
+      params = {}
+      @files = {}
+      boundary_rexp = /--#{Regexp.quote(boundary)}(#{EOL}|--)/
+      boundary_size = "#{EOL}--#{boundary}#{EOL}".bytesize
+      boundary_end  = nil
+      buf = ''
       bufsize = 10 * 1024
-      boundary_end=""
-
-      # start multipart/form-data
-      stdinput.binmode if defined? stdinput.binmode
-      boundary_size = boundary.bytesize + EOL.bytesize
-      content_length -= boundary_size
-      status = stdinput.read(boundary_size)
-      if nil == status
-        raise EOFError, "no content body"
-      elsif boundary + EOL != status
-        raise EOFError, "bad content body"
-      end
-
-      loop do
-        head = nil
-        body = MorphingBody.new
-
-        until head and /#{quoted_boundary}(?:#{EOL}|--)/.match(buf)
-          if (not head) and /#{EOL}#{EOL}/.match(buf)
-            buf = buf.sub(/\A((?:.|\n)*?#{EOL})#{EOL}/) do
-              head = $1.dup
-              ""
+      max_count = MAX_MULTIPART_COUNT
+      n = 0
+      while true
+        (n += 1) < max_count or raise StandardError.new("too many parameters.")
+        ## create body (StringIO or Tempfile)
+        body = create_body(bufsize < content_length)
+        class << body
+          if method_defined?(:path)
+            alias local_path path
+          else
+            def local_path
+              nil
             end
-            next
           end
-
-          if head and ( (EOL + boundary + EOL).bytesize < buf.bytesize )
-            body.print buf[0 ... (buf.bytesize - (EOL + boundary + EOL).bytesize)]
-            buf[0 ... (buf.bytesize - (EOL + boundary + EOL).bytesize)] = ""
-          end
-
-          c = if bufsize < content_length
-                stdinput.read(bufsize)
-              else
-                stdinput.read(content_length)
-              end
-          if c.nil? || c.empty?
-            raise EOFError, "bad content body"
-          end
-          buf.concat(c)
-          content_length -= c.bytesize
+          attr_reader :original_filename, :content_type
         end
-
-        buf = buf.sub(/\A((?:.|\n)*?)(?:[\r\n]{1,2})?#{quoted_boundary}([\r\n]{1,2}|--)/) do
-          body.print $1
-          if "--" == $2
-            content_length = -1
+        ## find head and boundary
+        head = nil
+        separator = EOL * 2
+        until head && matched = boundary_rexp.match(buf)
+          if !head && pos = buf.index(separator)
+            len  = pos + EOL.bytesize
+            head = buf[0, len]
+            buf  = buf[(pos+separator.bytesize)..-1]
+          else
+            if head && buf.size > boundary_size
+              len = buf.size - boundary_size
+              body.print(buf[0, len])
+              buf[0, len] = ''
+            end
+            c = stdin.read(bufsize < content_length ? bufsize : content_length)
+            raise EOFError.new("bad content body") if c.nil? || c.empty?
+            buf << c
+            content_length -= c.bytesize
           end
-          boundary_end = $2.dup
-          ""
         end
-
+        ## read to end of boundary
+        m = matched
+        len = m.begin(0)
+        s = buf[0, len]
+        if s =~ /(\r?\n)\z/
+          s = buf[0, len - $1.bytesize]
+        end
+        body.print(s)
+        buf = buf[m.end(0)..-1]
+        boundary_end = m[1]
+        content_length = -1 if boundary_end == '--'
+        ## reset file cursor position
         body.rewind
-
-        /Content-Disposition:.* filename=(?:"((?:\\.|[^\"])*)"|([^;\s]*))/i.match(head)
-      	filename = ($1 or $2 or "")
-	      if /Mac/i =~ env_table['HTTP_USER_AGENT'] and
-	          /Mozilla/i =~ env_table['HTTP_USER_AGENT'] and
-	          /MSIE/i !~ env_table['HTTP_USER_AGENT']
-	        filename = CGI::unescape(filename)
-	      end
-        
-        /Content-Type: ([^\s]*)/i.match(head)
-        content_type = ($1 or "")
-
-        (class << body; self; end).class_eval do
-          alias local_path path
-          define_method(:original_filename) {filename.dup.taint}
-          define_method(:content_type) {content_type.dup.taint}
-        end
-
-        /Content-Disposition:.* name="?([^\";\s]*)"?/i.match(head)
-        name = ($1 || "").dup
-
-        if params.has_key?(name)
-          params[name].push(body)
+        ## original filename
+        /Content-Disposition:.* filename=(?:"(.*?)"|([^;\r\n]*))/i.match(head)
+        filename = $1 || $2 || ''
+        filename = CGI.unescape(filename) if unescape_filename?()
+        body.instance_variable_set('@original_filename', filename.taint)
+        ## content type
+        /Content-Type: (.*)/i.match(head)
+        (content_type = $1 || '').chomp!
+        body.instance_variable_set('@content_type', content_type.taint)
+        ## query parameter name
+        /Content-Disposition:.* name=(?:"(.*?)"|([^;\r\n]*))/i.match(head)
+        name = $1 || $2 || ''
+        if body.original_filename.empty?
+          value=body.read.dup.force_encoding(@accept_charset)
+          (params[name] ||= []) << value
+          unless value.valid_encoding?
+            if @accept_charset_error_block
+              @accept_charset_error_block.call(name,value)
+            else
+              raise InvalidEncoding,"Accept-Charset encoding error"
+            end
+          end
+          class << params[name].last;self;end.class_eval do
+            define_method(:read){self}
+            define_method(:original_filename){""}
+            define_method(:content_type){""}
+          end
         else
-          params[name] = [body]
+          (params[name] ||= []) << body
+          @files[name]=body
         end
-        break if buf.bytesize == 0
+        ## break loop
+        break if buf.size == 0
         break if content_length == -1
       end
-      raise EOFError, "bad boundary end of body part" unless boundary_end=~/--/
-
+      raise EOFError, "bad boundary end of body part" unless boundary_end =~ /--/
+      params.default = []
       params
     end # read_multipart
     private :read_multipart
+    def create_body(is_large)  #:nodoc:
+      if is_large
+        require 'tempfile'
+        body = Tempfile.new('CGI', encoding: "ascii-8bit")
+      else
+        begin
+          require 'stringio'
+          body = StringIO.new("".force_encoding("ascii-8bit"))
+        rescue LoadError
+          require 'tempfile'
+          body = Tempfile.new('CGI', encoding: "ascii-8bit")
+        end
+      end
+      body.binmode if defined? body.binmode
+      return body
+    end
+    def unescape_filename?  #:nodoc:
+      user_agent = $CGI_ENV['HTTP_USER_AGENT']
+      return /Mac/i.match(user_agent) && /Mozilla/i.match(user_agent) && !/MSIE/i.match(user_agent)
+    end
 
     # offline mode. read name=value pairs on standard input.
     def read_from_cmdline
@@ -522,57 +570,6 @@ class CGI
 
     # A wrapper class to use a StringIO object as the body and switch
     # to a TempFile when the passed threshold is passed.
-    class MorphingBody
-      begin
-        require "stringio"
-        @@small_buffer = lambda{StringIO.new}
-      rescue LoadError
-        require "tempfile"
-        @@small_buffer = lambda{
-          n = Tempfile.new("CGI")
-          n.binmode
-          n
-        }
-      end
-
-      def initialize(morph_threshold = 10240)
-        @threshold = morph_threshold
-        @body = @@small_buffer.call
-        @cur_size = 0
-        @morph_check = true
-      end
-
-      def print(data)
-        if @morph_check && (@cur_size + data.bytesize > @threshold)
-          convert_body
-        end
-        @body.print data
-      end
-      def rewind
-        @body.rewind
-      end
-      def path
-        @body.path
-      end
-
-      # returns the true body object.
-      def extract
-        @body
-      end
-
-      private
-      def convert_body
-        new_body = TempFile.new("CGI")
-        new_body.binmode if defined? @body.binmode
-        new_body.binmode if defined? new_body.binmode
-
-        @body.rewind
-        new_body.print @body.read
-        @body = new_body
-        @morph_check = false
-      end
-    end
-
     # Initialize the data from the query.
     #
     # Handles multipart forms (in particular, forms that involve file uploads).
@@ -580,6 +577,7 @@ class CGI
     def initialize_query()
       if ("POST" == env_table['REQUEST_METHOD']) and
          %r|\Amultipart/form-data.*boundary=\"?([^\";,]+)\"?|.match(env_table['CONTENT_TYPE'])
+        raise StandardError.new("too large multipart data.") if env_table['CONTENT_LENGTH'].to_i > MAX_MULTIPART_LENGTH
         boundary = $1.dup
         @multipart = true
         @params = read_multipart(boundary, Integer(env_table['CONTENT_LENGTH']))
@@ -600,7 +598,7 @@ class CGI
                       read_from_cmdline
                     end.dup.force_encoding(@accept_charset)
                   )
-        if @accept_charset!="ASCII-8BIT" || @accept_charset!=Encoding::ASCII_8BIT
+        unless Encoding.find(@accept_charset) == Encoding::ASCII_8BIT
           @params.each do |key,values|
             values.each do |value|
               unless value.valid_encoding?
@@ -625,7 +623,7 @@ class CGI
 
     # Get the value for the parameter with a given key.
     #
-    # If the parameter has multiple values, only the first will be 
+    # If the parameter has multiple values, only the first will be
     # retrieved; use #params() to get the array of values.
     def [](key)
       params = @params[key]
@@ -635,9 +633,9 @@ class CGI
         if value
           return value
         elsif defined? StringIO
-          StringIO.new("")
+          StringIO.new("".force_encoding("ascii-8bit"))
         else
-          Tempfile.new("CGI")
+          Tempfile.new("CGI",encoding:"ascii-8bit")
         end
       else
         str = if value then value.dup else "" end
@@ -666,7 +664,7 @@ class CGI
   # This default value default is "UTF-8"
   # If you want to change the default accept character set
   # when create a new CGI instance, set this:
-  # 
+  #
   #   CGI.accept_charset = "EUC-JP"
   #
 
@@ -708,11 +706,11 @@ class CGI
   #
   # == block
   #
-  # When you use a block, you can write a process 
+  # When you use a block, you can write a process
   # that query encoding is invalid. Example:
   #
   #   encoding_error={}
-  #   cgi=CGI.new(:accept_charset=>"EUC-JP") do |name,value| 
+  #   cgi=CGI.new(:accept_charset=>"EUC-JP") do |name,value|
   #     encoding_error[key] = value
   #   end
   #

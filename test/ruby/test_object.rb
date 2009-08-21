@@ -170,6 +170,13 @@ class TestObject < Test::Unit::TestCase
     assert_raise(NameError) { o.instance_variable_defined?(:foo) }
   end
 
+  def test_remove_instance_variable
+    o = Object.new
+    o.instance_eval { @foo = :foo }
+    o.instance_eval { remove_instance_variable(:@foo) }
+    assert_equal(false, o.instance_variable_defined?(:@foo))
+  end
+
   def test_convert_type
     o = Object.new
     def o.to_s; 1; end
@@ -226,12 +233,12 @@ class TestObject < Test::Unit::TestCase
   end
 
   def test_redefine_method_which_may_case_serious_problem
-    assert_in_out_err([], <<-INPUT, [], /warning: redefining `object_id' may cause serious problem$/)
+    assert_in_out_err([], <<-INPUT, [], /warning: redefining `object_id' may cause serious problems$/)
       $VERBOSE = false
       def (Object.new).object_id; end
     INPUT
 
-    assert_in_out_err([], <<-INPUT, [], /warning: redefining `__send__' may cause serious problem$/)
+    assert_in_out_err([], <<-INPUT, [], /warning: redefining `__send__' may cause serious problems$/)
       $VERBOSE = false
       def (Object.new).__send__; end
     INPUT
@@ -259,7 +266,7 @@ class TestObject < Test::Unit::TestCase
     end
 
     %w(object_id __send__ initialize).each do |m|
-      assert_in_out_err([], <<-INPUT, %w(:ok), /warning: removing `#{m}' may cause serious problem$/)
+      assert_in_out_err([], <<-INPUT, %w(:ok), /warning: removing `#{m}' may cause serious problems$/)
         $VERBOSE = false
         begin
           Class.new.instance_eval { remove_method(:#{m}) }
@@ -286,6 +293,14 @@ class TestObject < Test::Unit::TestCase
 
     assert_raise(NoMethodError) do
       1.instance_eval { method_missing(:method_missing) }
+    end
+
+    c.class_eval do
+      undef_method(:method_missing)
+    end
+
+    assert_raise(ArgumentError) do
+      c.new.method_missing
     end
   end
 
@@ -397,5 +412,41 @@ class TestObject < Test::Unit::TestCase
     s = x.to_s
     assert_equal(true, s.untrusted?)
     assert_equal(true, s.tainted?)
+  end
+
+  def test_exec_recursive
+    Thread.current[:__recursive_key__] = nil
+    a = [[]]
+    a.inspect
+
+    assert_nothing_raised do
+      -> do
+        $SAFE = 4
+        begin
+          a.hash
+        rescue ArgumentError
+        end
+      end.call
+    end
+
+    -> do
+      assert_nothing_raised do
+        $SAFE = 4
+        a.inspect
+      end
+    end.call
+
+    -> do
+      o = Object.new
+      def o.to_ary(x); end
+      def o.==(x); $SAFE = 4; false; end
+      a = [[o]]
+      b = []
+      b << b
+
+      assert_nothing_raised do
+        b == a
+      end
+    end.call
   end
 end

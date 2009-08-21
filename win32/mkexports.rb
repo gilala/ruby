@@ -1,4 +1,4 @@
-#!./miniruby -s
+#!./miniruby -sI.
 
 $name = $library = $description = nil
 
@@ -7,14 +7,14 @@ module RbConfig
 end
 
 class Exports
-  @subclass = []
+  @@subclass = []
   def self.inherited(klass)
-    @subclass << [/#{klass.name.sub(/.*::/, '').downcase}/i, klass]
+    @@subclass << [/#{klass.name.sub(/.*::/, '').downcase}/i, klass]
   end
 
   def self.create(*args, &block)
     platform = RUBY_PLATFORM
-    pat, klass = @subclass.find {|p, k| p =~ platform}
+    pat, klass = @@subclass.find {|p, k| p =~ platform}
     unless klass
       raise ArgumentError, "unsupported platform: #{platform}"
     end
@@ -51,6 +51,8 @@ class Exports
       end
     end
     syms["NtInitialize"] ||= "ruby_sysinit" if syms["ruby_sysinit"]
+    syms["rb_w32_vsnprintf"] ||= "vsnprintf"
+    syms["rb_w32_snprintf"] ||= "snprintf"
     @syms = syms
   end
 
@@ -62,6 +64,7 @@ class Exports
       exports << "Library " + library
     end
     exports << "Description " + description.dump if description
+    exports << "VERSION #{RbConfig::CONFIG['MAJOR']}.#{RbConfig::CONFIG['MINOR']}"
     exports << "EXPORTS" << symbols()
     exports
   end
@@ -107,7 +110,7 @@ class Exports::Mswin < Exports
           next unless l.sub!(/.*?\s(\(\)\s+)?External\s+\|\s+/, '')
           is_data = !$1
           if noprefix or /^[@_]/ =~ l
-            next if /(?!^)@.*@/ =~ l || /@[[:xdigit:]]{16}$/ =~ l
+            next if /(?!^)@.*@/ =~ l || /@[[:xdigit:]]{16}$/ =~ l || /^_DllMain@/ =~ l
             l.sub!(/^[@_]/, '') if /@\d+$/ !~ l
           elsif !l.sub!(/^(\S+) \([^@?\`\']*\)$/, '\1')
             next
@@ -125,9 +128,13 @@ class Exports::Mswin < Exports
   end
 end
 
-class Exports::Mingw < Exports
+class Exports::Cygwin < Exports
   def self.nm
     @@nm ||= RbConfig::CONFIG["NM"]
+  end
+
+  def exports(*)
+    super()
   end
 
   def each_line(objs, &block)
@@ -136,14 +143,17 @@ class Exports::Mingw < Exports
 
   def each_export(objs)
     objdump(objs) do |l|
-      yield $1 if / [[:upper:]] _(.*)$/ =~ l
+      next if /@.*@/ =~ l
+      yield $2, !$1 if /\s(?:(T)|[[:upper:]])\s_((?!Init_|DllMain@).*)$/ =~ l
     end
+  end
+end
+
+class Exports::Mingw < Exports::Cygwin
+  def each_export(objs)
+    super
     yield "strcasecmp", "_stricmp"
     yield "strncasecmp", "_strnicmp"
-  end
-
-  def symbols()
-    @syms.select {|k, v| v}.sort.collect {|k, v| "#{k}=#{v}"}
   end
 end
 

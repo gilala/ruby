@@ -5,7 +5,6 @@
 #++
 
 require 'yaml'
-require 'rubygems'
 
 # Store the gem command options specified in the configuration file.  The
 # config file object acts much like a hash.
@@ -30,14 +29,15 @@ class Gem::ConfigFile
 
   PLATFORM_DEFAULTS = {}
 
-  system_config_path = 
+  system_config_path =
     begin
       require 'Win32API'
 
       CSIDL_COMMON_APPDATA = 0x0023
       path = 0.chr * 260
-      SHGetFolderPath = Win32API.new 'shell32', 'SHGetFolderPath', 'LLLLP', 'L'
-      SHGetFolderPath.call 0, CSIDL_COMMON_APPDATA, 0, 1, path
+      SHGetFolderPath = Win32API.new 'shell32', 'SHGetFolderPath', 'PLPLP', 'L',
+                                     :stdcall
+      SHGetFolderPath.call nil, CSIDL_COMMON_APPDATA, nil, 1, path
 
       path.strip
     rescue LoadError
@@ -45,9 +45,14 @@ class Gem::ConfigFile
     end
 
   SYSTEM_WIDE_CONFIG_FILE = File.join system_config_path, 'gemrc'
-  
+
   # List of arguments supplied to the config file object.
   attr_reader :args
+
+  # Where to look for gems
+  attr_accessor :path
+
+  attr_accessor :home
 
   # True if we print backtraces on errors.
   attr_writer :backtrace
@@ -123,9 +128,11 @@ class Gem::ConfigFile
     @backtrace = @hash[:backtrace] if @hash.key? :backtrace
     @benchmark = @hash[:benchmark] if @hash.key? :benchmark
     @bulk_threshold = @hash[:bulk_threshold] if @hash.key? :bulk_threshold
-    Gem.sources.replace @hash[:sources] if @hash.key? :sources
+    Gem.sources = @hash[:sources] if @hash.key? :sources
     @verbose = @hash[:verbose] if @hash.key? :verbose
     @update_sources = @hash[:update_sources] if @hash.key? :update_sources
+    @path = @hash[:gempath] if @hash.key? :gempath
+    @home = @hash[:gemhome] if @hash.key? :gemhome
 
     handle_arguments arg_list
   end

@@ -16,7 +16,7 @@ class TestIOScanf < Test::Unit::TestCase;end
 
 module ScanfTests
 
-def tests
+  def tests
     [
 
 # Scratchpad
@@ -240,8 +240,8 @@ def tests
       [ "%*5f%*d %*d %s", "1.2e23 45 string", ["string"] ],
       [ "%f %*d %s", "12.e23 45 string", ["12.e23".to_f, "string"] ],
       [ "%5f %d %s", "1.2e23 string", ["1.2e2".to_f, 3, "string"] ],
-      [ "%s %f %s %d %x%c%c%c%c", 
-        "float: 1.2e23 dec/hex: 135a23 abc", 
+      [ "%s %f %s %d %x%c%c%c%c",
+        "float: 1.2e23 dec/hex: 135a23 abc",
         ["float:", "1.2e23".to_f, "dec/hex:", 135, "a23".hex, " ", "a", "b", "c" ] ],
 
 # Testing 's'
@@ -284,8 +284,8 @@ def tests
       [" [%d,%f", " [10,1.1", [10,1.1] ],
 
      ]
-    end
   end
+end
 
 class TestStringScanf
   include Scanf
@@ -305,7 +305,7 @@ class TestIOScanf
   extend ScanfTests
 
   tmpfilename = "#{Dir.tmpdir}/iotest.dat.#{$$}"
-  
+
   i = 1
   self.tests.each do |test|
     define_method("test_#{i}") do ||

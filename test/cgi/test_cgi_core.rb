@@ -21,6 +21,19 @@ class CGICoreTest < Test::Unit::TestCase
     $stdout = STDOUT
   end
 
+  def test_cgi_parse_illegal_query
+    @environ = {
+      'REQUEST_METHOD'  => 'GET',
+      'QUERY_STRING'    => 'a=111&&b=222&c&d=',
+      'HTTP_COOKIE'     => '_session_id=12345; name1=val1&val2;',
+      'SERVER_SOFTWARE' => 'Apache 2.2.0',
+      'SERVER_PROTOCOL' => 'HTTP/1.1',
+    }
+    ENV.update(@environ)
+    cgi = CGI.new
+    assert_equal(["a","b","c","d"],cgi.keys.sort) if RUBY_VERSION>="1.9"
+    assert_equal("",cgi["d"])
+  end
 
   def test_cgi_core_params_GET
     @environ = {
@@ -115,14 +128,14 @@ class CGICoreTest < Test::Unit::TestCase
       hash={}
       cgi = CGI.new(:accept_charset=>"UTF-8"){|key,val|hash[key]=val}
       ## cgi[]
-      assert_equal("\xBE\xBE\xB9\xBE".force_encoding("ASCII-8BIT"), cgi['str'])
+      assert_equal("\xBE\xBE\xB9\xBE".force_encoding("UTF-8"), cgi['str'])
       ## cgi.params
-      assert_equal(["\xBE\xBE\xB9\xBE".force_encoding("ASCII-8BIT")], cgi.params['str'])
+      assert_equal(["\xBE\xBE\xB9\xBE".force_encoding("UTF-8")], cgi.params['str'])
       ## accept-charset error
-      assert_equal({"str"=>"\xBE\xBE\xB9\xBE".force_encoding("ASCII-8BIT")},hash)
+      assert_equal({"str"=>"\xBE\xBE\xB9\xBE".force_encoding("UTF-8")},hash)
 
       $stdin.rewind
-      assert_raise(CGI::InvalidEncoding) do 
+      assert_raise(CGI::InvalidEncoding) do
         cgi = CGI.new(:accept_charset=>"UTF-8")
       end
 

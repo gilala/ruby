@@ -34,7 +34,7 @@ class TestFileExhaustive < Test::Unit::TestCase
   def make_file(content, file = @file)
     open(file, "w") {|fh| fh << content }
   end
-  
+
   def make_tmp_filename(prefix)
     @hardlinkfile = @dir + "/" + prefix + File.basename(__FILE__) + ".#{$$}.test"
   end
@@ -42,7 +42,7 @@ class TestFileExhaustive < Test::Unit::TestCase
   def test_path
     file = @file
 
-    assert_equal(file, File.new(file).path)
+    assert_equal(file, File.open(file) {|f| f.path})
     assert_equal(file, File.path(file))
     o = Object.new
     class << o; self; end.class_eval do
@@ -90,13 +90,14 @@ class TestFileExhaustive < Test::Unit::TestCase
       assert_kind_of(String, fs1.inspect)
     end
     assert_raise(Errno::ENOENT) { File.stat(@nofile) }
-    assert_kind_of(File::Stat, File.new(@file).stat)
+    assert_kind_of(File::Stat, File.open(@file) {|f| f.stat})
     assert_raise(Errno::ENOENT) { File.lstat(@nofile) }
-    assert_kind_of(File::Stat, File.new(@file).lstat)
+    assert_kind_of(File::Stat, File.open(@file) {|f| f.lstat})
   end
 
   def test_directory_p
     assert(File.directory?(@dir))
+    assert(!(File.directory?(@dir+"/...")))
     assert(!(File.directory?(@file)))
     assert(!(File.directory?(@nofile)))
   end
@@ -141,6 +142,7 @@ class TestFileExhaustive < Test::Unit::TestCase
 
   def test_readable_p
     return if /cygwin|mswin|bccwin|mingw|emx/ =~ RUBY_PLATFORM
+    return if Process.euid == 0
     File.chmod(0200, @file)
     assert(!(File.readable?(@file)))
     File.chmod(0600, @file)
@@ -150,6 +152,7 @@ class TestFileExhaustive < Test::Unit::TestCase
 
   def test_readable_real_p
     return if /cygwin|mswin|bccwin|mingw|emx/ =~ RUBY_PLATFORM
+    return if Process.euid == 0
     File.chmod(0200, @file)
     assert(!(File.readable_real?(@file)))
     File.chmod(0600, @file)
@@ -170,6 +173,7 @@ class TestFileExhaustive < Test::Unit::TestCase
 
   def test_writable_p
     return if /cygwin|mswin|bccwin|mingw|emx/ =~ RUBY_PLATFORM
+    return if Process.euid == 0
     File.chmod(0400, @file)
     assert(!(File.writable?(@file)))
     File.chmod(0600, @file)
@@ -179,6 +183,7 @@ class TestFileExhaustive < Test::Unit::TestCase
 
   def test_writable_real_p
     return if /cygwin|mswin|bccwin|mingw|emx/ =~ RUBY_PLATFORM
+    return if Process.euid == 0
     File.chmod(0400, @file)
     assert(!(File.writable_real?(@file)))
     File.chmod(0600, @file)
@@ -254,7 +259,7 @@ class TestFileExhaustive < Test::Unit::TestCase
     assert(!(File.identical?(@nofile, @file)))
   end
 
-  def test_size
+  def test_s_size
     assert_integer(File.size(@dir))
     assert_equal(3, File.size(@file))
     assert_equal(0, File.size(@zerofile))
@@ -271,7 +276,7 @@ class TestFileExhaustive < Test::Unit::TestCase
 
   def test_atime
     t1 = File.atime(@file)
-    t2 = File.new(@file).atime
+    t2 = File.open(@file) {|f| f.atime}
     assert_kind_of(Time, t1)
     assert_kind_of(Time, t2)
     assert_equal(t1, t2)
@@ -280,7 +285,7 @@ class TestFileExhaustive < Test::Unit::TestCase
 
   def test_mtime
     t1 = File.mtime(@file)
-    t2 = File.new(@file).mtime
+    t2 = File.open(@file) {|f| f.mtime}
     assert_kind_of(Time, t1)
     assert_kind_of(Time, t2)
     assert_equal(t1, t2)
@@ -289,7 +294,7 @@ class TestFileExhaustive < Test::Unit::TestCase
 
   def test_ctime
     t1 = File.ctime(@file)
-    t2 = File.new(@file).ctime
+    t2 = File.open(@file) {|f| f.ctime}
     assert_kind_of(Time, t1)
     assert_kind_of(Time, t2)
     assert_equal(t1, t2)
@@ -300,7 +305,7 @@ class TestFileExhaustive < Test::Unit::TestCase
     return if /cygwin|mswin|bccwin|mingw|emx/ =~ RUBY_PLATFORM
     assert_equal(1, File.chmod(0444, @file))
     assert_equal(0444, File.stat(@file).mode % 01000)
-    assert_equal(0, File.new(@file).chmod(0222))
+    assert_equal(0, File.open(@file) {|f| f.chmod(0222)})
     assert_equal(0222, File.stat(@file).mode % 01000)
     File.chmod(0600, @file)
     assert_raise(Errno::ENOENT) { File.chmod(0600, @nofile) }
@@ -380,12 +385,17 @@ class TestFileExhaustive < Test::Unit::TestCase
       assert_equal(@file, File.expand_path(@file + "."))
       assert_equal(@file, File.expand_path(@file + "::$DATA"))
     end
+    assert_kind_of(String, File.expand_path("~"))
+    assert_raise(ArgumentError) { File.expand_path("~foo_bar_baz_unknown_user_wahaha") }
+    assert_raise(ArgumentError) { File.expand_path("~foo_bar_baz_unknown_user_wahaha", "/") }
   end
 
   def test_basename
     assert_equal(File.basename(@file).sub(/\.test$/, ""), File.basename(@file, ".test"))
-    assert_equal("", File.basename(""))
-    assert_equal("foo", File.basename("foo"))
+    assert_equal("", s = File.basename(""))
+    assert(!s.frozen?, '[ruby-core:24199]')
+    assert_equal("foo", s = File.basename("foo"))
+    assert(!s.frozen?, '[ruby-core:24199]')
     assert_equal("foo", File.basename("foo", ".ext"))
     assert_equal("foo", File.basename("foo.ext", ".ext"))
     assert_equal("foo", File.basename("foo.ext", ".*"))
@@ -411,25 +421,24 @@ class TestFileExhaustive < Test::Unit::TestCase
 
   def test_extname
     assert(".test", File.extname(@file))
-    assert_equal("", File.extname("foo"))
-    assert_equal("", File.extname("/foo"))
-    assert_equal("", File.extname(".foo"))
-    assert_equal("", File.extname("/.foo"))
-    assert_equal("", File.extname("bar/.foo"))
-    assert_equal("", File.extname("/bar/.foo"))
-    assert_equal(".ext", File.extname("foo.ext"))
-    assert_equal(".ext", File.extname("/foo.ext"))
-    assert_equal(".ext", File.extname(".foo.ext"))
-    assert_equal(".ext", File.extname("/.foo.ext"))
-    assert_equal(".ext", File.extname("bar/.foo.ext"))
-    assert_equal(".ext", File.extname("/bar/.foo.ext"))
-    assert_equal("", File.extname(""))
+    prefixes = ["", "/", ".", "/.", "bar/.", "/bar/."]
+    infixes = ["", " ", "."]
+    infixes2 = infixes + [".ext "]
+    appendixes = [""]
     if /cygwin|mingw|mswin|bccwin/ =~ RUBY_PLATFORM
-      assert_equal("", File.extname("foo "))
-      assert_equal(".ext", File.extname("foo.ext "))
-      assert_equal(".ext", File.extname("foo.ext."))
-      assert_equal(".ext", File.extname("foo.ext::$DATA"))
-      assert_equal("", File.extname("foo::$DATA.ext"))
+      appendixes << " " << "." << "::$DATA" << "::$DATA.bar"
+    end
+    prefixes.each do |prefix|
+      appendixes.each do |appendix|
+        infixes.each do |infix|
+          path = "#{prefix}foo#{infix}#{appendix}"
+          assert_equal("", File.extname(path), "File.extname(#{path.inspect})")
+        end
+        infixes2.each do |infix|
+          path = "#{prefix}foo#{infix}.ext#{appendix}"
+          assert_equal(".ext", File.extname(path), "File.extname(#{path.inspect})")
+        end
+      end
     end
   end
 
@@ -469,7 +478,7 @@ class TestFileExhaustive < Test::Unit::TestCase
     f.close
     make_file("foo", @file)
 
-    assert_raise(IOError) { File.new(@file).truncate(0) }
+    assert_raise(IOError) { File.open(@file) {|f| f.truncate(0)} }
   rescue NotImplementedError
   end
 
@@ -610,6 +619,7 @@ class TestFileExhaustive < Test::Unit::TestCase
 
   def test_stat_readable_p
     return if /cygwin|mswin|bccwin|mingw|emx/ =~ RUBY_PLATFORM
+    return if Process.euid == 0
     File.chmod(0200, @file)
     assert(!(File::Stat.new(@file).readable?))
     File.chmod(0600, @file)
@@ -618,6 +628,7 @@ class TestFileExhaustive < Test::Unit::TestCase
 
   def test_stat_readable_real_p
     return if /cygwin|mswin|bccwin|mingw|emx/ =~ RUBY_PLATFORM
+    return if Process.euid == 0
     File.chmod(0200, @file)
     assert(!(File::Stat.new(@file).readable_real?))
     File.chmod(0600, @file)
@@ -636,6 +647,7 @@ class TestFileExhaustive < Test::Unit::TestCase
 
   def test_stat_writable_p
     return if /cygwin|mswin|bccwin|mingw|emx/ =~ RUBY_PLATFORM
+    return if Process.euid == 0
     File.chmod(0400, @file)
     assert(!(File::Stat.new(@file).writable?))
     File.chmod(0600, @file)
@@ -644,6 +656,7 @@ class TestFileExhaustive < Test::Unit::TestCase
 
   def test_stat_writable_real_p
     return if /cygwin|mswin|bccwin|mingw|emx/ =~ RUBY_PLATFORM
+    return if Process.euid == 0
     File.chmod(0400, @file)
     assert(!(File::Stat.new(@file).writable_real?))
     File.chmod(0600, @file)
@@ -722,5 +735,19 @@ class TestFileExhaustive < Test::Unit::TestCase
         load(@file)
       end.join
     end
+  end
+
+  def test_size
+    assert_equal(3, File.open(@file) {|f| f.size })
+    File.open(@file, "a") do |f|
+      f.write("bar")
+      assert_equal(6, f.size)
+    end
+  end
+
+  def test_absolute_path
+    assert_equal(File.join(Dir.pwd, "~foo"), File.absolute_path("~foo"))
+    dir = File.expand_path("/bar")
+    assert_equal(File.join(dir, "~foo"), File.absolute_path("~foo", dir))
   end
 end

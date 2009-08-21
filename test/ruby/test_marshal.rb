@@ -116,6 +116,7 @@ class TestMarshal < Test::Unit::TestCase
   def test_limit
     assert_equal([[[]]], Marshal.load(Marshal.dump([[[]]], 3)))
     assert_raise(ArgumentError) { Marshal.dump([[[]]], 2) }
+    assert_nothing_raised(ArgumentError, '[ruby-core:24100]') { Marshal.dump("\u3042", 1) }
   end
 
   def test_userdef_invalid
@@ -190,5 +191,17 @@ class TestMarshal < Test::Unit::TestCase
     y = Marshal.load(s)
     assert_equal(true, y.tainted?)
     assert_equal(true, y.untrusted?)
+  end
+
+  def test_symbol
+    [:ruby, :"\u{7d05}\u{7389}"].each do |sym|
+      assert_equal(sym, Marshal.load(Marshal.dump(sym)), '[ruby-core:24788]')
+    end
+  end
+
+  ClassUTF8 = eval("class R\u{e9}sum\u{e9}; self; end")
+  def test_class_nonascii
+    a = ClassUTF8.new
+    assert_instance_of(ClassUTF8, Marshal.load(Marshal.dump(a)), '[ruby-core:24790]')
   end
 end

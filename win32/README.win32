@@ -4,7 +4,7 @@
 
 == Requirement
 
-(1) Visual C++ 5.0 or later.
+(1) Visual C++ 6.0 or later.
 
     Note: if you want to build x64 or ia64 version, use native compiler for
           x64/ia64.
@@ -22,6 +22,10 @@
      * bison
      * sed
      * ruby 1.8
+
+(4) If you want built binaries to run on Windows 95 series (including
+    98 and Me), you need unicows.lib at compile time, and unicows.dll
+    at run time.
 
 == How to compile and install
 
@@ -114,10 +118,10 @@ in Japanese, but you can download at least.
 
     D:
     cd D:\build\ruby
-    C:\src\ruby\win32\configure --prefix=C:/usr/local
+    C:\src\ruby\win32\configure --prefix=/usr/local
     nmake
     nmake test
-    nmake install
+    nmake install DESTDIR=C:
 
 * Build x64 version (requires native x64 VC++ compiler)
 

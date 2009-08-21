@@ -52,7 +52,7 @@ module WEBrick
         when 'SHA1','SHA1-sess'  # it is a bonus feature :-)
           @h = Digest::SHA1
         else
-          msg = format('Alogrithm "%s" is not supported.', @algorithm)
+          msg = format('Algorithm "%s" is not supported.', @algorithm)
           raise ArgumentError.new(msg)
         end
 
@@ -118,16 +118,16 @@ module WEBrick
         }
 
         if !check_uri(req, auth_req)
-          raise HTTPStatus::BadRequest  
+          raise HTTPStatus::BadRequest
         end
 
-        if auth_req['realm'] != @realm  
+        if auth_req['realm'] != @realm
           error('%s: realm unmatch. "%s" for "%s"',
                 auth_req['username'], auth_req['realm'], @realm)
           return false
         end
 
-        auth_req['algorithm'] ||= 'MD5' 
+        auth_req['algorithm'] ||= 'MD5'
         if auth_req['algorithm'] != @algorithm &&
            (@opera_hack && auth_req['algorithm'] != @algorithm.upcase)
           error('%s: algorithm unmatch. "%s" for "%s"',
@@ -229,8 +229,8 @@ module WEBrick
 
       def split_param_value(string)
         ret = {}
-        while string.size != 0
-          case string           
+        while string.bytesize != 0
+          case string
           when /^\s*([\w\-\.\*\%\!]+)=\s*\"((\\.|[^\"])*)\"\s*,?/
             key = $1
             matched = $2
@@ -320,7 +320,7 @@ module WEBrick
         uri = auth_req['uri']
         if uri != req.request_uri.to_s && uri != req.unparsed_uri &&
            (@internet_explorer_hack && uri != req.path)
-          error('%s: uri unmatch. "%s" for "%s"', auth_req['username'], 
+          error('%s: uri unmatch. "%s" for "%s"', auth_req['username'],
                 auth_req['uri'], req.request_uri.to_s)
           return false
         end

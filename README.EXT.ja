@@ -115,11 +115,9 @@ FIXNUMとNILに関してはより高速な判別マクロが用意されています．
 (整数に変換できない場合には例外が発生する)．同様にチェック無
 で使える変換マクロはdoubleを取り出す「NUM2DBL()」があります．
 
-char* を取り出す場合，version 1.6 以前では「STR2CSTR()」とい
-うマクロを使っていましたが，これは to_str() による暗黙の型変
-換結果が GC される可能性があるため，version 1.7 以降では
-obsolete となり，代わりに StringValue() と StringValuePtr() 
-を使う事を推奨しています．StringValue(var) は var が String 
+char* を取り出す場合， StringValue() と StringValuePtr() 
+を使います．
+StringValue(var) は var が String 
 であれば何もせず，そうでなければ var を var.to_str() の結果
 に置き換えるマクロ，StringValuePtr(var) は同様に var を
 String に置き換えてから var のバイト列表現に対する char* を
@@ -768,21 +766,17 @@ fdbm_s_open(int argc, VALUE *argv, VALUE klass)
 えられます．
 
 この配列で与えられた引数を解析するための関数がopen()でも使わ
-れているrb_scan_args()です．第3引数に指定したフォーマットに
-従い，第4変数以降に指定した変数に値を代入してくれます．この
-フォーマットは，第1文字目が省略できない引数の数，第2文字目が
-省略できる引数の数，第3文字目が対応する相手が無いあまりの引
-数があるかどうかを示す"*"です．2文字目と3文字目は省略できま
-す．dbm.cの例では，フォーマットは"11"ですから，引数は最低1つ
-で，2つまで許されるという意味になります．省略されている時の
-変数の値はnil(C言語のレベルではQnil)になります．
+れているrb_scan_args()です．第3引数に指定したフォーマットに従
+い，第4変数以降に指定したVALUEへの参照に値を代入してくれま
+す．
 
-Rubyの配列で引数を受け取るものはindexesがあります．実装はこ
-うです．
+
+引数をRubyの配列として受け取るメソッドの例には
+Thread#initializeがあります．実装はこうです．
 
 --
 static VALUE
-fdbm_indexes(VALUE obj, VALUE args)
+thread_initialize(VALUE thread, VALUE args)
 {
 	:
 }
@@ -927,7 +921,7 @@ Rubyの評価器(通称YARV)
   vm.c
   vm_dump.c
   vm_eval.c
-  vm_evalbody.c
+  vm_exec.c
   vm_insnhelper.c
   vm_method.c
 
@@ -986,10 +980,9 @@ Rubyコマンドの実装
   math.c        : Math
   numeric.c     : Numeric, Integer, Fixnum, Float
   pack.c        : Array#pack, String#unpack
-  prec.c        : Precision
   proc.c        : Binding, Proc
   process.c     : Process
-  random.c      : random number
+  random.c      : 乱数
   range.c       : Range
   rational.c    : Rational
   re.c          : Regexp, MatchData
@@ -998,6 +991,9 @@ Rubyコマンドの実装
   string.c      : String
   struct.c      : Struct
   time.c        : Time
+
+  defs/knwon_errors.def  : 例外クラス Errno::*
+    -> known_errors.inc  : 自動生成
 
 多言語化
   encoding.c    : Encoding
@@ -1008,7 +1004,8 @@ Rubyコマンドの実装
 gorubyコマンドの実装
   
   goruby.c
-  golf_prelude.rb
+  golf_prelude.rb      : goruby固有のライブラリ
+    -> golf_prelude.c  : 自動生成
 
 
 Appendix B. 拡張用関数リファレンス
@@ -1067,12 +1064,17 @@ void Check_SafeStr(VALUE value)
 
 ** 型変換
 
-FIX2INT(value)
-FIX2LONG(value)
-INT2FIX(i)
-NUM2INT(value)
-NUM2LONG(value)
-INT2NUM(i)
+FIX2INT(value), INT2FIX(i)
+FIX2LONG(value), LONG2FIX(l)
+NUM2INT(value), INT2NUM(i)
+NUM2UINT(value), UINT2NUM(ui)
+NUM2LONG(value), LONG2NUM(l)
+NUM2ULONG(value), ULONG2NUM(ul)
+NUM2LL(value), LL2NUM(ll)
+NUM2ULL(value), ULL2NUM(ull)
+NUM2OFFT(value), OFFT2NUM(off)
+NUM2SIZET(value), SIZET2NUM(size)
+NUM2SSIZET(value), SSIZET2NUM(ssize)
 NUM2DBL(value)
 rb_float_new(f)
 StringValue(value)
@@ -1176,13 +1178,38 @@ rb_define_singleton_method(VALUE klass, const char *name, VALUE (*func)(), int a
 
 rb_scan_args(int argc, VALUE *argv, const char *fmt, ...)
 
-  argc, argv形式で与えられた引数を分解する．fmtは必須引数の数, 
-  付加引数の数, 残りの引数があるかを指定する文字列で, "数字
-  数字*"という形式である． 2 番目の数字と"*"はそれぞれ省略可
-  能である．必須引数が一つもない場合は0を指定する．第3引数以
-  降は変数へのポインタで, 該当する要素がその変数に格納される．
-  付加引数に対応する引数が与えられていない場合は変数にQnilが
-  代入される．
+  argc, argv形式で与えられた指定されたフォーマットに従って引
+  数を分解し，続くVALUEへの参照にセットします．このフォーマッ
+  トは，ABNFで記述すると以下の通りです．
+
+--
+scan-arg-spec  := param-arg-spec [block-arg-spec]
+
+param-arg-spec := pre-arg-spec [post-arg-spec] / post-arg-spec / pre-opt-post-arg-spec
+pre-arg-spec   := num-of-leading-mandatory-args [num-of-optional-args]
+post-arg-spec  := sym-for-variable-length-args [num-of-trailing-mandatory-args]
+pre-opt-post-arg-spec := num-of-leading-mandatory-args num-of-optional-args num-of-trailing-mandatory-args
+block-arg-spec := sym-for-block-arg
+
+num-of-leading-mandatory-args  := DIGIT ; 先頭に置かれる省略不能な引数の数
+num-of-optional-args           := DIGIT ; 続いて置かれる省略可能な引数の数
+sym-for-variable-length-args   := "*"   ; 続いて置かれる可変長引数を
+                                        ; Rubyの配列で取得するための指定
+num-of-trailing-mandatory-args := DIGIT ; 終端に置かれる省略不能な引数の数
+sym-for-block-arg              := "&"   ; イテレータブロックを取得するための
+                                        ; 指定
+--
+
+  フォーマットが"12"の場合，引数は最低1つで，3つ(1+2)まで許さ
+  れるという意味になります．従って，フォーマット文字列に続い
+  て3つのVALUEへの参照を置く必要があります．それらには取得した
+  変数がセットされます．変数への参照の代わりにNULLを指定する
+  こともでき，その場合は取得した引数の値は捨てられます．なお、
+  省略可能引数が省略された時の変数の値はnil(C言語のレベルでは
+  Qnil)になります．
+
+  返り値は与えられた引数の数です．イテレータブロックは数えま
+  せん．
 
 ** Rubyメソッド呼び出し
 
@@ -1231,12 +1258,23 @@ VALUE rb_iv_set(VALUE obj, const char *name, VALUE val)
 
 ** 制御構造
 
-VALUE rb_iterate(VALUE (*func1)(), VALUE arg1, VALUE (*func2)(), VALUE arg2)
+VALUE rb_block_call(VALUE obj, ID mid, int argc, VALUE * argv,
+		    VALUE (*func) (ANYARGS), VALUE data2)
+
+  funcをブロックとして設定し, objをレシーバ, argcとargvを引
+  数としてmidメソッドを呼び出す. funcは第一引数にyieldされた
+  値, 第二引数にdata2, 第三, 第四引数にargcとargvを受け取る.
+
+[OBSOLETE] VALUE rb_iterate(VALUE (*func1)(), VALUE arg1, VALUE (*func2)(), VALUE arg2)
 
   func2をブロックとして設定し, func1をイテレータとして呼ぶ． 
   func1には arg1が引数として渡され, func2には第1引数にイテレー
   タから与えられた値, 第2引数にarg2が渡される．
  
+  1.9でrb_iterateを使う場合は, func1の中でRubyレベルのメソッド
+  を呼び出さなければならない.
+  1.9でobsoleteとなった. 代わりにrb_block_callが用意された.
+
 VALUE rb_yield(VALUE val)
 
   valを値としてイテレータブロックを呼び出す．
@@ -1305,7 +1343,7 @@ void ruby_script(char *name)
 
 ** インタプリタのイベントのフック
 
- void rb_add_event_hook(rb_event_hook_func_t func, rb_event_t events)
+ void rb_add_event_hook(rb_event_hook_func_t func, rb_event_flag_t events, VALUE data)
 
 指定されたインタプリタのイベントに対するフック関数を追加します．
 eventsは以下の値のorでなければなりません:
@@ -1322,13 +1360,58 @@ eventsは以下の値のorでなければなりません:
 
 rb_event_hook_func_tの定義は以下の通りです:
 
- typedef void (*rb_event_hook_func_t)(rb_event_t event, NODE *node,
+ typedef void (*rb_event_hook_func_t)(rb_event_t event, VALUE data,
  				      VALUE self, ID id, VALUE klass)
+
+rb_add_event_hook() の第3引数 data は，フック関数の第2引数と
+して渡されます．これは1.8では現在のNODEへのポインタでした．以
+下の RB_EVENT_HOOKS_HAVE_CALLBACK_DATA も参照してください．
 
  int rb_remove_event_hook(rb_event_hook_func_t func)
 
 指定されたフック関数を削除します．
 
+** 互換性のためのマクロ
+
+APIの互換性をチェックするために以下のマクロがデフォルトで定義されています．
+
+NORETURN_STYLE_NEW
+
+  NORETURN マクロが関数型マクロとして定義されていることを意味する．
+
+HAVE_RB_DEFINE_ALLOC_FUNC
+
+  rb_define_alloc_func() 関数が提供されていること、つまり
+  allocation framework が使われることを意味する．
+  have_func("rb_define_alloc_func", "ruby.h")
+  の結果と同じ．
+
+HAVE_RB_REG_NEW_STR
+
+  StringオブジェクトからRegexpオブジェクトを作る
+  rb_reg_new_str() 関数が提供されていることを意味する．
+  have_func("rb_reg_new_str", "ruby.h").
+  の結果と同じ．
+
+HAVE_RB_IO_T
+
+  rb_io_t 型が提供されていることを意味する．
+
+USE_SYMBOL_AS_METHOD_NAME
+
+  メソッド名を返すメソッド，Module#methods, #singleton_methods
+  などがSymbolを返すことを意味する．
+
+HAVE_RUBY_*_H
+
+  ruby.h で定義されている．対応するヘッダが提供されていること
+  を意味する．たとえば，HAVE_RUBY_ST_H が定義されている場合は
+  単なる st.h ではなく ruby/st.h を使用する．
+
+RB_EVENT_HOOKS_HAVE_CALLBACK_DATA
+
+  rb_add_event_hook() がフック関数に渡す data を第3引数として
+  受け取ることを意味する．
 
 Appendix C. extconf.rbで使える関数たち
 

@@ -20,8 +20,9 @@ class Gem::DependencyInstaller
     :force => false,
     :format_executable => false, # HACK dup
     :ignore_dependencies => false,
+    :prerelease => false,
     :security_policy => nil, # HACK NoSecurity requires OpenSSL.  AlmostNo? Low?
-    :wrappers => true
+    :wrappers => true,
   }
 
   ##
@@ -37,10 +38,19 @@ class Gem::DependencyInstaller
   # :format_executable:: See Gem::Installer#initialize.
   # :ignore_dependencies:: Don't install any dependencies.
   # :install_dir:: See Gem::Installer#install.
+  # :prerelease:: Allow prerelease versions
   # :security_policy:: See Gem::Installer::new and Gem::Security.
+  # :user_install:: See Gem::Installer.new
   # :wrappers:: See Gem::Installer::new
 
   def initialize(options = {})
+    if options[:install_dir] then
+      spec_dir = options[:install_dir], 'specifications'
+      @source_index = Gem::SourceIndex.from_gems_in spec_dir
+    else
+      @source_index = Gem.source_index
+    end
+
     options = DEFAULT_OPTIONS.merge options
 
     @bin_dir = options[:bin_dir]
@@ -50,20 +60,15 @@ class Gem::DependencyInstaller
     @force = options[:force]
     @format_executable = options[:format_executable]
     @ignore_dependencies = options[:ignore_dependencies]
+    @prerelease = options[:prerelease]
     @security_policy = options[:security_policy]
+    @user_install = options[:user_install]
     @wrappers = options[:wrappers]
 
     @installed_gems = []
 
     @install_dir = options[:install_dir] || Gem.dir
     @cache_dir = options[:cache_dir] || @install_dir
-
-    if options[:install_dir] then
-      spec_dir = File.join @install_dir, 'specifications'
-      @source_index = Gem::SourceIndex.from_gems_in spec_dir
-    else
-      @source_index = Gem.source_index
-    end
   end
 
   ##
@@ -88,10 +93,10 @@ class Gem::DependencyInstaller
           req
         end
 
-        all = requirements.length > 1 ||
-                (requirements.first != ">=" and requirements.first != ">")
+        all = !@prerelease && (requirements.length > 1 ||
+                (requirements.first != ">=" and requirements.first != ">"))
 
-        found = Gem::SpecFetcher.fetcher.fetch dep, all
+        found = Gem::SpecFetcher.fetcher.fetch dep, all, true, @prerelease
         gems_and_sources.push(*found)
 
       rescue Gem::RemoteFetcher::FetchError => e
@@ -232,15 +237,17 @@ class Gem::DependencyInstaller
       end
 
       inst = Gem::Installer.new local_gem_path,
-                                :env_shebang => @env_shebang,
-                                :force => @force,
-                                :format_executable => @format_executable,
+                                :bin_dir             => @bin_dir,
+                                :development         => @development,
+                                :env_shebang         => @env_shebang,
+                                :force               => @force,
+                                :format_executable   => @format_executable,
                                 :ignore_dependencies => @ignore_dependencies,
-                                :install_dir => @install_dir,
-                                :security_policy => @security_policy,
-                                :wrappers => @wrappers,
-                                :bin_dir => @bin_dir,
-                                :development => @development
+                                :install_dir         => @install_dir,
+                                :security_policy     => @security_policy,
+                                :source_index        => @source_index,
+                                :user_install        => @user_install,
+                                :wrappers            => @wrappers
 
       spec = inst.install
 

@@ -5,6 +5,10 @@ require_relative 'envutil'
 $m0 = Module.nesting
 
 class TestModule < Test::Unit::TestCase
+  def _wrap_assertion
+    yield
+  end
+
   def assert_method_defined?(klass, mid, message="")
     message = build_message(message, "#{klass}\##{mid} expected to be defined.")
     _wrap_assertion do
@@ -68,6 +72,12 @@ class TestModule < Test::Unit::TestCase
     list.reject {|c| c.to_s.start_with?("JSON") }
   end
 
+  def remove_rake_mixins(list)
+    list.
+      reject {|c| c.to_s == "RakeFileUtils" }.
+      reject {|c| c.to_s.start_with?("FileUtils") }
+  end
+
   module Mixin
     MIXIN = 1
     def mixin
@@ -96,16 +106,19 @@ class TestModule < Test::Unit::TestCase
     def AClass.cm3
       "cm3"
     end
-    
+
     private_class_method :cm1, "cm3"
 
     def aClass
+      :aClass
     end
 
     def aClass1
+      :aClass1
     end
 
     def aClass2
+      :aClass2
     end
 
     private :aClass1
@@ -114,15 +127,18 @@ class TestModule < Test::Unit::TestCase
 
   class BClass < AClass
     def bClass1
+      :bClass1
     end
 
     private
 
     def bClass2
+      :bClass2
     end
 
     protected
     def bClass3
+      :bClass3
     end
   end
 
@@ -195,23 +211,15 @@ class TestModule < Test::Unit::TestCase
     assert_equal([Mixin],            Mixin.ancestors)
 
     assert_equal([Object, Kernel, BasicObject],
-                 remove_json_mixins(remove_pp_mixins(Object.ancestors)))
+                 remove_rake_mixins(remove_json_mixins(remove_pp_mixins(Object.ancestors))))
     assert_equal([String, Comparable, Object, Kernel, BasicObject],
-                 remove_json_mixins(remove_pp_mixins(String.ancestors)))
+                 remove_rake_mixins(remove_json_mixins(remove_pp_mixins(String.ancestors))))
   end
 
   def test_class_eval
     Other.class_eval("CLASS_EVAL = 1")
     assert_equal(1, Other::CLASS_EVAL)
     assert(Other.constants.include?(:CLASS_EVAL))
-  end
-
-  def test_class_variable_set
-    # TODO
-  end
-
-  def test_class_variable_get
-    # TODO
   end
 
   def test_const_defined?
@@ -244,9 +252,9 @@ class TestModule < Test::Unit::TestCase
     assert_equal([], Mixin.included_modules)
     assert_equal([Mixin], User.included_modules)
     assert_equal([Kernel],
-                 remove_json_mixins(remove_pp_mixins(Object.included_modules)))
+                 remove_rake_mixins(remove_json_mixins(remove_pp_mixins(Object.included_modules))))
     assert_equal([Comparable, Kernel],
-                 remove_json_mixins(remove_pp_mixins(String.included_modules)))
+                 remove_rake_mixins(remove_json_mixins(remove_pp_mixins(String.included_modules))))
   end
 
   def test_instance_methods
@@ -441,7 +449,7 @@ class TestModule < Test::Unit::TestCase
     assert_raise(NameError) { c1.const_defined?(:foo) }
   end
 
-  def test_class_variable_get2
+  def test_class_variable_get
     c = Class.new
     c.class_eval { @@foo = :foo }
     assert_equal(:foo, c.class_variable_get(:@@foo))
@@ -449,7 +457,7 @@ class TestModule < Test::Unit::TestCase
     assert_raise(NameError) { c.class_variable_get(:foo) }
   end
 
-  def test_class_variable_set2
+  def test_class_variable_set
     c = Class.new
     c.class_variable_set(:@@foo, :foo)
     assert_equal(:foo, c.class_eval { @@foo })
@@ -462,6 +470,13 @@ class TestModule < Test::Unit::TestCase
     assert_equal(true, c.class_variable_defined?(:@@foo))
     assert_equal(false, c.class_variable_defined?(:@@bar))
     assert_raise(NameError) { c.class_variable_defined?(:foo) }
+  end
+
+  def test_remove_class_variable
+    c = Class.new
+    c.class_eval { @@foo = :foo }
+    c.class_eval { remove_class_variable(:@@foo) }
+    assert_equal(false, c.class_variable_defined?(:@@foo))
   end
 
   def test_export_method
@@ -486,7 +501,7 @@ class TestModule < Test::Unit::TestCase
 
     c = Class.new
     assert_raise(NameError) do
-      c.instance_eval { attr_reader :"$" }
+      c.instance_eval { attr_reader :"." }
     end
   end
 
@@ -514,7 +529,7 @@ class TestModule < Test::Unit::TestCase
     end
 
     %w(object_id __send__ initialize).each do |m|
-      assert_in_out_err([], <<-INPUT, [], /warning: undefining `#{m}' may cause serious problem$/)
+      assert_in_out_err([], <<-INPUT, [], /warning: undefining `#{m}' may cause serious problems$/)
         $VERBOSE = false
         Class.new.instance_eval { undef_method(:#{m}) }
       INPUT
@@ -527,7 +542,7 @@ class TestModule < Test::Unit::TestCase
       m.class_eval { alias foo bar }
     end
 
-    assert_in_out_err([], <<-INPUT, %w(2), /warning: discarding old foo$/)
+    assert_in_out_err([], <<-INPUT, %w(2), /discarding old foo$/)
       $VERBOSE = true
       c = Class.new
       c.class_eval do
@@ -540,10 +555,11 @@ class TestModule < Test::Unit::TestCase
   end
 
   def test_mod_constants
-    Module.const_set(:Foo, :foo)
-    assert_equal([:Foo], Module.constants(true))
-    assert_equal([:Foo], Module.constants(false))
-    Module.instance_eval { remove_const(:Foo) }
+    m = Module.new
+    m.const_set(:Foo, :foo)
+    assert_equal([:Foo], m.constants(true))
+    assert_equal([:Foo], m.constants(false))
+    m.instance_eval { remove_const(:Foo) }
   end
 
   def test_frozen_class
@@ -716,5 +732,27 @@ class TestModule < Test::Unit::TestCase
         c2.instance_eval { include(m) }
       }.call
     end
+  end
+
+  def test_send
+    a = AClass.new
+    assert_equal(:aClass, a.__send__(:aClass))
+    assert_equal(:aClass1, a.__send__(:aClass1))
+    assert_equal(:aClass2, a.__send__(:aClass2))
+    b = BClass.new
+    assert_equal(:aClass, b.__send__(:aClass))
+    assert_equal(:aClass1, b.__send__(:aClass1))
+    assert_equal(:aClass2, b.__send__(:aClass2))
+    assert_equal(:bClass1, b.__send__(:bClass1))
+    assert_equal(:bClass2, b.__send__(:bClass2))
+    assert_equal(:bClass3, b.__send__(:bClass3))
+  end
+
+
+  def test_nonascii_name
+    c = eval("class ::C\u{df}; self; end")
+    assert_equal("C\u{df}", c.name, '[ruby-core:24600]')
+    c = eval("class C\u{df}; self; end")
+    assert_equal("TestModule::C\u{df}", c.name, '[ruby-core:24600]')
   end
 end

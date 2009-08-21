@@ -51,7 +51,7 @@ onig_error_code_to_format(int code)
   case ONIG_NO_SUPPORT_CONFIG:
     p = "no support in this configuration"; break;
   case ONIGERR_MEMORY:
-    p = "fail to memory allocation"; break;
+    p = "failed to allocate memory"; break;
   case ONIGERR_MATCH_STACK_LIMIT_OVER:
     p = "match-stack limit over"; break;
   case ONIGERR_TYPE_BUG:
@@ -232,7 +232,7 @@ static int to_ascii(OnigEncoding enc, UChar *s, UChar *end,
     *is_over = ((p < end) ? 1 : 0);
   }
   else {
-    len = MIN((end - s), buf_size);
+    len = (int)MIN((end - s), buf_size);
     xmemcpy(buf, s, (size_t )len);
     *is_over = ((buf_size < (end - s)) ? 1 : 0);
   }
@@ -251,12 +251,13 @@ onig_error_code_to_str(UChar* s, int code, ...)
 onig_error_code_to_str(s, code, va_alist)
   UChar* s;
   int code;
-  va_dcl 
+  va_dcl
 #endif
 {
   UChar *p, *q;
   OnigErrorInfo* einfo;
-  int len, is_over;
+  size_t len;
+  int is_over;
   UChar parbuf[MAX_ERROR_PAR_LEN];
   va_list vargs;
 
@@ -327,7 +328,8 @@ onig_snprintf_with_pattern(buf, bufsize, enc, pat, pat_end, fmt, va_alist)
     va_dcl
 #endif
 {
-  int n, need, len;
+  size_t need;
+  int n, len;
   UChar *p, *s, *bp;
   UChar bs[6];
   va_list args;

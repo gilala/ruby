@@ -276,9 +276,9 @@ if defined? GDBM
       }
     end
 
-    def test_index
+    def test_key
       assert_equal('bar', @gdbm['foo'] = 'bar')
-      assert_equal('foo', @gdbm.index('bar'))
+      assert_equal('foo', @gdbm.key('bar'))
       assert_nil(@gdbm['bar'])
     end
 
@@ -354,7 +354,7 @@ if defined? GDBM
 
       n = 0
       ret = @gdbm.each_value {|val|
-        assert_not_nil(key = @gdbm.index(val))
+        assert_not_nil(key = @gdbm.key(val))
         assert_not_nil(i = keys.index(key))
         assert_equal(val, values[i])
 
@@ -696,7 +696,7 @@ if defined? GDBM
     def test_newdb_open
       GDBM.open("#{@tmproot}/a.dbm") {|dbm|
         dbm["k"] = "v"
-      } 
+      }
       v = GDBM.open("#{@tmproot}/a.dbm", nil, GDBM::NEWDB) {|d|
         assert_equal(0, d.length)
         assert_nil(d["k"])

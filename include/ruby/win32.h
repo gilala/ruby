@@ -27,16 +27,17 @@ extern "C" {
 
 // #include <stdarg.h> conflict with varargs.h?
 #if !defined(WSAAPI)
+#if defined(__cplusplus) && defined(_MSC_VER)
+extern "C++" {			/* template without extern "C++" */
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#if defined(__cplusplus) && defined(_MSC_VER)
+}
+#endif
 #endif
 
 #define NT 1			/* deprecated */
-
-#ifdef _WIN32_WCE
-#undef CharNext
-#define CharNext CharNextA
-#endif
 
 //
 // We're not using Microsoft's "extensions" to C for
@@ -92,12 +93,6 @@ typedef unsigned int uintptr_t;
 #endif
 #ifndef __MINGW32__
 # define mode_t int
-#endif
-
-#ifdef _M_IX86
-# define WIN95 1
-#else
-# undef  WIN95
 #endif
 
 #ifdef WIN95
@@ -164,7 +159,7 @@ extern DWORD rb_w32_osid(void);
 
 #undef execv
 #define execv(path,argv)	rb_w32_aspawn(P_OVERLAY,path,argv)
-#if !defined(__BORLANDC__) && !defined(_WIN32_WCE)
+#if !defined(__BORLANDC__)
 #undef isatty
 #define isatty(h)		rb_w32_isatty(h)
 #endif
@@ -196,8 +191,8 @@ extern int rb_w32_stat(const char *, struct stat *);
 extern int rb_w32_fstat(int, struct stat *);
 #endif
 
-#define strcasecmp		stricmp
-#define strncasecmp		strnicmp
+#define strcasecmp		_stricmp
+#define strncasecmp		_strnicmp
 #define fsync			_commit
 
 #ifdef __MINGW32__
@@ -208,6 +203,21 @@ struct timezone {
 #undef isascii
 #define isascii __isascii
 #endif
+
+struct iovec {
+    void *iov_base;
+    size_t iov_len;
+};
+struct msghdr {
+    void *msg_name;
+    int msg_namelen;
+    struct iovec *msg_iov;
+    int msg_iovlen;
+    void *msg_control;
+    int msg_controllen;
+    int msg_flags;
+};
+
 #define NtInitialize ruby_sysinit
 extern int    rb_w32_parse_cmdline(char ***, const char *);
 extern int    rb_w32_cmdvector(const char *, char ***);
@@ -230,6 +240,8 @@ extern int    WSAAPI rb_w32_recv(int, char *, int, int);
 extern int    WSAAPI rb_w32_recvfrom(int, char *, int, int, struct sockaddr *, int *);
 extern int    WSAAPI rb_w32_send(int, const char *, int, int);
 extern int    WSAAPI rb_w32_sendto(int, const char *, int, int, const struct sockaddr *, int);
+extern int    recvmsg(int, struct msghdr *, int);
+extern int    sendmsg(int, const struct msghdr *, int);
 extern int    WSAAPI rb_w32_setsockopt(int, int, int, const char *, int);
 extern int    WSAAPI rb_w32_shutdown(int, int);
 extern int    WSAAPI rb_w32_socket(int, int, int);
@@ -249,24 +261,17 @@ extern char **rb_w32_get_environ(void);
 extern void   rb_w32_free_environ(char **);
 extern int    rb_w32_map_errno(DWORD);
 
-#define vsnprintf(s,n,f,l) rb_w32_vsnprintf(s,n,f,l)
-#define snprintf   rb_w32_snprintf
-extern int rb_w32_vsnprintf(char *, size_t, const char *, va_list);
-extern int rb_w32_snprintf(char *, size_t, const char *, ...);
-
 extern int chown(const char *, int, int);
 extern int link(const char *, const char *);
 extern int gettimeofday(struct timeval *, struct timezone *);
 extern rb_pid_t waitpid (rb_pid_t, int *, int);
-extern int rb_w32_argv_size(char *const *);
-extern char *rb_w32_join_argv(char *, char *const *);
 extern rb_pid_t rb_w32_spawn(int, const char *, const char*);
 extern rb_pid_t rb_w32_aspawn(int, const char *, char *const *);
 extern int kill(int, int);
 extern int fcntl(int, int, ...);
 extern rb_pid_t rb_w32_getpid(void);
 extern rb_pid_t rb_w32_getppid(void);
-#if !defined(__BORLANDC__) && !defined(_WIN32_WCE)
+#if !defined(__BORLANDC__)
 extern int rb_w32_isatty(int);
 #endif
 extern int rb_w32_mkdir(const char *, int);
@@ -545,6 +550,7 @@ HANDLE GetCurrentThreadHandle(void);
 int  rb_w32_sleep(unsigned long msec);
 int  rb_w32_putc(int, FILE*);
 int  rb_w32_getc(FILE*);
+int  rb_w32_wopen(const WCHAR *, int, ...);
 int  rb_w32_open(const char *, int, ...);
 int  rb_w32_close(int);
 int  rb_w32_fclose(FILE*);

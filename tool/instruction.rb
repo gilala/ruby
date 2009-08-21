@@ -63,7 +63,7 @@ class RubyVM
          rets.any?{|t, v| v == '...'})
         # user definision
         raise "no sp increase definition" if @sp_inc.nil?
-        ret = "int inc = 0;\n"
+        ret = "rb_num_t inc = 0;\n"
 
         @opes.each_with_index{|(t, v), i|
           if t == 'rb_num_t' && ((re = /\b#{v}\b/n) =~ @sp_inc ||
@@ -106,8 +106,8 @@ class RubyVM
 
       load_insns_def opts[:"insns.def"] || 'insns.def'
 
-      load_opt_operand_def opts[:"opope.def"] || 'opt_operand.def'
-      load_insn_unification_def opts[:"unif.def"] || 'opt_insn_unif.def'
+      load_opt_operand_def opts[:"opope.def"] || 'defs/opt_operand.def'
+      load_insn_unification_def opts[:"unif.def"] || 'defs/opt_insn_unif.def'
       make_stackcaching_insns if vm_opt?('STACK_CACHING')
     end
 
@@ -977,6 +977,8 @@ class RubyVM
       # operands info
       operands_info = ''
       operands_num_info = ''
+      icoperands_num_info = ''
+
       @insns.each{|insn|
         opes = insn.opes
         operands_info << '  '
@@ -987,6 +989,12 @@ class RubyVM
 
         num = opes.size + 1
         operands_num_info << "  #{num},\n"
+
+        icnum = 0
+        opes.each{|e|
+          icnum += 1 if e[0] == 'IC'
+        }
+        icoperands_num_info << "  #{icnum},\n"
       }
 
       # stack num
@@ -1326,8 +1334,8 @@ class RubyVM
     def self.def_options(opt)
       opts = {
         :"insns.def" => 'insns.def',
-        :"opope.def" => 'opt_operand.def',
-        :"unif.def"  => 'opt_insn_unif.def',
+        :"opope.def" => 'defs/opt_operand.def',
+        :"unif.def"  => 'defs/opt_insn_unif.def',
       }
 
       opt.on("-Dname", /\AOPT_(\w+)\z/, "enable VM option") {|s, v|

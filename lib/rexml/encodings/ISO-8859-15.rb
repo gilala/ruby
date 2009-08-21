@@ -3,10 +3,10 @@
 #
 module REXML
   module Encoding
-  	register("ISO-8859-15") do |o|
-  		alias encode to_iso_8859_15
+    register("ISO-8859-15") do |o|
+      alias encode to_iso_8859_15
       alias decode from_iso_8859_15
-  	end
+    end
 
     # Convert from UTF-8
     def to_iso_8859_15(content)
@@ -46,7 +46,7 @@ module REXML
       end
       array_enc.pack('C*')
     end
-    
+
     # Convert to UTF-8
     def from_iso_8859_15(str)
       array_latin9 = str.unpack('C*')

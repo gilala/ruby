@@ -216,6 +216,22 @@ assert_equal 'true', %{
   end
 }
 
+assert_equal 'ok', %{
+  open("zzz.rb", "w") do |f|
+    f.puts <<-END
+      begin
+        Thread.new { fork { GC.start } }.join
+        pid, status = Process.wait2
+        $result = status.success? ? :ok : :ng
+      rescue NotImplementedError
+        $result = :ok
+      end
+    END
+  end
+  require "./zzz.rb"
+  $result
+}
+
 assert_finish 3, %{
   th = Thread.new {sleep 2}
   th.join(1)
@@ -363,5 +379,9 @@ assert_equal 'ok', %q{
 }, '[ruby-dev:35414]'
 
 assert_equal 'ok', %q{
-  10000.times { Thread.new(true) {|x| x == false } }; :ok
+  begin
+    10000.times { Thread.new(true) {|x| x == false } }
+  rescue NoMemoryError, StandardError
+  end
+  :ok
 }

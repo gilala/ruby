@@ -14,6 +14,10 @@ class TestFiber < Test::Unit::TestCase
     assert_equal([:a, :b], Fiber.new{|a, b| [a, b]}.resume(:a, :b))
   end
 
+  def test_argument
+    assert_equal(4, Fiber.new {|i=4| i}.resume)
+  end
+
   def test_term
     assert_equal(:ok, Fiber.new{:ok}.resume)
     assert_equal([:a, :b, :c, :d, :e],
@@ -133,7 +137,7 @@ class TestFiber < Test::Unit::TestCase
   end
 
   def test_tls
-    # 
+    #
     def tvar(var, val)
       old = Thread.current[var]
       begin
@@ -159,6 +163,20 @@ class TestFiber < Test::Unit::TestCase
     assert_equal(1,   Thread.current[:v]); }
     assert_equal(nil, Thread.current[:v]); fb.resume
     assert_equal(nil, Thread.current[:v]);
+  end
+
+  def test_alive
+    fib = Fiber.new{Fiber.yield}
+    assert_equal(true, fib.alive?)
+    fib.resume
+    assert_equal(true, fib.alive?)
+    fib.resume
+    assert_equal(false, fib.alive?)
+  end
+
+  def test_resume_self
+    f = Fiber.new {f.resume}
+    assert_raise(FiberError, '[ruby-core:23651]') {f.transfer}
   end
 end
 

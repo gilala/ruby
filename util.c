@@ -20,19 +20,11 @@
 #ifdef _WIN32
 #include "missing/file.h"
 #endif
-#if defined(__CYGWIN32__)
-#define _open open
-#define _close close
-#define _unlink unlink
-#define _access access
-#elif defined(_WIN32)
-#include <io.h>
-#endif
 
 #include "ruby/util.h"
 
 unsigned long
-ruby_scan_oct(const char *start, int len, int *retlen)
+ruby_scan_oct(const char *start, size_t len, size_t *retlen)
 {
     register const char *s = start;
     register unsigned long retval = 0;
@@ -41,24 +33,24 @@ ruby_scan_oct(const char *start, int len, int *retlen)
 	retval <<= 3;
 	retval |= *s++ - '0';
     }
-    *retlen = s - start;
+    *retlen = (int)(s - start);	/* less than len */
     return retval;
 }
 
 unsigned long
-ruby_scan_hex(const char *start, int len, int *retlen)
+ruby_scan_hex(const char *start, size_t len, size_t *retlen)
 {
     static const char hexdigit[] = "0123456789abcdef0123456789ABCDEF";
     register const char *s = start;
     register unsigned long retval = 0;
-    char *tmp;
+    const char *tmp;
 
     while (len-- && *s && (tmp = strchr(hexdigit, *s))) {
 	retval <<= 4;
 	retval |= (tmp - hexdigit) & 15;
 	s++;
     }
-    *retlen = s - start;
+    *retlen = (int)(s - start);	/* less than len */
     return retval;
 }
 
@@ -101,7 +93,7 @@ scan_digits(const char *str, int base, size_t *retlen, int *overflow)
             *overflow = 1;
         ret *= base;
         x = ret;
-        ret += d; 
+        ret += d;
         if (ret < x)
             *overflow = 1;
     }
@@ -170,7 +162,7 @@ ruby_strtoul(const char *str, char **endptr, int base)
     }
 
     if (sign < 0) {
-        ret = -ret;
+        ret = (unsigned long)(-(long)ret);
         return ret;
     }
     else {
@@ -191,7 +183,7 @@ ruby_strtoul(const char *str, char **endptr, int base)
 #   define S_ISDIR(m) ((m & S_IFMT) == S_IFDIR)
 #endif
 
-#if defined(MSDOS) || defined(__CYGWIN32__) || defined(_WIN32)
+#if defined(__CYGWIN32__) || defined(_WIN32)
 /*
  *  Copyright (c) 1993, Intergraph Corporation
  *
@@ -217,11 +209,11 @@ ruby_strtoul(const char *str, char **endptr, int base)
  * Style 1:  The suffix begins with a '.'.  The extension is replaced.
  *           If the name matches the original name, use the fallback method.
  *
- * Style 2:  The suffix is a single character, not a '.'.  Try to add the 
+ * Style 2:  The suffix is a single character, not a '.'.  Try to add the
  *           suffix to the following places, using the first one that works.
- *               [1] Append to extension.  
- *               [2] Append to filename, 
- *               [3] Replace end of extension, 
+ *               [1] Append to extension.
+ *               [2] Append to filename,
+ *               [3] Replace end of extension,
  *               [4] Replace end of filename.
  *           If the name matches the original name, use the fallback method.
  *
@@ -257,7 +249,7 @@ ruby_strtoul(const char *str, char **endptr, int base)
  *                longname.fil => longname.fi~
  *                longname.fi~ => longnam~.fi~
  *                longnam~.fi~ => longnam~.$$$
- *                
+ *
  */
 
 
@@ -278,20 +270,17 @@ ruby_add_suffix(VALUE str, const char *suffix)
     char *s, *t, *p;
     long slen;
     char buf[1024];
+    char *const bufend = buf + sizeof(buf);
 
     if (RSTRING_LEN(str) > 1000)
         rb_fatal("Cannot do inplace edit on long filename (%ld characters)",
 		 RSTRING_LEN(str));
 
-#if defined(DJGPP) || defined(__CYGWIN32__) || defined(_WIN32)
+#if defined(__CYGWIN32__) || defined(_WIN32)
     /* Style 0 */
     slen = RSTRING_LEN(str);
     rb_str_cat(str, suffix, extlen);
-#if defined(DJGPP)
-    if (_USE_LFN) return;
-#else
     if (valid_filename(RSTRING_PTR(str))) return;
-#endif
 
     /* Fooey, style 0 failed.  Fix str before continuing. */
     rb_str_resize(str, slen);
@@ -312,10 +301,10 @@ ruby_add_suffix(VALUE str, const char *suffix)
 
     if (*suffix == '.') {        /* Style 1 */
         if (strEQ(ext, suffix)) goto fallback;
-	strcpy(p, suffix);
+	strlcpy(p, suffix, bufend - p);
     }
     else if (suffix[1] == '\0') {  /* Style 2 */
-        if (extlen < 4) { 
+        if (extlen < 4) {
 	    ext[extlen] = *suffix;
 	    ext[++extlen] = '\0';
         }
@@ -329,7 +318,7 @@ ruby_add_suffix(VALUE str, const char *suffix)
 	    buf[7] = *suffix;
 	}
 	else goto fallback;
-	strcpy(p, ext);
+	strlcpy(p, ext, bufend - p);
     }
     else { /* Style 3:  Panic */
 fallback:
@@ -340,7 +329,7 @@ fallback:
 }
 
 #if defined(__CYGWIN32__) || defined(_WIN32)
-static int 
+static int
 valid_filename(const char *s)
 {
     int fd;
@@ -349,9 +338,9 @@ valid_filename(const char *s)
     // It doesn't exist, so see if we can open it.
     */
 
-    if ((fd = _open(s, O_CREAT|O_EXCL, 0666)) >= 0) {
-	_close(fd);
-	_unlink(s);	/* don't leave it laying around */
+    if ((fd = open(s, O_CREAT|O_EXCL, 0666)) >= 0) {
+	close(fd);
+	unlink(s);	/* don't leave it laying around */
 	return 1;
     }
     else if (errno == EEXIST) {
@@ -363,136 +352,6 @@ valid_filename(const char *s)
 #endif
 #endif
 
-#if defined __DJGPP__
-
-#include <dpmi.h>
-
-static char dbcs_table[256];
-
-int
-make_dbcs_table()
-{
-    __dpmi_regs r;
-    struct {
-	unsigned char start;
-	unsigned char end;
-    } vec;
-    int offset;
-
-    memset(&r, 0, sizeof(r));
-    r.x.ax = 0x6300;
-    __dpmi_int(0x21, &r);
-    offset = r.x.ds * 16 + r.x.si;
-
-    for (;;) {
-	int i;
-	dosmemget(offset, sizeof vec, &vec);
-	if (!vec.start && !vec.end)
-	    break;
-	for (i = vec.start; i <= vec.end; i++)
-	    dbcs_table[i] = 1;
-	offset += 2;
-    }
-}
-
-int
-mblen(const char *s, size_t n)
-{
-    static int need_init = 1;
-    if (need_init) {
-	make_dbcs_table();
-	need_init = 0;
-    }
-    if (s) {
-	if (n == 0 || *s == 0)
-	    return 0;
-	else if (!s[1])
-	    return 1;
-	return dbcs_table[(unsigned char)*s] + 1;
-    }
-    else
-	return 1;
-}
-
-struct PathList {
-    struct PathList *next;
-    char *path;
-};
-
-struct PathInfo {
-    struct PathList *head;
-    int count;
-};
-
-static int
-push_element(const char *path, VALUE vinfo)
-{
-    struct PathList *p;
-    struct PathInfo *info = (struct PathInfo *)vinfo;
-
-    p = ALLOC(struct PathList);
-    MEMZERO(p, struct PathList, 1);
-    p->path = ruby_strdup(path);
-    p->next = info->head;
-    info->head = p;
-    info->count++;
-
-    return 0;
-}
-
-#include <dirent.h>
-int __opendir_flags = __OPENDIR_PRESERVE_CASE;
-
-char **
-__crt0_glob_function(char *path)
-{
-    int len = strlen(path);
-    int i;
-    char **rv;
-    char path_buffer[PATH_MAX];
-    char *buf = path_buffer;
-    char *p;
-    struct PathInfo info;
-    struct PathList *plist;
-
-    if (PATH_MAX <= len)
-	buf = ruby_xmalloc(len + 1);
-
-    strncpy(buf, path, len);
-    buf[len] = '\0';
-
-    for (p = buf; *p; p += mblen(p, RUBY_MBCHAR_MAXSIZE))
-	if (*p == '\\')
-	    *p = '/';
-
-    info.count = 0;
-    info.head = 0;
-
-    ruby_glob(buf, 0, push_element, (VALUE)&info);
-
-    if (buf != path_buffer)
-	ruby_xfree(buf);
-
-    if (info.count == 0)
-	return 0;
-
-    rv = ruby_xmalloc((info.count + 1) * sizeof (char *));
-
-    plist = info.head;
-    i = 0;
-    while (plist) {
-	struct PathList *cur;
-	rv[i] = plist->path;
-	cur = plist;
-	plist = plist->next;
-	ruby_xfree(cur);
-	i++;
-    }
-    rv[i] = 0;
-    return rv;
-}
-
-#endif
 
 /* mm.c */
 
@@ -512,7 +371,7 @@ __crt0_glob_function(char *path)
 
 #define mmarg mmkind, size, high, low
 
-static void mmswap_(register char *a, register char *b, int mmkind, int size, int high, int low)
+static void mmswap_(register char *a, register char *b, int mmkind, size_t size, size_t high, size_t low)
 {
  register int s;
  if (a == b) return;
@@ -537,7 +396,7 @@ static void mmswap_(register char *a, register char *b, int mmkind, int size, in
 }
 #define mmswap(a,b) mmswap_((a),(b),mmarg)
 
-static void mmrot3_(register char *a, register char *b, register char *c, int mmkind, int size, int high, int low)
+static void mmrot3_(register char *a, register char *b, register char *c, int mmkind, size_t size, size_t high, size_t low)
 {
  register int s;
  if (mmkind >= 0) {
@@ -579,16 +438,17 @@ typedef struct { char *LL, *RR; } stack_node; /* Stack structure for L,l,R,r */
                        ((*cmp)(b,c,d)>0 ? b : ((*cmp)(a,c,d)<0 ? a : c)))
 
 void
-ruby_qsort(void* base, const int nel, const int size,
+ruby_qsort(void* base, const size_t nel, const size_t size,
 	   int (*cmp)(const void*, const void*, void*), void *d)
 {
   register char *l, *r, *m;          	/* l,r:left,right group   m:median point */
-  register int  t, eq_l, eq_r;       	/* eq_l: all items in left group are equal to S */
+  register int t, eq_l, eq_r;       	/* eq_l: all items in left group are equal to S */
   char *L = base;                    	/* left end of curren region */
   char *R = (char*)base + size*(nel-1); /* right end of current region */
-  int  chklim = 63;                     /* threshold of ordering element check */
+  size_t chklim = 63;                   /* threshold of ordering element check */
   stack_node stack[32], *top = stack;   /* 32 is enough for 32bit CPU */
-  int mmkind, high, low;
+  int mmkind;
+  size_t high, low, n;
 
   if (nel <= 1) return;        /* need not to sort */
   mmprepare(base, size);
@@ -605,29 +465,29 @@ ruby_qsort(void* base, const int nel, const int size,
     }
 
     l = L; r = R;
-    t = (r - l + size) / size;  /* number of elements */
-    m = l + size * (t >> 1);    /* calculate median value */
+    n = (r - l + size) / size;  /* number of elements */
+    m = l + size * (n >> 1);    /* calculate median value */
 
-    if (t >= 60) {
+    if (n >= 60) {
       register char *m1;
       register char *m3;
-      if (t >= 200) {
-	t = size*(t>>3); /* number of bytes in splitting 8 */
+      if (n >= 200) {
+	n = size*(n>>3); /* number of bytes in splitting 8 */
 	{
-	  register char *p1 = l  + t;
-	  register char *p2 = p1 + t;
-	  register char *p3 = p2 + t;
+	  register char *p1 = l  + n;
+	  register char *p2 = p1 + n;
+	  register char *p3 = p2 + n;
 	  m1 = med3(p1, p2, p3);
-	  p1 = m  + t;
-	  p2 = p1 + t;
-	  p3 = p2 + t;
+	  p1 = m  + n;
+	  p2 = p1 + n;
+	  p3 = p2 + n;
 	  m3 = med3(p1, p2, p3);
 	}
       }
       else {
-	t = size*(t>>2); /* number of bytes in splitting 4 */
-	m1 = l + t;
-	m3 = m + t;
+	n = size*(n>>2); /* number of bytes in splitting 4 */
+	m1 = l + n;
+	m3 = m + n;
       }
       m = med3(m1, m, m3);
     }
@@ -731,7 +591,7 @@ char *
 ruby_strdup(const char *str)
 {
     char *tmp;
-    int len = strlen(str) + 1;
+    size_t len = strlen(str) + 1;
 
     tmp = xmalloc(len);
     memcpy(tmp, str, len);
@@ -1039,6 +899,9 @@ static double private_mem[PRIVATE_mem], *pmem_next = private_mem;
 
 #ifdef __cplusplus
 extern "C" {
+#if 0
+}
+#endif
 #endif
 
 #if defined(IEEE_LITTLE_ENDIAN) + defined(IEEE_BIG_ENDIAN) + defined(VAX) + defined(IBM) != 1
@@ -1048,23 +911,25 @@ Exactly one of IEEE_LITTLE_ENDIAN, IEEE_BIG_ENDIAN, VAX, or IBM should be define
 typedef union { double d; ULong L[2]; } U;
 
 #ifdef YES_ALIAS
-#define dval(x) x
-#ifdef IEEE_LITTLE_ENDIAN
-#define word0(x) ((ULong *)&x)[1]
-#define word1(x) ((ULong *)&x)[0]
+typedef double double_u;
+#  define dval(x) x
+#  ifdef IEEE_LITTLE_ENDIAN
+#    define word0(x) (((ULong *)&x)[1])
+#    define word1(x) (((ULong *)&x)[0])
+#  else
+#    define word0(x) (((ULong *)&x)[0])
+#    define word1(x) (((ULong *)&x)[1])
+#  endif
 #else
-#define word0(x) ((ULong *)&x)[0]
-#define word1(x) ((ULong *)&x)[1]
-#endif
-#else
-#ifdef IEEE_LITTLE_ENDIAN
-#define word0(x) ((U*)&x)->L[1]
-#define word1(x) ((U*)&x)->L[0]
-#else
-#define word0(x) ((U*)&x)->L[0]
-#define word1(x) ((U*)&x)->L[1]
-#endif
-#define dval(x) ((U*)&x)->d
+typedef U double_u;
+#  ifdef IEEE_LITTLE_ENDIAN
+#    define word0(x) (x.L[1])
+#    define word1(x) (x.L[0])
+#  else
+#    define word0(x) (x.L[0])
+#    define word1(x) (x.L[1])
+#  endif
+#  define dval(x) (x.d)
 #endif
 
 /* The following definition of Storeinc is appropriate for MIPS processors.
@@ -1263,7 +1128,7 @@ Balloc(int k)
     int x;
     Bigint *rv;
 #ifndef Omit_Private_Memory
-    unsigned int len;
+    size_t len;
 #endif
 
     ACQUIRE_DTOA_LOCK(0);
@@ -1310,11 +1175,11 @@ static Bigint *
 multadd(Bigint *b, int m, int a)   /* multiply by m and add a */
 {
     int i, wds;
-#ifdef ULLong
     ULong *x;
+#ifdef ULLong
     ULLong carry, y;
 #else
-    ULong carry, *x, y;
+    ULong carry, y;
 #ifdef Pack_32
     ULong xi, z;
 #endif
@@ -1329,7 +1194,7 @@ multadd(Bigint *b, int m, int a)   /* multiply by m and add a */
 #ifdef ULLong
         y = *x * (ULLong)m + carry;
         carry = y >> 32;
-        *x++ = y & FFFFFFFF;
+        *x++ = (ULong)(y & FFFFFFFF);
 #else
 #ifdef Pack_32
         xi = *x;
@@ -1351,7 +1216,7 @@ multadd(Bigint *b, int m, int a)   /* multiply by m and add a */
             Bfree(b);
             b = b1;
         }
-        b->x[wds++] = carry;
+        b->x[wds++] = (ULong)carry;
         b->wds = wds;
     }
     return b;
@@ -1518,9 +1383,9 @@ mult(Bigint *a, Bigint *b)
             do {
                 z = *x++ * (ULLong)y + *xc + carry;
                 carry = z >> 32;
-                *xc++ = z & FFFFFFFF;
+                *xc++ = (ULong)(z & FFFFFFFF);
             } while (x < xae);
-            *xc = carry;
+            *xc = (ULong)carry;
         }
     }
 #else
@@ -1537,7 +1402,7 @@ mult(Bigint *a, Bigint *b)
                 carry = z2 >> 16;
                 Storeinc(xc, z2, z);
             } while (x < xae);
-            *xc = carry;
+            *xc = (ULong)carry;
         }
         if (y = *xb >> 16) {
             x = xa;
@@ -1565,7 +1430,7 @@ mult(Bigint *a, Bigint *b)
                 carry = z >> 16;
                 *xc++ = z & 0xffff;
             } while (x < xae);
-            *xc = carry;
+            *xc = (ULong)carry;
         }
     }
 #endif
@@ -1756,12 +1621,12 @@ diff(Bigint *a, Bigint *b)
     do {
         y = (ULLong)*xa++ - *xb++ - borrow;
         borrow = y >> 32 & (ULong)1;
-        *xc++ = y & FFFFFFFF;
+        *xc++ = (ULong)(y & FFFFFFFF);
     } while (xb < xbe);
     while (xa < xae) {
         y = *xa++ - borrow;
         borrow = y >> 32 & (ULong)1;
-        *xc++ = y & FFFFFFFF;
+        *xc++ = (ULong)(y & FFFFFFFF);
     }
 #else
 #ifdef Pack_32
@@ -1799,10 +1664,11 @@ diff(Bigint *a, Bigint *b)
 }
 
 static double
-ulp(double x)
+ulp(double x_)
 {
     register Long L;
-    double a;
+    double_u x, a;
+    dval(x) = x_;
 
     L = (word0(x) & Exp_mask) - (P-1)*Exp_msk1;
 #ifndef Avoid_Underflow
@@ -1840,7 +1706,7 @@ b2d(Bigint *a, int *e)
 {
     ULong *xa, *xa0, w, y, z;
     int k;
-    double d;
+    double_u d;
 #ifdef VAX
     ULong d0, d1;
 #else
@@ -1901,8 +1767,9 @@ ret_d:
 }
 
 static Bigint *
-d2b(double d, int *e, int *bits)
+d2b(double d_, int *e, int *bits)
 {
+    double_u d;
     Bigint *b;
     int de, k;
     ULong *x, y, z;
@@ -1911,6 +1778,9 @@ d2b(double d, int *e, int *bits)
 #endif
 #ifdef VAX
     ULong d0, d1;
+#endif
+    dval(d) = d_;
+#ifdef VAX
     d0 = word0(d) >> 16 | word0(d) << 16;
     d1 = word1(d) >> 16 | word1(d) << 16;
 #else
@@ -2036,7 +1906,7 @@ d2b(double d, int *e, int *bits)
 static double
 ratio(Bigint *a, Bigint *b)
 {
-    double da, db;
+    double_u da, db;
     int k, ka, kb;
 
     dval(da) = b2d(a, &ka);
@@ -2195,7 +2065,8 @@ ruby_strtod(const char *s00, char **se)
     int bb2, bb5, bbe, bd2, bd5, bbbits, bs2, c, dsign,
          e, e1, esign, i, j, k, nd, nd0, nf, nz, nz0, sign;
     const char *s, *s0, *s1;
-    double aadj, aadj1, adj, rv, rv0;
+    double aadj, adj;
+    double_u aadj1, rv, rv0;
     Long L;
     ULong y, z;
     Bigint *bb, *bb1, *bd, *bd0, *bs, *delta;
@@ -2894,14 +2765,14 @@ drop_down:
         }
         if ((aadj = ratio(delta, bs)) <= 2.) {
             if (dsign)
-                aadj = aadj1 = 1.;
+                aadj = dval(aadj1) = 1.;
             else if (word1(rv) || word0(rv) & Bndry_mask) {
 #ifndef Sudden_Underflow
                 if (word1(rv) == Tiny1 && !word0(rv))
                     goto undfl;
 #endif
                 aadj = 1.;
-                aadj1 = -1.;
+                dval(aadj1) = -1.;
             }
             else {
                 /* special case -- power of FLT_RADIX to be */
@@ -2911,12 +2782,12 @@ drop_down:
                     aadj = 1./FLT_RADIX;
                 else
                     aadj *= 0.5;
-                aadj1 = -aadj;
+                dval(aadj1) = -aadj;
             }
         }
         else {
             aadj *= 0.5;
-            aadj1 = dsign ? aadj : -aadj;
+            dval(aadj1) = dsign ? aadj : -aadj;
 #ifdef Check_FLT_ROUNDS
             switch (Rounding) {
               case 2: /* towards +infinity */
@@ -2928,7 +2799,7 @@ drop_down:
             }
 #else
             if (Flt_Rounds == 0)
-                aadj1 += 0.5;
+                dval(aadj1) += 0.5;
 #endif /*Check_FLT_ROUNDS*/
         }
         y = word0(rv) & Exp_mask;
@@ -2938,7 +2809,7 @@ drop_down:
         if (y == Exp_msk1*(DBL_MAX_EXP+Bias-1)) {
             dval(rv0) = dval(rv);
             word0(rv) -= P*Exp_msk1;
-            adj = aadj1 * ulp(dval(rv));
+            adj = dval(aadj1) * ulp(dval(rv));
             dval(rv) += adj;
             if ((word0(rv) & Exp_mask) >=
                     Exp_msk1*(DBL_MAX_EXP+Bias-P)) {
@@ -2955,14 +2826,14 @@ drop_down:
 #ifdef Avoid_Underflow
             if (scale && y <= 2*P*Exp_msk1) {
                 if (aadj <= 0x7fffffff) {
-                    if ((z = aadj) <= 0)
+                    if ((z = (int)aadj) <= 0)
                         z = 1;
                     aadj = z;
-                    aadj1 = dsign ? aadj : -aadj;
+                    dval(aadj1) = dsign ? aadj : -aadj;
                 }
                 word0(aadj1) += (2*P+1)*Exp_msk1 - y;
             }
-            adj = aadj1 * ulp(dval(rv));
+            adj = dval(aadj1) * ulp(dval(rv));
             dval(rv) += adj;
 #else
 #ifdef Sudden_Underflow
@@ -3113,7 +2984,7 @@ quorem(Bigint *b, Bigint *S)
             carry = ys >> 32;
             y = *bx - (ys & FFFFFFFF) - borrow;
             borrow = y >> 32 & (ULong)1;
-            *bx++ = y & FFFFFFFF;
+            *bx++ = (ULong)(y & FFFFFFFF);
 #else
 #ifdef Pack_32
             si = *sx++;
@@ -3153,7 +3024,7 @@ quorem(Bigint *b, Bigint *S)
             carry = ys >> 32;
             y = *bx - (ys & FFFFFFFF) - borrow;
             borrow = y >> 32 & (ULong)1;
-            *bx++ = y & FFFFFFFF;
+            *bx++ = (ULong)(y & FFFFFFFF);
 #else
 #ifdef Pack_32
             si = *sx++;
@@ -3189,27 +3060,18 @@ quorem(Bigint *b, Bigint *S)
 static char *dtoa_result;
 #endif
 
+#ifndef MULTIPLE_THREADS
 static char *
 rv_alloc(int i)
 {
-    int j, k, *r;
-
-    j = sizeof(ULong);
-    for (k = 0;
-            sizeof(Bigint) - sizeof(ULong) - sizeof(int) + j <= i;
-            j <<= 1)
-        k++;
-    r = (int*)Balloc(k);
-    *r = k;
-    return
-#ifndef MULTIPLE_THREADS
-        dtoa_result =
-#endif
-        (char *)(r+1);
+    return dtoa_result = xmalloc(i);
 }
+#else
+#define rv_alloc(i) xmalloc(i)
+#endif
 
 static char *
-nrv_alloc(const char *s, char **rve, int n)
+nrv_alloc(const char *s, char **rve, size_t n)
 {
     char *rv, *t;
 
@@ -3220,23 +3082,21 @@ nrv_alloc(const char *s, char **rve, int n)
     return rv;
 }
 
+#define rv_strdup(s, rve) nrv_alloc(s, rve, strlen(s)+1)
+
+#ifndef MULTIPLE_THREADS
 /* freedtoa(s) must be used to free values s returned by dtoa
  * when MULTIPLE_THREADS is #defined.  It should be used in all cases,
  * but for consistency with earlier versions of dtoa, it is optional
  * when MULTIPLE_THREADS is not defined.
  */
 
-void
+static void
 freedtoa(char *s)
 {
-    Bigint *b = (Bigint *)((int *)s - 1);
-    b->maxwds = 1 << (b->k = *(int*)b);
-    Bfree(b);
-#ifndef MULTIPLE_THREADS
-    if (s == dtoa_result)
-        dtoa_result = 0;
-#endif
+    xfree(s);
 }
+#endif
 
 /* dtoa for IEEE arithmetic (dmg): convert double to ASCII string.
  *
@@ -3273,7 +3133,7 @@ freedtoa(char *s)
  */
 
 char *
-dtoa(double d, int mode, int ndigits, int *decpt, int *sign, char **rve)
+ruby_dtoa(double d_, int mode, int ndigits, int *decpt, int *sign, char **rve)
 {
  /* Arguments ndigits, decpt, sign are similar to those
     of ecvt and fcvt; trailing zeros are suppressed from
@@ -3318,7 +3178,8 @@ dtoa(double d, int mode, int ndigits, int *decpt, int *sign, char **rve)
     ULong x;
 #endif
     Bigint *b, *b1, *delta, *mlo = 0, *mhi = 0, *S;
-    double d2, ds, eps;
+    double ds;
+    double_u d, d2, eps;
     char *s, *s0;
 #ifdef Honor_FLT_ROUNDS
     int rounding;
@@ -3326,6 +3187,8 @@ dtoa(double d, int mode, int ndigits, int *decpt, int *sign, char **rve)
 #ifdef SET_INEXACT
     int inexact, oldinexact;
 #endif
+
+    dval(d) = d_;
 
 #ifndef MULTIPLE_THREADS
     if (dtoa_result) {
@@ -3353,9 +3216,9 @@ dtoa(double d, int mode, int ndigits, int *decpt, int *sign, char **rve)
         *decpt = 9999;
 #ifdef IEEE_Arith
         if (!word1(d) && !(word0(d) & 0xfffff))
-            return nrv_alloc("Infinity", rve, 8);
+            return rv_strdup("Infinity", rve);
 #endif
-        return nrv_alloc("NaN", rve, 3);
+        return rv_strdup("NaN", rve);
     }
 #endif
 #ifdef IBM
@@ -3363,7 +3226,7 @@ dtoa(double d, int mode, int ndigits, int *decpt, int *sign, char **rve)
 #endif
     if (!dval(d)) {
         *decpt = 1;
-        return nrv_alloc("0", rve, 1);
+        return rv_strdup("0", rve);
     }
 
 #ifdef SET_INEXACT
@@ -3506,7 +3369,7 @@ dtoa(double d, int mode, int ndigits, int *decpt, int *sign, char **rve)
         if (i <= 0)
             i = 1;
     }
-    s = s0 = rv_alloc(i);
+    s = s0 = rv_alloc(i+1);
 
 #ifdef Honor_FLT_ROUNDS
     if (mode > 1 && rounding != 1)
@@ -3572,7 +3435,7 @@ dtoa(double d, int mode, int ndigits, int *decpt, int *sign, char **rve)
              */
             dval(eps) = 0.5/tens[ilim-1] - dval(eps);
             for (i = 0;;) {
-                L = dval(d);
+                L = (int)dval(d);
                 dval(d) -= L;
                 *s++ = '0' + (int)L;
                 if (dval(d) < dval(eps))
@@ -3954,11 +3817,14 @@ ruby_each_words(const char *str, void (*func)(const char*, int, void*), void *ar
 	if (!*str) break;
 	end = str;
 	while (*end && !ISSPACE(*end) && *end != ',') end++;
-	len = end - str;
+	len = (int)(end - str);	/* assume no string exceeds INT_MAX */
 	(*func)(str, len, arg);
     }
 }
 
 #ifdef __cplusplus
+#if 0
+{
+#endif
 }
 #endif

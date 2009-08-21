@@ -103,7 +103,7 @@ numbers into C integers.  These macros includes a type check,
 so an exception will be raised if the conversion failed.  NUM2DBL()
 can be used to retrieve the double float value in the same way.
 
-In version 1.7 or later it is recommended that you use the new macros
+You can use the macros
 StringValue() and StringValuePtr() to get a char* from a VALUE.
 StringValue(var) replaces var's value with the result of "var.to_str()".
 StringValuePtr(var) does same replacement and returns char*
@@ -118,10 +118,6 @@ the ArgumentError exception.
 StringValuePtr() doesn't gurantee to exist nul at the end of the
 result, and the result may contain nul.
 
-In version 1.6 or earlier, STR2CSTR() was used to do the same thing
-but now it is deprecated in version 1.7, because STR2CSTR() has a risk
-of a dangling pointer problem in the to_str() implicit conversion.
-
 Other data types have corresponding C structures, e.g. struct RArray
 for T_ARRAY etc. The VALUE of the type which has the corresponding
 structure can be cast to retrieve the pointer to the struct.  The
@@ -129,9 +125,9 @@ casting macro will be of the form RXXXX for each data type; for
 instance, RARRAY(obj).  See "ruby.h".
 
 There are some accessing macros for structure members, for example
-`RSTRING_LEN(s)' to to get the size of the Ruby String object.  The
-allocated region can be accessed by `RSTRING_PTR(str).  For arrays, use
-`RARRAY_LEN(ary) and `RARRAY_PTR(ary) respectively.
+`RSTRING_LEN(str)' to get the size of the Ruby String object.  The
+allocated region can be accessed by `RSTRING_PTR(str)'.  For arrays,
+use `RARRAY_LEN(ary)' and `RARRAY_PTR(ary)' respectively.
 
 Notice: Do not change the value of the structure directly, unless you
 are responsible for the result.  This ends up being the cause of
@@ -682,15 +678,17 @@ argument is the C array of the method arguments, and the third
 argument is the receiver of the method.
 
 You can use the function rb_scan_args() to check and retrieve the
-arguments.  For example, "11" means that the method requires at least one
-argument, and at most receives two arguments.
+arguments.  The third argument is a string that specifies how to
+capture method arguments and assign them to the following VALUE
+references.
 
-Methods with an arbitrary number of arguments can receive arguments
-by Ruby's array, like this:
+
+The following is an example of a method that takes arguments by Ruby's
+array:
 
 --
 static VALUE
-fdbm_indexes(VALUE obj, VALUE args)
+thread_initialize(VALUE thread, VALUE args)
 {
 	:
 }
@@ -816,7 +814,7 @@ ruby evaluator (a.k.a. YARV)
   vm.c
   vm_dump.c
   vm_eval.c
-  vm_evalbody.c
+  vm_exec.c
   vm_insnhelper.c
   vm_method.c
 
@@ -876,7 +874,6 @@ class library
   math.c        : Math
   numeric.c     : Numeric, Integer, Fixnum, Float
   pack.c        : Array#pack, String#unpack
-  prec.c        : Precision
   proc.c        : Binding, Proc
   process.c     : Process
   random.c      : random number
@@ -889,6 +886,9 @@ class library
   struct.c      : Struct
   time.c        : Time
 
+  defs/knwon_errors.def  : Errno::* exception classes
+    -> known_errors.inc  : automatically generated
+
 multilingualization
   encoding.c    : Encoding
   transcode.c   : Encoding::Converter
@@ -898,7 +898,8 @@ multilingualization
 goruby interpreter implementation
   
   goruby.c
-  golf_prelude.rb
+  golf_prelude.rb     : goruby specific libraries.
+    -> golf_prelude.c : automatically generated
 
 
 Appendix B. Ruby extension API reference
@@ -955,12 +956,17 @@ void Check_SafeStr(VALUE value)
 
 ** Data type conversion
 
-FIX2INT(value)
-FIX2LONG(value)
-INT2FIX(i)
-NUM2INT(value)
-NUM2LONG(value)
-INT2NUM(i)
+FIX2INT(value), INT2FIX(i)
+FIX2LONG(value), LONG2FIX(l)
+NUM2INT(value), INT2NUM(i)
+NUM2UINT(value), UINT2NUM(ui)
+NUM2LONG(value), LONG2NUM(l)
+NUM2ULONG(value), ULONG2NUM(ul)
+NUM2LL(value), LL2NUM(ll)
+NUM2ULL(value), ULL2NUM(ull)
+NUM2OFFT(value), OFFT2NUM(off)
+NUM2SIZET(value), SIZET2NUM(size)
+NUM2SSIZET(value), SSIZET2NUM(ssize)
 NUM2DBL(value)
 rb_float_new(f)
 StringValue(value)
@@ -1073,11 +1079,42 @@ Defines a singleton method.  Arguments are same as rb_define_method().
 
  rb_scan_args(int argc, VALUE *argv, const char *fmt, ...)
 
-Retrieve argument from argc, argv.  The fmt is the format string for
-the arguments, such as "12" for 1 non-optional argument, 2 optional
-arguments.  If `*' appears at the end of fmt, it means the rest of
-the arguments are assigned to the corresponding variable, packed in
-an array.
+Retrieve argument from argc and argv to given VALUE references
+according to the format string.  The format can be described in ABNF
+as follows:
+
+--
+scan-arg-spec  := param-arg-spec [block-arg-spec]
+
+param-arg-spec := pre-arg-spec [post-arg-spec] / post-arg-spec / pre-opt-post-arg-spec
+pre-arg-spec   := num-of-leading-mandatory-args [num-of-optional-args]
+post-arg-spec  := sym-for-variable-length-args [num-of-trailing-mandatory-args]
+pre-opt-post-arg-spec := num-of-leading-mandatory-args num-of-optional-args num-of-trailing-mandatory-args
+block-arg-spec := sym-for-block-arg
+
+num-of-leading-mandatory-args  := DIGIT ; The number of leading
+                                        ; mandatory arguments
+num-of-optional-args           := DIGIT ; The number of optional
+                                        ; arguments
+sym-for-variable-length-args   := "*"   ; Indicates that variable
+                                        ; length arguments are
+                                        ; captured as a ruby array
+num-of-trailing-mandatory-args := DIGIT ; The number of trailing
+                                        ; mandatory arguments
+sym-for-block-arg              := "&"   ; Indicates that an iterator
+                                        ; block should be captured if
+                                        ; given
+--
+
+For example, "12" means that the method requires at least one
+argument, and at most receives three (1+2) arguments.  So, the format
+string must be followed by three variable references, which are to be
+assigned to captured arguments.  For omitted arguments, variables are
+set to Qnil.  NULL can be put in place of a variable reference, which
+means the corresponding captured argument(s) should be just dropped.
+
+The number of given arguments, excluding an iterator block, is
+returned.
 
 ** Invoking Ruby method
 
@@ -1122,12 +1159,23 @@ Sets the value of the instance variable.
 
 ** Control Structure
 
- VALUE rb_iterate(VALUE (*func1)(), void *arg1, VALUE (*func2)(), void *arg2)
+ VALUE rb_block_call(VALUE recv, ID mid, int argc, VALUE * argv,
+		     VALUE (*func) (ANYARGS), VALUE data2)
+
+Calls a method on the recv, with the method name specified by the
+symbol mid, supplying func as the block.  func will receive the
+value from yield as the first argument, data2 as the second, and
+argc/argv as the third/fourth arguments.
+
+ [OBSOLETE] VALUE rb_iterate(VALUE (*func1)(), void *arg1, VALUE (*func2)(), void *arg2)
 
 Calls the function func1, supplying func2 as the block.  func1 will be
 called with the argument arg1.  func2 receives the value from yield as
 the first argument, arg2 as the second argument.
  
+When rb_iterate is used in 1.9, func1 has to call some Ruby-level method.
+This function is obsolete since 1.9; use rb_block_call instead.
+
  VALUE rb_yield(VALUE val)
 
 Evaluates the block with value val.
@@ -1197,7 +1245,7 @@ Specifies the name of the script ($0).
 
 ** Hooks for the Interpreter Events
 
- void rb_add_event_hook(rb_event_hook_func_t func, rb_event_t events)
+ void rb_add_event_hook(rb_event_hook_func_t func, rb_event_flag_t events, VALUE data)
 
 Adds a hook function for the specified interpreter events.
 events should be Or'ed value of:
@@ -1214,12 +1262,56 @@ events should be Or'ed value of:
 
 The definition of rb_event_hook_func_t is below:
 
- typedef void (*rb_event_hook_func_t)(rb_event_t event, NODE *node,
+ typedef void (*rb_event_hook_func_t)(rb_event_t event, VALUE data,
  				      VALUE self, ID id, VALUE klass)
+
+The third argument `data' to rb_add_event_hook() is passed to the hook
+function as the second argument, which was the pointer to the current
+NODE in 1.8.  See RB_EVENT_HOOKS_HAVE_CALLBACK_DATA below.
 
  int rb_remove_event_hook(rb_event_hook_func_t func)
 
 Removes the specified hook function.
+
+** Macros for the Compatibilities
+
+Some macros to check API compatibilities are available by default.
+
+ NORETURN_STYLE_NEW
+
+Means that NORETURN macro is functional style instead of prefix.
+
+ HAVE_RB_DEFINE_ALLOC_FUNC
+
+Means that function rb_define_alloc_func() is provided, that means the
+allocation framework is used.  This is same as the result of
+have_func("rb_define_alloc_func", "ruby.h").
+
+ HAVE_RB_REG_NEW_STR
+
+Means that function rb_reg_new_str() is provided, that creates Regexp
+object from String object.  This is same as the result of
+have_func("rb_reg_new_str", "ruby.h").
+
+ HAVE_RB_IO_T
+
+Means that type rb_io_t is provided.
+
+ USE_SYMBOL_AS_METHOD_NAME
+
+Means that Symbols will be returned as method names, e.g.,
+Module#methods, #singleton_methods and so on.
+
+ HAVE_RUBY_*_H
+
+Defined in ruby.h and means correspoinding header is available.  For
+instance, when HAVE_RUBY_ST_H is defined you should use ruby/st.h not
+mere st.h.
+
+ RB_EVENT_HOOKS_HAVE_CALLBACK_DATA
+
+Means that rb_add_event_hook() takes the third argument `data', to be
+passed to the given event hook function.
 
 Appendix C. Functions Available in extconf.rb
 

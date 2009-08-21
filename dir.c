@@ -83,37 +83,19 @@ char *strchr(char*,char);
 # define Next(p, e, enc) (p + rb_enc_mbclen(p, e, enc))
 # define Inc(p, e, enc) ((p) = Next(p, e, enc))
 
-static int
-char_casecmp(const char *p1, const char *p2, rb_encoding *enc, const int nocase)
-{
-    const char *p1end, *p2end;
-    unsigned int c1, c2;
-
-    if (!*p1 || !*p2) return !!*p1 - !!*p2;
-    p1end = p1 + strlen(p1);
-    p2end = p2 + strlen(p2);
-    c1 = rb_enc_codepoint(p1, p1end, enc);
-    c2 = rb_enc_codepoint(p2, p2end, enc);
-
-    if (c1 == c2) return 0;
-    if (nocase) {
-	c1 = rb_enc_toupper(c1, enc);
-	c2 = rb_enc_toupper(c2, enc);
-    }
-    return c1 - c2;
-}
-
 static char *
 bracket(
     const char *p, /* pattern (next to '[') */
+    const char *pend,
     const char *s, /* string */
+    const char *send,
     int flags,
     rb_encoding *enc)
 {
-    const char *pend = p + strlen(p);
     const int nocase = flags & FNM_CASEFOLD;
     const int escape = !(flags & FNM_NOESCAPE);
-
+    unsigned int c1, c2;
+    int r;
     int ok = 0, not = 0;
 
     if (*p == '!' || *p == '^') {
@@ -127,20 +109,42 @@ bracket(
 	    t1++;
 	if (!*t1)
 	    return NULL;
-	p = Next(t1, pend, enc);
+	p = t1 + (r = rb_enc_mbclen(t1, pend, enc));
 	if (p[0] == '-' && p[1] != ']') {
 	    const char *t2 = p + 1;
+	    int r2;
 	    if (escape && *t2 == '\\')
 		t2++;
 	    if (!*t2)
 		return NULL;
-	    p = Next(t2, pend, enc);
-	    if (!ok && char_casecmp(t1, s, enc, nocase) <= 0 && char_casecmp(s, t2, enc, nocase) <= 0)
+	    p = t2 + (r2 = rb_enc_mbclen(t2, pend, enc));
+	    if (ok) continue;
+	    if ((r <= (send-s) && memcmp(t1, s, r) == 0) ||
+		(r2 <= (send-s) && memcmp(t2, s, r) == 0)) {
 		ok = 1;
+		continue;
+	    }
+	    c1 = rb_enc_codepoint(s, send, enc);
+	    if (nocase) c1 = rb_enc_toupper(c1, enc);
+	    c2 = rb_enc_codepoint(t1, pend, enc);
+	    if (nocase) c2 = rb_enc_toupper(c2, enc);
+	    if (c1 < c2) continue;
+	    c2 = rb_enc_codepoint(t2, pend, enc);
+	    if (nocase) c2 = rb_enc_toupper(c2, enc);
+	    if (c1 > c2) continue;
 	}
-	else
-	    if (!ok && char_casecmp(t1, s, enc, nocase) == 0)
+	else {
+	    if (ok) continue;
+	    if (r <= (send-s) && memcmp(t1, s, r) == 0) {
 		ok = 1;
+		continue;
+	    }
+	    if (!nocase) continue;
+	    c1 = rb_enc_toupper(rb_enc_codepoint(s, send, enc), enc);
+	    c2 = rb_enc_toupper(rb_enc_codepoint(p, pend, enc), enc);
+	    if (c1 != c2) continue;
+	}
+	ok = 1;
     }
 
     return ok == not ? NULL : (char *)p + 1;
@@ -175,6 +179,8 @@ fnmatch_helper(
     const char *s = *scur;
     const char *send = s + strlen(s);
 
+    int r;
+
     if (period && *s == '.' && *UNESCAPE(p) != '.') /* leading period */
 	RETURN(FNM_NOMATCH);
 
@@ -203,7 +209,7 @@ fnmatch_helper(
 	    const char *t;
 	    if (ISEND(s))
 		RETURN(FNM_NOMATCH);
-	    if ((t = bracket(p + 1, s, flags, enc)) != 0) {
+	    if ((t = bracket(p + 1, pend, s, send, flags, enc)) != 0) {
 		p = t;
 		Inc(s, send, enc);
 		continue;
@@ -218,9 +224,19 @@ fnmatch_helper(
 	    RETURN(ISEND(p) ? 0 : FNM_NOMATCH);
 	if (ISEND(p))
 	    goto failed;
-	if (char_casecmp(p, s, enc, nocase) != 0)
+	r = rb_enc_precise_mbclen(p, pend, enc);
+	if (!MBCLEN_CHARFOUND_P(r))
 	    goto failed;
-	Inc(p, pend, enc);
+	if (r <= (send-s) && memcmp(p, s, r) == 0) {
+	    p += r;
+	    s += r;
+	    continue;
+	}
+	if (!nocase) goto failed;
+	if (rb_enc_toupper(rb_enc_codepoint(p, pend, enc), enc) !=
+	    rb_enc_toupper(rb_enc_codepoint(s, send, enc), enc))
+	    goto failed;
+	p += r;
 	Inc(s, send, enc);
 	continue;
 
@@ -423,16 +439,6 @@ dir_check(VALUE dir)
     if (dirp->dir == NULL) dir_closed();\
 } while (0)
 
-static VALUE
-dir_enc_str_new(const char *p, long len, rb_encoding *enc)
-{
-    VALUE path = rb_tainted_str_new(p, len);
-    if (rb_enc_asciicompat(enc) && rb_enc_str_asciionly_p(path)) {
-	enc = rb_usascii_encoding();
-    }
-    rb_enc_associate(path, enc);
-    return path;
-}
 
 /*
  *  call-seq:
@@ -472,6 +478,52 @@ dir_path(VALUE dir)
     return rb_str_dup(dirp->path);
 }
 
+#if defined HAVE_READDIR_R
+# define READDIR(dir, enc, entry, dp) (readdir_r(dir, entry, &(dp)) == 0 && dp != 0)
+#elif defined _WIN32
+# define READDIR(dir, enc, entry, dp) ((dp = rb_w32_readdir_with_enc(dir, enc)) != 0)
+#else
+# define READDIR(dir, enc, entry, dp) ((dp = readdir(dir)) != 0)
+#endif
+#if defined HAVE_READDIR_R
+# define IF_HAVE_READDIR_R(something) something
+#else
+# define IF_HAVE_READDIR_R(something) /* nothing */
+#endif
+
+#if defined SIZEOF_STRUCT_DIRENT_TOO_SMALL
+# include <limits.h>
+# define NAME_MAX_FOR_STRUCT_DIRENT 255
+# if defined NAME_MAX
+#  if NAME_MAX_FOR_STRUCT_DIRENT < NAME_MAX
+#   undef  NAME_MAX_FOR_STRUCT_DIRENT
+#   define NAME_MAX_FOR_STRUCT_DIRENT NAME_MAX
+#  endif
+# endif
+# if defined _POSIX_NAME_MAX
+#  if NAME_MAX_FOR_STRUCT_DIRENT < _POSIX_NAME_MAX
+#   undef  NAME_MAX_FOR_STRUCT_DIRENT
+#   define NAME_MAX_FOR_STRUCT_DIRENT _POSIX_NAME_MAX
+#  endif
+# endif
+# if defined _XOPEN_NAME_MAX
+#  if NAME_MAX_FOR_STRUCT_DIRENT < _XOPEN_NAME_MAX
+#   undef  NAME_MAX_FOR_STRUCT_DIRENT
+#   define NAME_MAX_FOR_STRUCT_DIRENT _XOPEN_NAME_MAX
+#  endif
+# endif
+# define DEFINE_STRUCT_DIRENT \
+  union { \
+    struct dirent dirent; \
+    char dummy[offsetof(struct dirent, d_name) + \
+	       NAME_MAX_FOR_STRUCT_DIRENT + 1]; \
+  }
+# define STRUCT_DIRENT(entry) ((entry).dirent)
+#else
+# define DEFINE_STRUCT_DIRENT struct dirent
+# define STRUCT_DIRENT(entry) (entry)
+#endif
+
 /*
  *  call-seq:
  *     dir.read => string or nil
@@ -489,12 +541,12 @@ dir_read(VALUE dir)
 {
     struct dir_data *dirp;
     struct dirent *dp;
+    IF_HAVE_READDIR_R(DEFINE_STRUCT_DIRENT entry);
 
     GetDIR(dir, dirp);
     errno = 0;
-    dp = readdir(dirp->dir);
-    if (dp) {
-	return dir_enc_str_new(dp->d_name, NAMLEN(dp), dirp->enc);
+    if (READDIR(dirp->dir, dirp->enc, &STRUCT_DIRENT(entry), dp)) {
+	return rb_external_str_new_with_enc(dp->d_name, NAMLEN(dp), dirp->enc);
     }
     else if (errno == 0) {	/* end of stream */
 	return Qnil;
@@ -527,17 +579,19 @@ dir_each(VALUE dir)
 {
     struct dir_data *dirp;
     struct dirent *dp;
+    IF_HAVE_READDIR_R(DEFINE_STRUCT_DIRENT entry);
 
     RETURN_ENUMERATOR(dir, 0, 0);
     GetDIR(dir, dirp);
     rewinddir(dirp->dir);
-    for (dp = readdir(dirp->dir); dp != NULL; dp = readdir(dirp->dir)) {
-	rb_yield(dir_enc_str_new(dp->d_name, NAMLEN(dp), dirp->enc));
+    while (READDIR(dirp->dir, dirp->enc, &STRUCT_DIRENT(entry), dp)) {
+	rb_yield(rb_external_str_new_with_enc(dp->d_name, NAMLEN(dp), dirp->enc));
 	if (dirp->dir == NULL) dir_closed();
     }
     return dir;
 }
 
+#ifdef HAVE_TELLDIR
 /*
  *  call-seq:
  *     dir.pos => integer
@@ -554,18 +608,18 @@ dir_each(VALUE dir)
 static VALUE
 dir_tell(VALUE dir)
 {
-#ifdef HAVE_TELLDIR
     struct dir_data *dirp;
     long pos;
 
     GetDIR(dir, dirp);
     pos = telldir(dirp->dir);
     return rb_int2inum(pos);
-#else
-    rb_notimplement();
-#endif
 }
+#else
+#define dir_tell rb_f_notimplement
+#endif
 
+#ifdef HAVE_SEEKDIR
 /*
  *  call-seq:
  *     dir.seek( integer ) => dir
@@ -584,16 +638,15 @@ static VALUE
 dir_seek(VALUE dir, VALUE pos)
 {
     struct dir_data *dirp;
-    off_t p = NUM2OFFT(pos);
+    long p = NUM2LONG(pos);
 
     GetDIR(dir, dirp);
-#ifdef HAVE_SEEKDIR
     seekdir(dirp->dir, p);
     return dir;
-#else
-    rb_notimplement();
-#endif
 }
+#else
+#define dir_seek rb_f_notimplement
+#endif
 
 /*
  *  call-seq:
@@ -681,7 +734,7 @@ static VALUE
 chdir_yield(struct chdir_data *args)
 {
     dir_chdir(args->new_path);
-    args->done = Qtrue;
+    args->done = TRUE;
     chdir_blocking++;
     if (chdir_thread == Qnil)
 	chdir_thread = rb_thread_current();
@@ -768,7 +821,7 @@ dir_s_chdir(int argc, VALUE *argv, VALUE obj)
 
 	args.old_path = rb_tainted_str_new2(cwd); xfree(cwd);
 	args.new_path = path;
-	args.done = Qfalse;
+	args.done = FALSE;
 	return rb_ensure(chdir_yield, (VALUE)&args, chdir_restore, (VALUE)&args);
     }
     dir_chdir(path);
@@ -796,6 +849,7 @@ dir_s_getwd(VALUE dir)
     rb_secure(4);
     path = my_getcwd();
     cwd = rb_tainted_str_new2(path);
+    rb_enc_associate(cwd, rb_filesystem_encoding());
 
     xfree(path);
     return cwd;
@@ -814,6 +868,7 @@ check_dirname(volatile VALUE *dir)
     }
 }
 
+#if defined(HAVE_CHROOT)
 /*
  *  call-seq:
  *     Dir.chroot( string ) => 0
@@ -826,18 +881,16 @@ check_dirname(volatile VALUE *dir)
 static VALUE
 dir_s_chroot(VALUE dir, VALUE path)
 {
-#if defined(HAVE_CHROOT) && !defined(__CHECKER__)
     check_dirname(&path);
 
     if (chroot(RSTRING_PTR(path)) == -1)
 	rb_sys_fail(RSTRING_PTR(path));
 
     return INT2FIX(0);
-#else
-    rb_notimplement();
-    return Qnil;		/* not reached */
-#endif
 }
+#else
+#define dir_s_chroot rb_f_notimplement
+#endif
 
 /*
  *  call-seq:
@@ -891,15 +944,16 @@ dir_s_rmdir(VALUE obj, VALUE dir)
     return INT2FIX(0);
 }
 
-static void
-sys_warning_1(const char* mesg)
+static VALUE
+sys_warning_1(VALUE mesg)
 {
-    rb_sys_warning("%s", mesg);
+    rb_sys_warning("%s", (const char *)mesg);
+    return Qnil;
 }
 
-#define GLOB_VERBOSE	(1UL << (sizeof(int) * CHAR_BIT - 1))
+#define GLOB_VERBOSE	(1U << (sizeof(int) * CHAR_BIT - 1))
 #define sys_warning(val) \
-    (void)((flags & GLOB_VERBOSE) && rb_protect((VALUE (*)(VALUE))sys_warning_1, (VALUE)(val), 0))
+    (void)((flags & GLOB_VERBOSE) && rb_protect(sys_warning_1, (VALUE)(val), 0))
 
 #define GLOB_ALLOC(type) (type *)malloc(sizeof(type))
 #define GLOB_ALLOC_N(type, n) (type *)malloc(sizeof(type) * (n))
@@ -1122,15 +1176,16 @@ static char *
 join_path(const char *path, int dirsep, const char *name)
 {
     long len = strlen(path);
-    char *buf = GLOB_ALLOC_N(char, len+strlen(name)+(dirsep?1:0)+1);
+    long len2 = strlen(name)+(dirsep?1:0)+1;
+    char *buf = GLOB_ALLOC_N(char, len+len2);
 
     if (!buf) return 0;
     memcpy(buf, path, len);
     if (dirsep) {
-	strcpy(buf+len, "/");
-	len++;
+	buf[len++] = '/';
     }
-    strcpy(buf+len, name);
+    buf[len] = '\0';
+    strlcat(buf+len, name, len2);
     return buf;
 }
 
@@ -1247,10 +1302,12 @@ glob_helper(
 
     if (magical || recursive) {
 	struct dirent *dp;
-	DIR *dirp = do_opendir(*path ? path : ".", flags);
+	DIR *dirp;
+	IF_HAVE_READDIR_R(DEFINE_STRUCT_DIRENT entry);
+	dirp = do_opendir(*path ? path : ".", flags);
 	if (dirp == NULL) return 0;
 
-	for (dp = readdir(dirp); dp != NULL; dp = readdir(dirp)) {
+	while (READDIR(dirp, enc, &STRUCT_DIRENT(entry), dp)) {
 	    char *buf = join_path(path, dirsep, dp->d_name);
 	    enum answer new_isdir = UNKNOWN;
 
@@ -1311,12 +1368,13 @@ glob_helper(
 	    if (*cur) {
 		char *buf;
 		char *name;
-		name = GLOB_ALLOC_N(char, strlen((*cur)->str) + 1);
+		size_t len = strlen((*cur)->str) + 1;
+		name = GLOB_ALLOC_N(char, len);
 		if (!name) {
 		    status = -1;
 		    break;
 		}
-		strcpy(name, (*cur)->str);
+		memcpy(name, (*cur)->str, len);
 		if (escape) remove_backslashes(name, enc);
 
 		new_beg = new_end = GLOB_ALLOC_N(struct glob_pattern *, end - beg);
@@ -1360,7 +1418,7 @@ ruby_glob0(const char *path, int flags, ruby_glob_func *func, VALUE arg, rb_enco
     struct glob_pattern *list;
     const char *root, *start;
     char *buf;
-    int n;
+    size_t n;
     int status;
 
     start = root = path;
@@ -1436,7 +1494,7 @@ rb_glob(const char *path, void (*func)(const char *, VALUE, void *), VALUE arg)
 static void
 push_pattern(const char *path, VALUE ary, void *enc)
 {
-    rb_ary_push(ary, dir_enc_str_new(path, strlen(path), enc));
+    rb_ary_push(ary, rb_external_str_new_with_enc(path, strlen(path), enc));
 }
 
 static int
@@ -1465,7 +1523,8 @@ ruby_brace_expand(const char *str, int flags, ruby_glob_func *func, VALUE arg,
     }
 
     if (lbrace && rbrace) {
-	char *buf = GLOB_ALLOC_N(char, strlen(s) + 1);
+	size_t len = strlen(s) + 1;
+	char *buf = GLOB_ALLOC_N(char, len);
 	long shift;
 
 	if (!buf) return -1;
@@ -1484,7 +1543,7 @@ ruby_brace_expand(const char *str, int flags, ruby_glob_func *func, VALUE arg,
 		Inc(p, pend, enc);
 	    }
 	    memcpy(buf+shift, t, p-t);
-	    strcpy(buf+shift+(p-t), rbrace+1);
+	    strlcpy(buf+shift+(p-t), rbrace+1, len-(shift+(p-t)));
 	    status = ruby_brace_expand(buf, flags, func, arg, enc);
 	    if (status) break;
 	}
@@ -1541,7 +1600,7 @@ push_glob(VALUE ary, VALUE str, int flags)
     args.value = ary;
     args.enc = enc;
 
-    return ruby_brace_glob0(RSTRING_PTR(str), flags | GLOB_VERBOSE,
+    return ruby_brace_glob0(StringValuePtr(str), flags | GLOB_VERBOSE,
 			    rb_glob_caller, (VALUE)&args, enc);
 }
 
@@ -1581,7 +1640,7 @@ dir_globs(long argc, VALUE *argv, int flags)
     for (i = 0; i < argc; ++i) {
 	int status;
 	VALUE str = argv[i];
-	StringValue(str);
+	SafeStringValue(str);
 	status = push_glob(ary, str, flags);
 	if (status) GLOB_JUMP_TAG(status);
     }
@@ -1627,7 +1686,7 @@ dir_s_aref(int argc, VALUE *argv, VALUE obj)
  *                          match all files beginning with
  *                          <code>c</code>; <code>*c</code> will match
  *                          all files ending with <code>c</code>; and
- *                          <code>*c*</code> will match all files that
+ *                          <code>\*c\*</code> will match all files that
  *                          have <code>c</code> in them (including at
  *                          the beginning or end). Equivalent to
  *                          <code>/ .* /x</code> in regexp.
@@ -1860,6 +1919,30 @@ file_s_fnmatch(int argc, VALUE *argv, VALUE obj)
     return Qfalse;
 }
 
+VALUE rb_home_dir(const char *user, VALUE result);
+
+/*
+ *  call-seq:
+ *    Dir.home()       => "/home/me"
+ *    Dir.home("root") => "/root"
+ *
+ *  Returns the home directory of the current user or the named user
+ *  if given.
+ */
+static VALUE
+dir_s_home(int argc, VALUE *argv, VALUE obj)
+{
+    VALUE user;
+    const char *u = 0;
+
+    rb_scan_args(argc, argv, "01", &user);
+    if (!NIL_P(user)) {
+	SafeStringValue(user);
+	u = StringValueCStr(user);
+    }
+    return rb_home_dir(u, rb_str_new(0, 0));
+}
+
 /*
  *  Objects of class <code>Dir</code> are directory streams representing
  *  directories in the underlying file system. They provide a variety of
@@ -1903,6 +1986,7 @@ Init_Dir(void)
     rb_define_singleton_method(rb_cDir,"rmdir", dir_s_rmdir, 1);
     rb_define_singleton_method(rb_cDir,"delete", dir_s_rmdir, 1);
     rb_define_singleton_method(rb_cDir,"unlink", dir_s_rmdir, 1);
+    rb_define_singleton_method(rb_cDir,"home", dir_s_home, -1);
 
     rb_define_singleton_method(rb_cDir,"glob", dir_s_glob, -1);
     rb_define_singleton_method(rb_cDir,"[]", dir_s_aref, -1);

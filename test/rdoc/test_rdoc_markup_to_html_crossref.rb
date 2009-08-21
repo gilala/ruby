@@ -1,10 +1,14 @@
-require 'test/unit'
+require 'rubygems'
+require 'minitest/unit'
 require 'rdoc/generator'
+require 'rdoc/stats'
+require 'rdoc/code_objects'
 require 'rdoc/markup/to_html_crossref'
+require 'rdoc/parser/ruby'
 
 require 'pathname'
 
-class TestRDocMarkupToHtmlCrossref < Test::Unit::TestCase
+class TestRDocMarkupToHtmlCrossref < MiniTest::Unit::TestCase
 
   #
   # This method parses a source file and returns a Hash mapping
@@ -28,7 +32,7 @@ class TestRDocMarkupToHtmlCrossref < Test::Unit::TestCase
     # predicable.
     RDoc::Generator::Method.reset
     top_level = RDoc::TopLevel.new @source_file_name
-    
+
     options = RDoc::Options.new
     options.quiet = true
 
@@ -80,7 +84,12 @@ class TestRDocMarkupToHtmlCrossref < Test::Unit::TestCase
     actual_expected_result.gsub!(/\n/, " ")
     result.gsub!(/\n/, " ")
 
-    assert_equal actual_expected_result, result
+    begin
+      assert_equal actual_expected_result, result
+    rescue MiniTest::Assertion => e
+      bt = caller(2)
+      raise e, [e.message, *bt.grep(/\A#{Regexp.quote(__FILE__)}:/o)].join("\n"), bt
+    end
   end
 
   #
@@ -103,7 +112,7 @@ class TestRDocMarkupToHtmlCrossref < Test::Unit::TestCase
   #
   def verify_class_crossref(xref, reference, class_name)
     class_file_name = class_name.gsub(/::/, "/")
-    
+
     result = "<a href=\"../classes/#{class_file_name}.html\">#{reference}</a>"
 
     verify_convert xref, reference, result
@@ -116,7 +125,7 @@ class TestRDocMarkupToHtmlCrossref < Test::Unit::TestCase
   #
   def verify_method_crossref(xref, reference, class_name, method_seq)
     class_file_name = class_name.gsub(/::/, "/")
-    
+
     result = "<a href=\"../classes/#{class_file_name}.html##{method_seq}\">#{reference}</a>"
 
     verify_convert xref, reference, result
@@ -141,7 +150,7 @@ class TestRDocMarkupToHtmlCrossref < Test::Unit::TestCase
     # bogus does not exist and so no cross-reference should be generated.
     verify_no_crossref xref, "bogus"
     verify_no_crossref xref, "\\bogus"
-    
+
     # Ref_Class1 is in the top-level namespace, and so a cross-reference always
     # should be generated, unless markup is suppressed.
     verify_class_crossref xref, "Ref_Class1", "Ref_Class1"
@@ -286,3 +295,5 @@ class TestRDocMarkupToHtmlCrossref < Test::Unit::TestCase
     verify_class_crossref xref, "Ref_Class4", "Ref_Class4::Ref_Class4"
   end
 end
+
+MiniTest::Unit.autorun

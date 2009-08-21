@@ -438,6 +438,18 @@ class TestThread < Test::Unit::TestCase
     assert_equal(false, m3.locked?)
   end
 
+  def test_mutex_trylock
+    m = Mutex.new
+    assert_equal(true, m.try_lock)
+    assert_equal(false, m.try_lock, '[ruby-core:20943]')
+
+    Thread.new{
+      assert_equal(false, m.try_lock)
+    }.join
+
+    m.unlock
+  end
+
   def test_recursive_error
     o = Object.new
     def o.inspect
@@ -503,5 +515,15 @@ class TestThreadGroup < Test::Unit::TestCase
     c = Class.new(Thread)
     c.class_eval { def initialize; end }
     assert_raise(ThreadError) { c.new.start }
+  end
+
+  def test_backtrace
+    Thread.new{
+      assert_equal(Array, Thread.main.backtrace.class)
+    }.join
+
+    t = Thread.new{}
+    t.join
+    assert_equal(nil, t.backtrace)
   end
 end

@@ -1,7 +1,7 @@
 /* -*-c-*- */
 /**********************************************************************
 
-  vm_evalbody.c -
+  vm_exec.c -
 
   $Author$
 
@@ -83,7 +83,7 @@ vm_exec_core(rb_thread_t *th, VALUE initial)
 
 #if OPT_TOKEN_THREADED_CODE || OPT_DIRECT_THREADED_CODE
 #include "vmtc.inc"
-    if (th == 0) {
+    if (UNLIKELY(th == 0)) {
 #if OPT_STACK_CACHING
 	finish_insn_seq[0] = (VALUE)&&LABEL (finish_SC_ax_ax);
 #else
@@ -113,7 +113,7 @@ vm_exec_core(rb_thread_t *th, VALUE initial)
 }
 
 const void **
-vm_get_insns_address_table(void)
+rb_vm_get_insns_address_table(void)
 {
     return (const void **)vm_exec_core(0, 0);
 }
@@ -124,7 +124,7 @@ vm_get_insns_address_table(void)
 #include "vmtc.inc"
 
 const void *const *
-vm_get_insns_address_table(void)
+rb_vm_get_insns_address_table(void)
 {
     return insns_address_table;
 }

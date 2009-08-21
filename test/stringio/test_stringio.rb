@@ -117,10 +117,6 @@ class TestStringIO < Test::Unit::TestCase
   def test_isatty
     assert_equal(false, StringIO.new("").isatty)
   end
-  
-  def test_path
-    assert_equal(nil, StringIO.new("").path)
-  end
 
   def test_fsync
     assert_equal(0, StringIO.new("").fsync)
@@ -134,7 +130,7 @@ class TestStringIO < Test::Unit::TestCase
   def test_set_fcntl
     assert_raise(NotImplementedError) { StringIO.new("").fcntl }
   end
-  
+
   def test_close
     f = StringIO.new("")
     f.close
@@ -147,7 +143,7 @@ class TestStringIO < Test::Unit::TestCase
   ensure
     f.close unless f.closed?
   end
-  
+
   def test_close_read
     f = StringIO.new("")
     f.close_read
@@ -161,7 +157,7 @@ class TestStringIO < Test::Unit::TestCase
   ensure
     f.close unless f.closed?
   end
-  
+
   def test_close_write
     f = StringIO.new("")
     f.close_write
@@ -293,6 +289,21 @@ class TestStringIO < Test::Unit::TestCase
     f.close unless f.closed?
   end
 
+  def test_ungetbyte
+    s = "foo\nbar\n"
+    t = StringIO.new(s, "r")
+    t.ungetbyte(0x41)
+    assert_equal(0x41, t.getbyte)
+    t.ungetbyte("qux")
+    assert_equal("quxfoo\n", t.gets)
+    t.set_encoding("utf-8")
+    t.ungetbyte(0x89)
+    t.ungetbyte(0x8e)
+    t.ungetbyte("\xe7")
+    t.ungetbyte("\xe7\xb4\x85")
+    assert_equal("\u7d05\u7389bar\n", t.gets)
+  end
+
   def test_ungetc
     s = "1234"
     f = StringIO.new(s, "r")
@@ -327,6 +338,11 @@ class TestStringIO < Test::Unit::TestCase
   def test_each_char
     f = StringIO.new("1234")
     assert_equal(%w(1 2 3 4), f.each_char.to_a)
+  end
+
+  def test_each_codepoint
+    f = StringIO.new("1234")
+    assert_equal([49, 50, 51, 52], f.each_codepoint.to_a)
   end
 
   def test_gets2
@@ -379,4 +395,34 @@ class TestStringIO < Test::Unit::TestCase
     assert_equal(4, f.size)
   end
 
+  # This test is should in ruby/test_method.rb
+  # However this test depends on stringio library,
+  # we write it here.
+  class C < StringIO
+    alias old_init initialize
+    attr_reader :foo
+    def initialize
+      @foo = :ok
+      old_init
+    end
+  end
+
+  def test_method
+    assert_equal(:ok, C.new.foo, 'Bug #632 [ruby-core:19282]')
+  end
+
+  def test_ungetc_pos
+    b = '\\b00010001 \\B00010001 \\b1 \\B1 \\b000100011'
+    s = StringIO.new( b )
+    expected_pos = 0
+    while n = s.getc
+      assert_equal( expected_pos + 1, s.pos )
+
+      s.ungetc( n )
+      assert_equal( expected_pos, s.pos )
+      assert_equal( n, s.getc )
+
+      expected_pos += 1
+    end
+  end
 end

@@ -104,6 +104,12 @@ class TestRegexp < Test::Unit::TestCase
     assert_equal({}, /(.)(.)/.named_captures)
 
     assert_equal("a[b]c", "abc".sub(/(?<x>[bc])/, "[\\k<x>]"))
+
+    assert_equal("o", "foo"[/(?<bar>o)/, "bar"])
+
+    s = "foo"
+    s[/(?<bar>o)/, "bar"] = "baz"
+    assert_equal("fbazo", s)
   end
 
   def test_assign_named_capture
@@ -272,8 +278,9 @@ class TestRegexp < Test::Unit::TestCase
       Thread.new { $SAFE = 4; re.instance_eval { initialize(re) } }.join
     end
 
-    assert_equal(Encoding.find("ASCII-8BIT"), Regexp.new("b..", nil, "n").encoding)
+    assert_equal(Encoding.find("US-ASCII"), Regexp.new("b..", nil, "n").encoding)
     assert_equal("bar", "foobarbaz"[Regexp.new("b..", nil, "n")])
+    assert_equal(//n, Regexp.new("", nil, "n"))
 
     assert_raise(RegexpError) { Regexp.new(")(") }
   end
@@ -297,7 +304,7 @@ class TestRegexp < Test::Unit::TestCase
     assert_equal(/a/, eval(%q(s="\u0061";/#{s}/n)))
     assert_raise(RegexpError) { s = "\u3042"; eval(%q(/#{s}/n)) }
     assert_raise(RegexpError) { s = "\u0061"; eval(%q(/\u3042#{s}/n)) }
-    assert_raise(ArgumentError) { s1=[0xff].pack("C"); s2="\u3042"; eval(%q(/#{s1}#{s2}/)) }
+    assert_raise(RegexpError) { s1=[0xff].pack("C"); s2="\u3042"; eval(%q(/#{s1}#{s2}/)) }
 
     assert_raise(ArgumentError) { s = '\x'; /#{ s }/ }
 
@@ -603,11 +610,13 @@ class TestRegexp < Test::Unit::TestCase
     check(/\Aa{0}+\z/, "", %w(a aa aab))
     check(/\Aa{1}+\z/, %w(a aa), ["", "aab"])
     check(/\Aa{1,2}b{1,2}\z/, %w(ab aab abb aabb), ["", "aaabb", "abbb"])
+    check(/(?!x){0,1}/, [ ['', 'ab'], ['', ''] ])
+    check(/c\z{0,1}/, [ ['c', 'abc'], ['c', 'cab']], ['abd'])
+    check(/\A{0,1}a/, [ ['a', 'abc'], ['a', '____abc']], ['bcd'])
     failcheck('.{100001}')
     failcheck('.{0,100001}')
     failcheck('.{1,0}')
     failcheck('{0}')
-    failcheck('(?!x){0,1}')
   end
 
   def test_parse_comment
@@ -656,6 +665,13 @@ class TestRegexp < Test::Unit::TestCase
     check(/\A[[^b-c]&&[^e]&&a-f]\z/, %w(a d f), %w(b c e g 0))
     check(/\A[\n\r\t]\z/, ["\n", "\r", "\t"])
     failcheck('[9-1]')
+
+    assert_match(/\A\d+\z/, "0123456789")
+    assert_no_match(/\d/, "\uff10\uff11\uff12\uff13\uff14\uff15\uff16\uff17\uff18\uff19")
+    assert_match(/\A\w+\z/, "09azAZ_")
+    assert_no_match(/\w/, "\uff10\uff19\uff41\uff5a\uff21\uff3a")
+    assert_match(/\A\s+\z/, "\r\n\v\f\r\s")
+    assert_no_match(/\s/, "\u0085")
   end
 
   def test_posix_bracket
@@ -668,6 +684,12 @@ class TestRegexp < Test::Unit::TestCase
     failcheck('[[:alpha')
     failcheck('[[:alpha:')
     failcheck('[[:alp:]]')
+
+    assert_match(/\A[[:digit:]]+\z/, "\uff10\uff11\uff12\uff13\uff14\uff15\uff16\uff17\uff18\uff19")
+    assert_match(/\A[[:alnum:]]+\z/, "\uff10\uff19\uff41\uff5a\uff21\uff3a")
+    assert_match(/\A[[:space:]]+\z/, "\r\n\v\f\r\s\u0085")
+    assert_match(/\A[[:ascii:]]+\z/, "\x00\x7F")
+    assert_no_match(/[[:ascii:]]/, "\x80\xFF")
   end
 
   def test_backward

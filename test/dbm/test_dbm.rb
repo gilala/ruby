@@ -37,7 +37,7 @@ if defined? DBM
       DBM.open("#{@tmpdir}/#{@prefix}_rdonly") {|dbm|
         dbm['foo'] = 'FOO'
       }
-      
+
       File.chmod(0400, *Dir.glob("#{@tmpdir}/#{@prefix}_rdonly.*"))
 
       assert_instance_of(DBM, @dbm_rdonly = DBM.new("#{@tmpdir}/#{@prefix}_rdonly", nil))
@@ -160,9 +160,9 @@ if defined? DBM
       }
     end
 
-    def test_index
+    def test_key
       assert_equal('bar', @dbm['foo'] = 'bar')
-      assert_equal('foo', @dbm.index('bar'))
+      assert_equal('foo', @dbm.key('bar'))
       assert_nil(@dbm['bar'])
     end
 
@@ -238,7 +238,7 @@ if defined? DBM
 
       n = 0
       ret = @dbm.each_value {|val|
-        assert_not_nil(key = @dbm.index(val))
+        assert_not_nil(key = @dbm.key(val))
         assert_not_nil(i = keys.index(key))
         assert_equal(val, values[i])
 
@@ -334,14 +334,11 @@ if defined? DBM
     def test_delete_with_block
       key = 'no called block'
       @dbm[key] = 'foo'
-      assert_equal('foo', @dbm.delete(key) {|k| k.replace 'called block'})
-      assert_equal('no called block', key)
+      assert_equal('foo', @dbm.delete(key) {|k| k.replace 'called block'; :blockval})
       assert_equal(0, @dbm.size)
 
       key = 'no called block'
-      assert_equal(:blockval,
-                    @dbm.delete(key) {|k| k.replace 'called block'; :blockval})
-      assert_equal('called block', key)
+      assert_equal(:blockval, @dbm.delete(key) {|k| k.replace 'called block'; :blockval})
       assert_equal(0, @dbm.size)
     end
 
@@ -533,7 +530,7 @@ if defined? DBM
       DBM.open("#{@tmproot}/a") {} # create a db.
       v = DBM.open("#{@tmproot}/a", nil, DBM::READER) {|d|
         # Errno::EPERM is raised on Solaris which use ndbm.
-        # DBMError is raised on Debian which use gdbm. 
+        # DBMError is raised on Debian which use gdbm.
         assert_raise(Errno::EPERM, DBMError) { d["k"] = "v" }
         true
       }

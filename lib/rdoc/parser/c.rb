@@ -1,4 +1,5 @@
 require 'rdoc/parser'
+require 'rdoc/parser/ruby'
 require 'rdoc/known_classes'
 
 ##
@@ -67,7 +68,7 @@ require 'rdoc/known_classes'
 # Ruby function is in the same source file as the rb_define_method call.
 # If this isn't the case, add the comment:
 #
-#    rb_define_method(....);  // in: filename
+#    rb_define_method(....);  // in filename
 #
 # As an example, we might have an extension that defines multiple classes
 # in its Init_xxx method. We could document them using
@@ -78,7 +79,7 @@ require 'rdoc/known_classes'
 #    * Encapsulate the writing and reading of the configuration
 #    * file. ...
 #    */
-#   
+#
 #   /*
 #    * Document-method: read_value
 #    *
@@ -123,7 +124,7 @@ class RDoc::Parser::C < RDoc::Parser
   end
 
   def do_classes
-    @content.scan(/(\w+)\s* = \s*rb_define_module\s*\(\s*"(\w+)"\s*\)/mx) do 
+    @content.scan(/(\w+)\s* = \s*rb_define_module\s*\(\s*"(\w+)"\s*\)/mx) do
       |var_name, class_name|
       handle_class_module(var_name, "module", class_name, nil, nil)
     end
@@ -269,7 +270,7 @@ class RDoc::Parser::C < RDoc::Parser
 
   def find_body(class_name, meth_name, meth_obj, body, quiet = false)
     case body
-    when %r"((?>/\*.*?\*/\s*)*)(?:(?:static|SWIGINTERN)\s+)?(?:intern\s+)?VALUE\s+#{meth_name}
+    when %r"((?>/\*.*?\*/\s*))(?:(?:static|SWIGINTERN)\s+)?(?:intern\s+)?VALUE\s+#{meth_name}
             \s*(\([^)]*\))([^;]|$)"xm
       comment, params = $1, $2
       body_text = $&
@@ -424,7 +425,7 @@ class RDoc::Parser::C < RDoc::Parser
 
   def find_override_comment(class_name, meth_name)
     name = Regexp.escape(meth_name)
-    if @content =~ %r{Document-method:\s+#{class_name}(?:\.|::)#{name}\s*?\n((?>.*?\*/))}m then
+    if @content =~ %r{Document-method:\s+#{class_name}(?:\.|::|#)#{name}\s*?\n((?>.*?\*/))}m then
       $1
     elsif @content =~ %r{Document-method:\s#{name}\s*?\n((?>.*?\*/))}m then
       $1

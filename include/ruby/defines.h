@@ -103,17 +103,12 @@ void xfree(void*);
 #undef _WIN32
 #endif
 
-#if defined(MSDOS) || defined(_WIN32) || defined(__human68k__) || defined(__EMX__)
+#if defined(_WIN32) || defined(__EMX__)
 #define DOSISH 1
-#ifndef _WIN32_WCE
 # define DOSISH_DRIVE_LETTER
 #endif
-#endif
 
-#if defined(__NeXT__) || defined(__APPLE__)
-/* Do not trust WORDS_BIGENDIAN from configure since -arch compiler flag may
-   result in a different endian.  Instead trust __BIG_ENDIAN__ and
-   __LITTLE_ENDIAN__ which are set correctly by -arch. */
+#ifdef AC_APPLE_UNIVERSAL_BUILD
 #undef WORDS_BIGENDIAN
 #ifdef __BIG_ENDIAN__
 #define WORDS_BIGENDIAN
@@ -194,16 +189,31 @@ void xfree(void*);
 #include "ruby/win32.h"
 #endif
 
-#if defined(__VMS)
-#include "vms/vms.h"
-#endif
-
 #if defined(__BEOS__) && !defined(__HAIKU__) && !defined(BONE)
 #include <net/socket.h> /* intern.h needs fd_set definition */
+#elif defined (__SYMBIAN32__) && defined (HAVE_SYS_SELECT_H)
+# include <sys/select.h>
+#endif
+
+#ifdef __SYMBIAN32__
+# define FALSE 0
+# define TRUE 1
 #endif
 
 #ifdef RUBY_EXPORT
 #undef RUBY_EXTERN
+
+#ifndef FALSE
+# define FALSE 0
+#elif FALSE
+# error FALSE must be false
+#endif
+#ifndef TRUE
+# define TRUE 1
+#elif !TRUE
+# error TRUE must be true
+#endif
+
 #endif
 
 #ifndef RUBY_EXTERN
@@ -245,25 +255,19 @@ void rb_ia64_flushrs(void);
 
 #if defined(DOSISH)
 #define PATH_SEP ";"
-#elif defined(riscos)
-#define PATH_SEP ","
 #else
 #define PATH_SEP ":"
 #endif
 #define PATH_SEP_CHAR PATH_SEP[0]
 
-#if defined(__human68k__)
-#define PATH_ENV "path"
-#else
 #define PATH_ENV "PATH"
-#endif
 
-#if defined(DOSISH) && !defined(__human68k__) && !defined(__EMX__)
+#if defined(DOSISH) && !defined(__EMX__)
 #define ENV_IGNORECASE
 #endif
 
 #ifndef CASEFOLD_FILESYSTEM
-# if defined DOSISH || defined __VMS
+# if defined DOSISH
 #   define CASEFOLD_FILESYSTEM 1
 # else
 #   define CASEFOLD_FILESYSTEM 0
@@ -278,9 +282,17 @@ void rb_ia64_flushrs(void);
 #define RUBY_PLATFORM "unknown-unknown"
 #endif
 
+#ifndef RUBY_ALIAS_FUNCTION_TYPE
+#define RUBY_ALIAS_FUNCTION_TYPE(type, prot, name, args) \
+    type prot {return name args;}
+#endif
+#ifndef RUBY_ALIAS_FUNCTION_VOID
+#define RUBY_ALIAS_FUNCTION_VOID(prot, name, args) \
+    void prot {name args;}
+#endif
 #ifndef RUBY_ALIAS_FUNCTION
-#define RUBY_ALIAS_FUNCTION(old_prot, new_name, args) \
-    VALUE old_prot {return new_name args;}
+#define RUBY_ALIAS_FUNCTION(prot, name, args) \
+    RUBY_ALIAS_FUNCTION_TYPE(VALUE, prot, name, args)
 #endif
 
 #if defined(__cplusplus)

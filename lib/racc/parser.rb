@@ -159,7 +159,6 @@ module Racc
       reduce_n,     use_result,   * = arg
 
       _racc_init_sysvars
-      tok = nil
       act = nil
       i = nil
       nerr = 0
@@ -189,7 +188,7 @@ module Racc
             ;
           end
 
-          while not (i = action_pointer[@racc_state[-1]]) or
+          while not(i = action_pointer[@racc_state[-1]]) or
                 not @racc_read_next or
                 @racc_t == 0   # $
             unless i and i += @racc_t and
@@ -389,7 +388,7 @@ module Racc
         toks.each {|t| out.print ' ', racc_token2str(t) }
       end
       out.puts " --> #{racc_token2str(sim)}"
-          
+
       racc_print_stacks tstack, vstack
       @racc_debug_out.puts
     end

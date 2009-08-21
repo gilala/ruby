@@ -1,6 +1,14 @@
 # depends on: array.rb dir.rb env.rb file.rb hash.rb module.rb regexp.rb
+# vim: filetype=ruby
+
+# NOTICE: Ruby is during initialization here.
+# * Encoding.default_external does not reflects -E.
+# * Should not expect Encoding.default_internal.
+# * Locale encoding is available.
 
 if defined?(Gem) then
+
+  # :stopdoc:
 
   module Kernel
 
@@ -13,24 +21,17 @@ if defined?(Gem) then
   module Gem
 
     ConfigMap = {
-      :sitedir => RbConfig::CONFIG["sitedir"],
-      :ruby_version => RbConfig::CONFIG["ruby_version"],
-      :libdir => RbConfig::CONFIG["libdir"],
-      :sitelibdir => RbConfig::CONFIG["sitelibdir"],
-      :arch => RbConfig::CONFIG["arch"],
-      :bindir => RbConfig::CONFIG["bindir"],
-      :EXEEXT => RbConfig::CONFIG["EXEEXT"],
-      :RUBY_SO_NAME => RbConfig::CONFIG["RUBY_SO_NAME"],
-      :ruby_install_name => RbConfig::CONFIG["ruby_install_name"]
+      :EXEEXT            => RbConfig::CONFIG["EXEEXT"],
+      :RUBY_SO_NAME      => RbConfig::CONFIG["RUBY_SO_NAME"],
+      :arch              => RbConfig::CONFIG["arch"],
+      :bindir            => RbConfig::CONFIG["bindir"],
+      :libdir            => RbConfig::CONFIG["libdir"],
+      :ruby_install_name => RbConfig::CONFIG["ruby_install_name"],
+      :ruby_version      => RbConfig::CONFIG["ruby_version"],
+      :rubylibprefix     => RbConfig::CONFIG["rubylibprefix"],
+      :sitedir           => RbConfig::CONFIG["sitedir"],
+      :sitelibdir        => RbConfig::CONFIG["sitelibdir"],
     }
-
-    def self.default_dir
-      if defined? RUBY_FRAMEWORK_VERSION
-        return File.join(File.dirname(ConfigMap[:sitedir]), "Gems")
-      else
-        File.join(ConfigMap[:libdir], 'ruby', 'gems', ConfigMap[:ruby_version])
-      end
-    end
 
     def self.dir
       @gem_home ||= nil
@@ -41,52 +42,141 @@ if defined?(Gem) then
     def self.path
       @gem_path ||= nil
       unless @gem_path
-        paths = [ENV['GEM_PATH']]
+        paths = [ENV['GEM_PATH'] || default_path]
         paths << APPLE_GEM_HOME if defined? APPLE_GEM_HOME
         set_paths(paths.compact.join(File::PATH_SEPARATOR))
       end
       @gem_path
     end
 
-    # Set the Gem home directory (as reported by +dir+).
+    def self.post_install(&hook)
+      @post_install_hooks << hook
+    end
+
+    def self.post_uninstall(&hook)
+      @post_uninstall_hooks << hook
+    end
+
+    def self.pre_install(&hook)
+      @pre_install_hooks << hook
+    end
+
+    def self.pre_uninstall(&hook)
+      @pre_uninstall_hooks << hook
+    end
+
     def self.set_home(home)
+      home = home.gsub File::ALT_SEPARATOR, File::SEPARATOR if File::ALT_SEPARATOR
       @gem_home = home
-      ensure_gem_subdirectories(@gem_home)
     end
 
     def self.set_paths(gpaths)
       if gpaths
         @gem_path = gpaths.split(File::PATH_SEPARATOR)
+
+        if File::ALT_SEPARATOR then
+          @gem_path.map! do |path|
+            path.gsub File::ALT_SEPARATOR, File::SEPARATOR
+          end
+        end
+
         @gem_path << Gem.dir
       else
+        # TODO: should this be Gem.default_path instead?
         @gem_path = [Gem.dir]
       end
+
       @gem_path.uniq!
-      @gem_path.each do |gp| ensure_gem_subdirectories(gp) end
     end
 
-    def self.ensure_gem_subdirectories(path)
+    def self.user_home
+      @user_home ||= File.expand_path("~")
+    rescue
+      if File::ALT_SEPARATOR then
+        "C:/"
+      else
+        "/"
+      end
     end
+
+    # begin rubygems/defaults
+    # NOTE: this require will be replaced with in-place eval before compilation.
+    require 'lib/rubygems/defaults.rb'
+    # end rubygems/defaults
+
+
+    ##
+    # Methods before this line will be removed when QuickLoader is replaced
+    # with the real RubyGems
 
     GEM_PRELUDE_METHODS = Gem.methods(false)
 
+    begin
+      verbose, debug = $VERBOSE, $DEBUG
+      $VERBOSE = $DEBUG = nil
+
+      begin
+        require 'rubygems/defaults/operating_system'
+      rescue ::LoadError
+      end
+
+      if defined?(RUBY_ENGINE) then
+        begin
+          require "rubygems/defaults/#{RUBY_ENGINE}"
+        rescue ::LoadError
+        end
+      end
+    ensure
+      $VERBOSE, $DEBUG = verbose, debug
+    end
+
     module QuickLoader
 
+      @loaded_full_rubygems_library = false
+
       def self.load_full_rubygems_library
+        return if @loaded_full_rubygems_library
+
+        @loaded_full_rubygems_library = true
+
         class << Gem
           Gem::GEM_PRELUDE_METHODS.each do |method_name|
             undef_method method_name
           end
+          undef_method :const_missing
+          undef_method :method_missing
         end
 
         Kernel.module_eval do
           undef_method :gem if method_defined? :gem
         end
 
-        $".delete File.join(Gem::ConfigMap[:libdir], 'ruby',
-                            Gem::ConfigMap[:ruby_version], 'rubygems.rb')
-
+        $".delete path_to_full_rubygems_library
+        $".each do |path|
+          if /#{Regexp.escape File::SEPARATOR}rubygems\.rb\z/ =~ path
+            raise LoadError, "another rubygems is already loaded from #{path}"
+          end
+        end
         require 'rubygems'
+      end
+
+      def self.fake_rubygems_as_loaded
+        path = path_to_full_rubygems_library
+        $" << path unless $".include?(path)
+      end
+
+      def self.path_to_full_rubygems_library
+        installed_path = File.join(Gem::ConfigMap[:rubylibprefix], Gem::ConfigMap[:ruby_version])
+        if $:.include?(installed_path)
+          return File.join(installed_path, 'rubygems.rb')
+        else # e.g., on test-all
+          $:.each do |dir|
+            if File.exist?( path = File.join(dir, 'rubygems.rb') )
+              return path
+            end
+          end
+          raise LoadError, 'rubygems.rb'
+        end
       end
 
       GemPaths = {}
@@ -94,14 +184,14 @@ if defined?(Gem) then
 
       def push_gem_version_on_load_path(gem_name, *version_requirements)
         if version_requirements.empty?
-          unless GemPaths.has_key?(gem_name)
-            raise LoadError.new("Could not find RubyGem #{gem_name} (>= 0)\n") 
+          unless GemPaths.has_key?(gem_name) then
+            raise Gem::LoadError, "Could not find RubyGem #{gem_name} (>= 0)\n"
           end
 
           # highest version gems already active
           return false
         else
-          if version_requirements.length > 1
+          if version_requirements.length > 1 then
             QuickLoader.load_full_rubygems_library
             return gem(gem_name, *version_requirements)
           end
@@ -109,24 +199,24 @@ if defined?(Gem) then
           requirement, version = version_requirements[0].split
           requirement.strip!
 
-          if requirement == ">" || requirement == ">="
-            if (GemVersions[gem_name] <=> Gem.calculate_integers_for_gem_version(version)) >= 0
-              return false 
-            end
-          elsif requirement == "~>"
-            loaded_version = GemVersions[gem_name]
-            required_version = Gem.calculate_integers_for_gem_version(version)
-            if loaded_version && (loaded_version[0] == required_version[0])
-              return false
+          if loaded_version = GemVersions[gem_name] then
+            case requirement
+            when ">", ">=" then
+              return false if
+                (loaded_version <=> Gem.integers_for(version)) >= 0
+            when "~>" then
+              required_version = Gem.integers_for version
+
+              return false if loaded_version.first == required_version.first
             end
           end
 
           QuickLoader.load_full_rubygems_library
-          gem(gem_name, *version_requirements)
+          gem gem_name, *version_requirements
         end
       end
 
-      def calculate_integers_for_gem_version(gem_version)
+      def integers_for(gem_version)
         numbers = gem_version.split(".").collect {|n| n.to_i}
         numbers.pop while numbers.last == 0
         numbers << 0 if numbers.empty?
@@ -136,16 +226,20 @@ if defined?(Gem) then
       def push_all_highest_version_gems_on_load_path
         Gem.path.each do |path|
           gems_directory = File.join(path, "gems")
-          if File.exist?(gems_directory)
+
+          if File.exist?(gems_directory) then
             Dir.entries(gems_directory).each do |gem_directory_name|
               next if gem_directory_name == "." || gem_directory_name == ".."
+
               dash = gem_directory_name.rindex("-")
               next if dash.nil?
+
               gem_name = gem_directory_name[0...dash]
               current_version = GemVersions[gem_name]
-              new_version = calculate_integers_for_gem_version(gem_directory_name[dash+1..-1])
-              if current_version
-                if (current_version <=> new_version) == -1
+              new_version = integers_for(gem_directory_name[dash+1..-1])
+
+              if current_version then
+                if (current_version <=> new_version) == -1 then
                   GemVersions[gem_name] = new_version
                   GemPaths[gem_name] = File.join(gems_directory, gem_directory_name)
                 end
@@ -159,19 +253,23 @@ if defined?(Gem) then
 
         require_paths = []
 
-        GemPaths.values.each do |path|
-          if File.exist?(File.join(path, ".require_paths"))
-            require_paths.concat(File.read(File.join(path, ".require_paths")).split.map {|require_path| File.join(path, require_path)})
+        GemPaths.each_value do |path|
+          if File.exist?(file = File.join(path, ".require_paths")) then
+            paths = File.read(file).split.map do |require_path|
+              File.join path, require_path
+            end
+
+            require_paths.concat paths
           else
-            require_paths << File.join(path, "bin") if File.exist?(File.join(path, "bin"))
-            require_paths << File.join(path, "lib") if File.exist?(File.join(path, "lib"))
+            require_paths << file if File.exist?(file = File.join(path, "bin"))
+            require_paths << file if File.exist?(file = File.join(path, "lib"))
           end
         end
 
         # "tag" the first require_path inserted into the $LOAD_PATH to enable
         # indexing correctly with rubygems proper when it inserts an explicitly
         # gem version
-        unless require_paths.empty?
+        unless require_paths.empty? then
           require_paths.first.instance_variable_set(:@gem_prelude_index, true)
         end
         # gem directories must come after -I and ENV['RUBYLIB']
@@ -180,8 +278,9 @@ if defined?(Gem) then
 
       def const_missing(constant)
         QuickLoader.load_full_rubygems_library
-        if Gem.const_defined?(constant)
-          Gem.const_get(constant)
+
+        if Gem.const_defined?(constant) then
+          Gem.const_get constant
         else
           super
         end
@@ -200,8 +299,7 @@ if defined?(Gem) then
 
   begin
     Gem.push_all_highest_version_gems_on_load_path
-    $" << File.join(Gem::ConfigMap[:libdir], "ruby",
-                    Gem::ConfigMap[:ruby_version], "rubygems.rb")
+    Gem::QuickLoader.fake_rubygems_as_loaded
   rescue Exception => e
     puts "Error loading gem paths on load path in gem_prelude"
     puts e

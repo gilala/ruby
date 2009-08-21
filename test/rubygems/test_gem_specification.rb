@@ -5,7 +5,6 @@
 #++
 
 require 'stringio'
-require 'test/unit'
 require File.join(File.expand_path(File.dirname(__FILE__)), 'gemutilities')
 require 'rubygems/specification'
 
@@ -54,6 +53,7 @@ end
       s.test_file = 'test/suite.rb'
       s.requirements << 'A working computer'
       s.rubyforge_project = 'example'
+      s.license = 'MIT'
 
       s.add_dependency 'rake', '> 0.4'
       s.add_dependency 'jabber4r', '> 0.0.0'
@@ -92,6 +92,7 @@ end
       files
       has_rdoc
       homepage
+      licenses
       name
       platform
       post_install_message
@@ -196,8 +197,8 @@ end
     assert_equal [], spec.requirements
     assert_equal [], spec.dependencies
     assert_equal 'bin', spec.bindir
-    assert_equal false, spec.has_rdoc
-    assert_equal false, spec.has_rdoc?
+    assert_equal true, spec.has_rdoc
+    assert_equal true, spec.has_rdoc?
     assert_equal '>= 0', spec.required_ruby_version.to_s
     assert_equal '>= 0', spec.required_rubygems_version.to_s
   end
@@ -215,6 +216,80 @@ end
 
     assert_equal "blah", spec.name
     assert_equal "1.3.5", spec.version.to_s
+  end
+
+  def test_initialize_copy
+    spec = Gem::Specification.new do |s|
+      s.name = "blah"
+      s.version = "1.3.5"
+      s.summary = 'summary'
+      s.description = 'description'
+      s.authors = 'author a', 'author b'
+      s.licenses = 'BSD'
+      s.files = 'lib/file.rb'
+      s.test_files = 'test/file.rb'
+      s.rdoc_options = '--foo'
+      s.extra_rdoc_files = 'README.txt'
+      s.executables = 'exec'
+      s.extensions = 'ext/extconf.rb'
+      s.requirements = 'requirement'
+      s.add_dependency 'some_gem'
+    end
+
+    new_spec = spec.dup
+
+    assert_equal "blah", spec.name
+    assert_same  spec.name, new_spec.name
+
+    assert_equal "1.3.5", spec.version.to_s
+    assert_same spec.version, new_spec.version
+
+    assert_equal Gem::Platform::RUBY, spec.platform
+    assert_same spec.platform, new_spec.platform
+
+    assert_equal 'summary', spec.summary
+    assert_same spec.summary, new_spec.summary
+
+    assert_equal %w[lib/file.rb test/file.rb bin/exec README.txt
+                    ext/extconf.rb],
+                 spec.files
+    refute_same spec.files, new_spec.files, 'files'
+
+    assert_equal %w[test/file.rb], spec.test_files
+    refute_same spec.test_files, new_spec.test_files, 'test_files'
+
+    assert_equal %w[--foo], spec.rdoc_options
+    refute_same spec.rdoc_options, new_spec.rdoc_options, 'rdoc_options'
+
+    assert_equal %w[README.txt], spec.extra_rdoc_files
+    refute_same spec.extra_rdoc_files, new_spec.extra_rdoc_files,
+                'extra_rdoc_files'
+
+    assert_equal %w[exec], spec.executables
+    refute_same spec.executables, new_spec.executables, 'executables'
+
+    assert_equal %w[ext/extconf.rb], spec.extensions
+    refute_same spec.extensions, new_spec.extensions, 'extensions'
+
+    assert_equal %w[requirement], spec.requirements
+    refute_same spec.requirements, new_spec.requirements, 'requirements'
+
+    assert_equal [Gem::Dependency.new('some_gem', Gem::Requirement.default)],
+                 spec.dependencies
+    refute_same spec.dependencies, new_spec.dependencies, 'dependencies'
+
+    assert_equal 'bin', spec.bindir
+    assert_same spec.bindir, new_spec.bindir
+
+    assert_equal true, spec.has_rdoc
+    assert_same spec.has_rdoc, new_spec.has_rdoc
+
+    assert_equal '>= 0', spec.required_ruby_version.to_s
+    assert_same spec.required_ruby_version, new_spec.required_ruby_version
+
+    assert_equal '>= 0', spec.required_rubygems_version.to_s
+    assert_same spec.required_rubygems_version,
+                new_spec.required_rubygems_version
   end
 
   def test__dump
@@ -336,8 +411,8 @@ end
   def test_equals2
     assert_equal @a1, @a1
     assert_equal @a1, @a1.dup
-    assert_not_equal @a1, @a2
-    assert_not_equal @a1, Object.new
+    refute_equal @a1, @a2
+    refute_equal @a1, Object.new
   end
 
   # The cgikit specification was reported to be causing trouble in at least
@@ -356,7 +431,7 @@ end
       s.homepage = %q{http://www.spice-of-life.net/download/cgikit/}
       s.autorequire = %q{cgikit}
       s.bindir = nil
-      s.has_rdoc = nil
+      s.has_rdoc = true
       s.required_ruby_version = nil
       s.platform = nil
       s.files = ["lib/cgikit", "lib/cgikit.rb", "lib/cgikit/components", "..."]
@@ -369,16 +444,16 @@ end
     spec = @a1.dup
     spec.default_executable = 'xx'
 
-    assert_not_equal @a1, spec
-    assert_not_equal spec, @a1
+    refute_equal @a1, spec
+    refute_equal spec, @a1
   end
 
   def test_equals2_extensions
     spec = @a1.dup
     spec.extensions = 'xx'
 
-    assert_not_equal @a1, spec
-    assert_not_equal spec, @a1
+    refute_equal @a1, spec
+    refute_equal spec, @a1
   end
 
   def test_executables
@@ -500,19 +575,50 @@ end
   end
 
   def test_has_rdoc_eh
-    assert_equal true, @a1.has_rdoc?
+    assert @a1.has_rdoc?
+  end
+
+  def test_has_rdoc_equals
+
+    use_ui @ui do
+      @a1.has_rdoc = false
+    end
+
+    assert_equal '', @ui.output
+
+    assert_equal true, @a1.has_rdoc
   end
 
   def test_hash
     assert_equal @a1.hash, @a1.hash
     assert_equal @a1.hash, @a1.dup.hash
-    assert_not_equal @a1.hash, @a2.hash
+    refute_equal @a1.hash, @a2.hash
+  end
+
+  def test_installation_path
+    assert_equal @gemhome, @a1.installation_path
+
+    @a1.instance_variable_set :@loaded_from, nil
+
+    e = assert_raises Gem::Exception do
+      @a1.installation_path
+    end
+
+    assert_equal 'spec a-1 is not from an installed gem', e.message
   end
 
   def test_lib_files
     @a1.files = %w[lib/foo.rb Rakefile]
 
     assert_equal %w[lib/foo.rb], @a1.lib_files
+  end
+
+  def test_license
+    assert_equal 'MIT', @a1.license
+  end
+
+  def test_licenses
+    assert_equal ['MIT'], @a1.licenses
   end
 
   def test_name
@@ -567,6 +673,12 @@ end
 
     @a1.platform = 'powerpc-darwin'
     assert_equal Gem::Platform.new('ppc-darwin'), @a1.platform
+  end
+
+  def test_prerelease_spec_adds_required_rubygems_version
+    @prerelease = quick_gem('tardis', '2.2.0.a')
+    refute @prerelease.required_rubygems_version.satisfied_by?(Gem::Version.new('1.3.1'))
+    assert @prerelease.required_rubygems_version.satisfied_by?(Gem::Version.new('1.4.0'))
   end
 
   def test_require_paths
@@ -634,7 +746,10 @@ end
 
     ruby_code = @a2.to_ruby
 
-    expected = "Gem::Specification.new do |s|
+    expected = <<-SPEC
+# -*- encoding: utf-8 -*-
+
+Gem::Specification.new do |s|
   s.name = %q{a}
   s.version = \"2\"
 
@@ -644,7 +759,6 @@ end
   s.description = %q{This is a test description}
   s.email = %q{example@example.com}
   s.files = [\"lib/code.rb\"]
-  s.has_rdoc = true
   s.homepage = %q{http://example.com}
   s.require_paths = [\"lib\"]
   s.rubygems_version = %q{#{Gem::RubyGemsVersion}}
@@ -654,7 +768,7 @@ end
     current_version = Gem::Specification::CURRENT_SPECIFICATION_VERSION
     s.specification_version = #{Gem::Specification::CURRENT_SPECIFICATION_VERSION}
 
-    if current_version >= 3 then
+    if Gem::Version.new(Gem::RubyGemsVersion) >= Gem::Version.new('1.2.0') then
       s.add_runtime_dependency(%q<b>, [\"= 1\"])
     else
       s.add_dependency(%q<b>, [\"= 1\"])
@@ -663,7 +777,7 @@ end
     s.add_dependency(%q<b>, [\"= 1\"])
   end
 end
-"
+    SPEC
 
     assert_equal expected, ruby_code
 
@@ -679,7 +793,10 @@ end
     local = Gem::Platform.local
     expected_platform = "[#{local.cpu.inspect}, #{local.os.inspect}, #{local.version.inspect}]"
 
-    expected = "Gem::Specification.new do |s|
+    expected = <<-SPEC
+# -*- encoding: utf-8 -*-
+
+Gem::Specification.new do |s|
   s.name = %q{a}
   s.version = \"1\"
   s.platform = Gem::Platform.new(#{expected_platform})
@@ -693,8 +810,8 @@ end
   s.executables = [\"exec\"]
   s.extensions = [\"ext/a/extconf.rb\"]
   s.files = [\"lib/code.rb\", \"test/suite.rb\", \"bin/exec\", \"ext/a/extconf.rb\"]
-  s.has_rdoc = %q{true}
   s.homepage = %q{http://example.com}
+  s.licenses = [\"MIT\"]
   s.require_paths = [\"lib\"]
   s.requirements = [\"A working computer\"]
   s.rubyforge_project = %q{example}
@@ -704,9 +821,9 @@ end
 
   if s.respond_to? :specification_version then
     current_version = Gem::Specification::CURRENT_SPECIFICATION_VERSION
-    s.specification_version = 2
+    s.specification_version = 3
 
-    if current_version >= 3 then
+    if Gem::Version.new(Gem::RubyGemsVersion) >= Gem::Version.new('1.2.0') then
       s.add_runtime_dependency(%q<rake>, [\"> 0.4\"])
       s.add_runtime_dependency(%q<jabber4r>, [\"> 0.0.0\"])
       s.add_runtime_dependency(%q<pqa>, [\"> 0.4\", \"<= 0.6\"])
@@ -721,7 +838,7 @@ end
     s.add_dependency(%q<pqa>, [\"> 0.4\", \"<= 0.6\"])
   end
 end
-"
+    SPEC
 
     assert_equal expected, ruby_code
 
@@ -792,12 +909,16 @@ end
   end
 
   def test_validate
+    util_setup_validate
+
     Dir.chdir @tempdir do
       assert @a1.validate
     end
   end
 
   def test_validate_authors
+    util_setup_validate
+
     Dir.chdir @tempdir do
       @a1.authors = []
 
@@ -809,15 +930,33 @@ end
 
       @a1.authors = [Object.new]
 
-      e = assert_raise Gem::InvalidSpecificationException do
+      e = assert_raises Gem::InvalidSpecificationException do
         @a1.validate
       end
 
       assert_equal 'authors must be Array of Strings', e.message
+
+      @a1.authors = ['FIXME (who is writing this software)']
+
+      e = assert_raises Gem::InvalidSpecificationException do
+        @a1.validate
+      end
+
+      assert_equal '"FIXME" or "TODO" is not an author', e.message
+
+      @a1.authors = ['TODO (who is writing this software)']
+
+      e = assert_raises Gem::InvalidSpecificationException do
+        @a1.validate
+      end
+
+      assert_equal '"FIXME" or "TODO" is not an author', e.message
     end
   end
 
   def test_validate_autorequire
+    util_setup_validate
+
     Dir.chdir @tempdir do
       @a1.autorequire = 'code'
 
@@ -830,7 +969,50 @@ end
     end
   end
 
+  def test_validate_description
+    util_setup_validate
+
+    Dir.chdir @tempdir do
+      @a1.description = ''
+
+      use_ui @ui do
+        @a1.validate
+      end
+
+      assert_equal "WARNING:  no description specified\n", @ui.error, 'error'
+
+      @ui = MockGemUi.new
+      @a1.summary = 'this is my summary'
+      @a1.description = @a1.summary
+
+      use_ui @ui do
+        @a1.validate
+      end
+
+      assert_equal "WARNING:  description and summary are identical\n",
+                   @ui.error, 'error'
+
+      @a1.description = 'FIXME (describe your package)'
+
+      e = assert_raises Gem::InvalidSpecificationException do
+        @a1.validate
+      end
+
+      assert_equal '"FIXME" or "TODO" is not a description', e.message
+
+      @a1.description = 'TODO (describe your package)'
+
+      e = assert_raises Gem::InvalidSpecificationException do
+        @a1.validate
+      end
+
+      assert_equal '"FIXME" or "TODO" is not a description', e.message
+    end
+  end
+
   def test_validate_email
+    util_setup_validate
+
     Dir.chdir @tempdir do
       @a1.email = ''
 
@@ -839,11 +1021,29 @@ end
       end
 
       assert_equal "WARNING:  no email specified\n", @ui.error, 'error'
+
+      @a1.email = 'FIXME (your e-mail)'
+
+      e = assert_raises Gem::InvalidSpecificationException do
+        @a1.validate
+      end
+
+      assert_equal '"FIXME" or "TODO" is not an email address', e.message
+
+      @a1.email = 'TODO (your e-mail)'
+
+      e = assert_raises Gem::InvalidSpecificationException do
+        @a1.validate
+      end
+
+      assert_equal '"FIXME" or "TODO" is not an email address', e.message
     end
   end
 
   def test_validate_empty
-    e = assert_raise Gem::InvalidSpecificationException do
+    util_setup_validate
+
+    e = assert_raises Gem::InvalidSpecificationException do
       Gem::Specification.new.validate
     end
 
@@ -851,8 +1051,11 @@ end
   end
 
   def test_validate_executables
+    util_setup_validate
+
     FileUtils.mkdir_p File.join(@tempdir, 'bin')
     File.open File.join(@tempdir, 'bin', 'exec'), 'w' do end
+    FileUtils.mkdir_p File.join(@tempdir, 'exec')
 
     use_ui @ui do
       Dir.chdir @tempdir do
@@ -860,21 +1063,62 @@ end
       end
     end
 
+    assert_equal %w[exec], @a1.executables
+
     assert_equal '', @ui.output, 'output'
     assert_equal "WARNING:  bin/exec is missing #! line\n", @ui.error, 'error'
   end
 
   def test_validate_empty_require_paths
-    @a1.require_paths = []
-    e = assert_raise Gem::InvalidSpecificationException do
-      @a1.validate
+    if win_platform? then
+      skip 'test_validate_empty_require_paths skipped on MS Windows (symlink)'
+    else
+      util_setup_validate
+
+      @a1.require_paths = []
+      e = assert_raises Gem::InvalidSpecificationException do
+        @a1.validate
+      end
+
+      assert_equal 'specification must have at least one require_path',
+                   e.message
+    end
+  end
+
+  def test_validate_files
+    skip 'test_validate_files skipped on MS Windows (symlink)' if win_platform?
+    util_setup_validate
+
+    @a1.files += ['lib', 'lib2']
+
+    Dir.chdir @tempdir do
+      FileUtils.ln_s '/root/path', 'lib2' unless vc_windows?
+
+      e = assert_raises Gem::InvalidSpecificationException do
+        @a1.validate
+      end
+
+      assert_equal '["lib2"] are not files', e.message
     end
 
-    assert_equal 'specification must have at least one require_path', e.message
+    assert_equal %w[lib/code.rb test/suite.rb bin/exec ext/a/extconf.rb lib2],
+                 @a1.files
   end
 
   def test_validate_homepage
+    util_setup_validate
+
     Dir.chdir @tempdir do
+      @a1.homepage = nil
+
+      use_ui @ui do
+        @a1.validate
+      end
+
+      assert_equal "WARNING:  no homepage specified\n", @ui.error, 'error'
+
+      @ui = MockGemUi.new
+
       @a1.homepage = ''
 
       use_ui @ui do
@@ -882,23 +1126,31 @@ end
       end
 
       assert_equal "WARNING:  no homepage specified\n", @ui.error, 'error'
-    end
-  end
 
-  def test_validate_has_rdoc
-    Dir.chdir @tempdir do
-      @a1.has_rdoc = false
+      @a1.homepage = 'over at my cool site'
 
-      use_ui @ui do
+      e = assert_raises Gem::InvalidSpecificationException do
         @a1.validate
       end
 
-      assert_equal "WARNING:  RDoc will not be generated (has_rdoc == false)\n",
-                   @ui.error, 'error'
+      assert_equal '"over at my cool site" is not a URI', e.message
     end
   end
 
+  def test_validate_name
+    util_setup_validate
+
+    e = assert_raises Gem::InvalidSpecificationException do
+      @a1.name = :json
+      @a1.validate
+    end
+
+    assert_equal 'invalid value for attribute name: ":json"', e.message
+  end
+
   def test_validate_platform_legacy
+    util_setup_validate
+
     Dir.chdir @tempdir do
       @a1.platform = 'mswin32'
       assert @a1.validate
@@ -912,6 +1164,8 @@ end
   end
 
   def test_validate_rubyforge_project
+    util_setup_validate
+
     Dir.chdir @tempdir do
       @a1.rubyforge_project = ''
 
@@ -925,8 +1179,10 @@ end
   end
 
   def test_validate_rubygems_version
+    util_setup_validate
+
     @a1.rubygems_version = "3"
-    e = assert_raise Gem::InvalidSpecificationException do
+    e = assert_raises Gem::InvalidSpecificationException do
       @a1.validate
     end
 
@@ -934,7 +1190,26 @@ end
                  e.message
   end
 
+  def test_validate_specification_version
+    util_setup_validate
+
+    Dir.chdir @tempdir do
+      @a1.specification_version = '1.0'
+
+      e = assert_raises Gem::InvalidSpecificationException do
+        use_ui @ui do
+          @a1.validate
+        end
+      end
+
+      err = 'specification_version must be a Fixnum (did you mean version?)'
+      assert_equal err, e.message
+    end
+  end
+
   def test_validate_summary
+    util_setup_validate
+
     Dir.chdir @tempdir do
       @a1.summary = ''
 
@@ -943,11 +1218,39 @@ end
       end
 
       assert_equal "WARNING:  no summary specified\n", @ui.error, 'error'
+
+      @a1.summary = 'FIXME (describe your package)'
+
+      e = assert_raises Gem::InvalidSpecificationException do
+        @a1.validate
+      end
+
+      assert_equal '"FIXME" or "TODO" is not a summary', e.message
+
+      @a1.summary = 'TODO (describe your package)'
+
+      e = assert_raises Gem::InvalidSpecificationException do
+        @a1.validate
+      end
+
+      assert_equal '"FIXME" or "TODO" is not a summary', e.message
     end
   end
 
   def test_version
     assert_equal Gem::Version.new('1'), @a1.version
+  end
+
+  def util_setup_validate
+    Dir.chdir @tempdir do
+      FileUtils.mkdir_p File.join('ext', 'a')
+      FileUtils.mkdir_p 'lib'
+      FileUtils.mkdir_p 'test'
+
+      FileUtils.touch File.join('ext', 'a', 'extconf.rb')
+      FileUtils.touch File.join('lib', 'code.rb')
+      FileUtils.touch File.join('test', 'suite.rb')
+    end
   end
 
 end

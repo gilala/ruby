@@ -68,8 +68,8 @@ configure:
     This configure script is free software; the Free Software Foundation
     gives unlimited permission to copy, distribute and modify it.
 
-config.guess:
-config.sub:
+tool/config.guess:
+tool/config.sub:
 parse.c:
 
   As long as you distribute these files with the file configure, they
@@ -171,7 +171,6 @@ random.c
     email: matumoto@math.keio.ac.jp
 
 st.[ch]:
-x68/*:
 missing/alloca.c:
 missing/dup2.c:
 missing/finite.c:
@@ -260,6 +259,17 @@ missing/strlcpy.c
    WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
    OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
    ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+missing/langinfo.c
+
+  This file is from http://www.cl.cam.ac.uk/~mgk25/ucs/langinfo.c.
+  Ruby uses a modified version. The file contains the following
+  author/copyright notice:
+
+  Markus.Kuhn@cl.cam.ac.uk -- 2002-03-11
+  Permission to use, copy, modify, and distribute this software
+  for any purpose and without fee is hereby granted. The author
+  disclaims all warranties with regard to this software.
 
 ext/digest/md5/md5.[ch]:
 

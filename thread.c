@@ -14,7 +14,7 @@
   model 1: Userlevel Thread
     Same as traditional ruby thread.
 
-  model 2: Native Thread with Giant VM lock
+  model 2: Native Thread with Global VM lock
     Using pthread (or Windows thread) and Ruby threads run concurrent.
 
   model 3: Native Thread with fine grain lock
@@ -23,8 +23,8 @@
 ------------------------------------------------------------------------
 
   model 2:
-    A thread has mutex (GVL: Global VM Lock) can run.  When thread
-    scheduling, running thread release GVL.  If running thread
+    A thread has mutex (GVL: Global VM Lock or Giant VM Lock) can run.
+    When thread scheduling, running thread release GVL.  If running thread
     try blocking operation, this thread must release GVL and another
     thread can continue this flow.  After blocking operation, thread
     must check interrupt (RUBY_VM_CHECK_INTS).
@@ -65,12 +65,14 @@ static void sleep_wait_for_interrupt(rb_thread_t *th, double sleepsec);
 static void sleep_forever(rb_thread_t *th, int nodeadlock);
 static double timeofday(void);
 struct timeval rb_time_interval(VALUE);
-static int rb_thread_dead(rb_thread_t *th);
+static int rb_threadptr_dead(rb_thread_t *th);
 
 static void rb_check_deadlock(rb_vm_t *vm);
 
+int rb_signal_buff_size(void);
 void rb_signal_exec(rb_thread_t *th, int sig);
 void rb_disable_interrupt(void);
+void rb_thread_stop_timer_thread(void);
 
 static const VALUE eKillSignal = INT2FIX(0);
 static const VALUE eTerminateSignal = INT2FIX(1);
@@ -86,9 +88,18 @@ st_delete_wrap(st_table *table, st_data_t key)
 
 #define THREAD_SYSTEM_DEPENDENT_IMPLEMENTATION
 
+struct rb_blocking_region_buffer {
+    enum rb_thread_status prev_status;
+    struct rb_unblock_callback oldubf;
+};
+
 static void set_unblock_function(rb_thread_t *th, rb_unblock_function_t *func, void *arg,
 				 struct rb_unblock_callback *old);
 static void reset_unblock_function(rb_thread_t *th, const struct rb_unblock_callback *old);
+
+static inline void blocking_region_begin(rb_thread_t *th, struct rb_blocking_region_buffer *region,
+					 rb_unblock_function_t *func, void *arg);
+static inline void blocking_region_end(rb_thread_t *th, struct rb_blocking_region_buffer *region);
 
 #define GVL_UNLOCK_BEGIN() do { \
   rb_thread_t *_th_stored = GET_THREAD(); \
@@ -109,18 +120,10 @@ static void reset_unblock_function(rb_thread_t *th, const struct rb_unblock_call
 
 #define BLOCKING_REGION(exec, ubf, ubfarg) do { \
     rb_thread_t *__th = GET_THREAD(); \
-    enum rb_thread_status __prev_status = __th->status; \
-    struct rb_unblock_callback __oldubf; \
-    set_unblock_function(__th, ubf, ubfarg, &__oldubf); \
-    __th->status = THREAD_STOPPED; \
-    thread_debug("enter blocking region (%p)\n", __th); \
-    BLOCKING_REGION_CORE(exec); \
-    thread_debug("leave blocking region (%p)\n", __th); \
-    remove_signal_thread_list(__th); \
-    reset_unblock_function(__th, &__oldubf); \
-    if (__th->status == THREAD_STOPPED) { \
-	__th->status = __prev_status; \
-    } \
+    struct rb_blocking_region_buffer __region; \
+    blocking_region_begin(__th, &__region, ubf, ubfarg); \
+    exec; \
+    blocking_region_end(__th, &__region); \
     RUBY_VM_CHECK_INTS(); \
 } while(0)
 
@@ -246,7 +249,7 @@ reset_unblock_function(rb_thread_t *th, const struct rb_unblock_callback *old)
 }
 
 static void
-rb_thread_interrupt(rb_thread_t *th)
+rb_threadptr_interrupt(rb_thread_t *th)
 {
     native_mutex_lock(&th->interrupt_lock);
     RUBY_VM_SET_INTERRUPT(th);
@@ -268,13 +271,13 @@ terminate_i(st_data_t key, st_data_t val, rb_thread_t *main_thread)
     GetThreadPtr(thval, th);
 
     if (th != main_thread) {
-	thread_debug("terminate_i: %p\n", th);
-	rb_thread_interrupt(th);
+	thread_debug("terminate_i: %p\n", (void *)th);
+	rb_threadptr_interrupt(th);
 	th->thrown_errinfo = eTerminateSignal;
 	th->status = THREAD_TO_KILL;
     }
     else {
-	thread_debug("terminate_i: main thread (%p)\n", th);
+	thread_debug("terminate_i: main thread (%p)\n", (void *)th);
     }
     return ST_CONTINUE;
 }
@@ -288,36 +291,41 @@ typedef struct rb_mutex_struct
     struct rb_mutex_struct *next_mutex;
 } mutex_t;
 
-static void rb_mutex_unlock_all(mutex_t *mutex);
+static void rb_mutex_unlock_all(mutex_t *mutex, rb_thread_t *th);
 
 void
 rb_thread_terminate_all(void)
 {
     rb_thread_t *th = GET_THREAD(); /* main thread */
     rb_vm_t *vm = th->vm;
+    VALUE einfo = vm->main_thread->errinfo;
+    int state;
+
     if (vm->main_thread != th) {
-	rb_bug("rb_thread_terminate_all: called by child thread (%p, %p)", vm->main_thread, th);
+	rb_bug("rb_thread_terminate_all: called by child thread (%p, %p)",
+	       (void *)vm->main_thread, (void *)th);
     }
 
     /* unlock all locking mutexes */
     if (th->keeping_mutexes) {
-	rb_mutex_unlock_all(th->keeping_mutexes);
+	rb_mutex_unlock_all(th->keeping_mutexes, GET_THREAD());
     }
 
-    thread_debug("rb_thread_terminate_all (main thread: %p)\n", th);
+    thread_debug("rb_thread_terminate_all (main thread: %p)\n", (void *)th);
     st_foreach(vm->living_threads, terminate_i, (st_data_t)th);
 
     while (!rb_thread_alone()) {
 	PUSH_TAG();
-	if (EXEC_TAG() == 0) {
+	if ((state = EXEC_TAG()) == 0) {
 	    rb_thread_schedule();
 	}
-	else {
-	    /* ignore exception */
-	}
 	POP_TAG();
+	if (state && einfo != vm->main_thread->errinfo &&
+	    RUBY_VM_SET_INTERRUPT(vm->main_thread)) {
+	    break;
+	}
     }
-    system_working = 0;
+    rb_thread_stop_timer_thread();
 }
 
 static void
@@ -335,12 +343,18 @@ static void
 thread_cleanup_func(void *th_ptr)
 {
     rb_thread_t *th = th_ptr;
+
+    /* unlock all locking mutexes */
+    if (th->keeping_mutexes) {
+	rb_mutex_unlock_all(th->keeping_mutexes, th);
+	th->keeping_mutexes = NULL;
+    }
     thread_cleanup_func_before_exec(th_ptr);
     native_thread_destroy(th);
 }
 
 extern void ruby_error_print(void);
-static VALUE rb_thread_raise(int, VALUE *, rb_thread_t *);
+static VALUE rb_threadptr_raise(rb_thread_t *, int, VALUE *);
 void rb_thread_recycle_stack_release(VALUE *);
 
 void
@@ -359,15 +373,17 @@ thread_start_func_2(rb_thread_t *th, VALUE *stack_start, VALUE *register_stack_s
     rb_thread_t *main_th;
     VALUE errinfo = Qnil;
 
+    ruby_thread_set_native(th);
+
     th->machine_stack_start = stack_start;
 #ifdef __ia64
     th->machine_register_stack_start = register_stack_start;
 #endif
-    thread_debug("thread start: %p\n", th);
+    thread_debug("thread start: %p\n", (void *)th);
 
     native_mutex_lock(&th->vm->global_vm_lock);
     {
-	thread_debug("thread start (get lock): %p\n", th);
+	thread_debug("thread start (get lock): %p\n", (void *)th);
 	rb_thread_set_current(th);
 
 	TH_PUSH_TAG(th);
@@ -378,8 +394,8 @@ thread_start_func_2(rb_thread_t *th, VALUE *stack_start, VALUE *register_stack_s
 		    th->errinfo = Qnil;
 		    th->local_lfp = proc->block.lfp;
 		    th->local_svar = Qnil;
-		    th->value = vm_invoke_proc(th, proc, proc->block.self,
-					       RARRAY_LEN(args), RARRAY_PTR(args), 0);
+		    th->value = rb_vm_invoke_proc(th, proc, proc->block.self,
+						  (int)RARRAY_LEN(args), RARRAY_PTR(args), 0);
 		}
 		else {
 		    th->value = (*th->first_func)((void *)th->first_args);
@@ -411,13 +427,13 @@ thread_start_func_2(rb_thread_t *th, VALUE *stack_start, VALUE *register_stack_s
 	}
 
 	th->status = THREAD_KILLED;
-	thread_debug("thread end: %p\n", th);
+	thread_debug("thread end: %p\n", (void *)th);
 
 	main_th = th->vm->main_thread;
 	if (th != main_th) {
 	    if (TYPE(errinfo) == T_OBJECT) {
 		/* treat with normal error object */
-		rb_thread_raise(1, &errinfo, main_th);
+		rb_threadptr_raise(main_th, 1, &errinfo);
 	    }
 	}
 	TH_POP_TAG();
@@ -425,23 +441,19 @@ thread_start_func_2(rb_thread_t *th, VALUE *stack_start, VALUE *register_stack_s
 	/* locking_mutex must be Qfalse */
 	if (th->locking_mutex != Qfalse) {
 	    rb_bug("thread_start_func_2: locking_mutex must not be set (%p:%"PRIxVALUE")",
-		   th, th->locking_mutex);
+		   (void *)th, th->locking_mutex);
 	}
 
-	/* unlock all locking mutexes */
-	if (th->keeping_mutexes) {
-	    rb_mutex_unlock_all(th->keeping_mutexes);
-	    th->keeping_mutexes = NULL;
+	/* delete self other than main thread from living_threads */
+	if (th != main_th) {
+	    st_delete_wrap(th->vm->living_threads, th->self);
 	}
-
-	/* delete self from living_threads */
-	st_delete_wrap(th->vm->living_threads, th->self);
 
 	/* wake up joinning threads */
 	join_th = th->join_list_head;
 	while (join_th) {
 	    if (join_th == main_th) errinfo = Qnil;
-	    rb_thread_interrupt(join_th);
+	    rb_threadptr_interrupt(join_th);
 	    switch (join_th->status) {
 	      case THREAD_STOPPED: case THREAD_STOPPED_FOREVER:
 		join_th->status = THREAD_RUNNABLE;
@@ -449,7 +461,6 @@ thread_start_func_2(rb_thread_t *th, VALUE *stack_start, VALUE *register_stack_s
 	    }
 	    join_th = join_th->join_list_next;
 	}
-	if (th != main_th) rb_check_deadlock(th->vm);
 
 	if (!th->root_fiber) {
 	    rb_thread_recycle_stack_release(th->stack);
@@ -457,6 +468,10 @@ thread_start_func_2(rb_thread_t *th, VALUE *stack_start, VALUE *register_stack_s
 	}
     }
     thread_cleanup_func(th);
+    if (th != main_th) rb_check_deadlock(th->vm);
+    if (th->vm->main_thread == th) {
+	ruby_cleanup(state);
+    }
     native_mutex_unlock(&th->vm->global_vm_lock);
 
     return 0;
@@ -639,7 +654,7 @@ thread_join(rb_thread_t *target_th, double delay)
 	    /* */
 	}
 	else if (TYPE(target_th->errinfo) == T_NODE) {
-	    rb_exc_raise(vm_make_jump_tag_but_local_jump(
+	    rb_exc_raise(rb_vm_make_jump_tag_but_local_jump(
 		GET_THROWOBJ_STATE(err), GET_THROWOBJ_VAL(err)));
 	}
 	else {
@@ -739,7 +754,7 @@ double2timeval(double d)
     time.tv_sec = (int)d;
     time.tv_usec = (int)((d - (int)d) * 1e6);
     if (time.tv_usec < 0) {
-	time.tv_usec += (long)1e6;
+	time.tv_usec += (int)1e6;
 	time.tv_sec -= 1;
     }
     return time;
@@ -802,8 +817,8 @@ sleep_timeval(rb_thread_t *th, struct timeval tv)
 	if (to.tv_sec < tvn.tv_sec) break;
 	if (to.tv_sec == tvn.tv_sec && to.tv_usec <= tvn.tv_usec) break;
 	thread_debug("sleep_timeval: %ld.%.6ld > %ld.%.6ld\n",
-		     (long)to.tv_sec, to.tv_usec,
-		     (long)tvn.tv_sec, tvn.tv_usec);
+		     (long)to.tv_sec, (long)to.tv_usec,
+		     (long)tvn.tv_sec, (long)tvn.tv_usec);
 	tv.tv_sec = to.tv_sec - tvn.tv_sec;
 	if ((tv.tv_usec = to.tv_usec - tvn.tv_usec) < 0) {
 	    --tv.tv_sec;
@@ -814,14 +829,14 @@ sleep_timeval(rb_thread_t *th, struct timeval tv)
 }
 
 void
-rb_thread_sleep_forever()
+rb_thread_sleep_forever(void)
 {
     thread_debug("rb_thread_sleep_forever\n");
     sleep_forever(GET_THREAD(), 0);
 }
 
 static void
-rb_thread_sleep_deadly()
+rb_thread_sleep_deadly(void)
 {
     thread_debug("rb_thread_sleep_deadly\n");
     sleep_forever(GET_THREAD(), 1);
@@ -908,7 +923,7 @@ rb_thread_interrupted(VALUE thval)
     return RUBY_VM_INTERRUPTED(th);
 }
 
-struct timeval rb_time_timeval();
+struct timeval rb_time_timeval(VALUE);
 
 void
 rb_thread_sleep(int sec)
@@ -939,6 +954,52 @@ rb_thread_schedule(void)
     }
 }
 
+/* blocking region */
+static inline void
+blocking_region_begin(rb_thread_t *th, struct rb_blocking_region_buffer *region,
+		      rb_unblock_function_t *func, void *arg)
+{
+    region->prev_status = th->status;
+    th->blocking_region_buffer = region;
+    set_unblock_function(th, func, arg, &region->oldubf);
+    th->status = THREAD_STOPPED;
+    thread_debug("enter blocking region (%p)\n", (void *)th);
+    rb_gc_save_machine_context(th);
+    native_mutex_unlock(&th->vm->global_vm_lock);
+}
+
+static inline void
+blocking_region_end(rb_thread_t *th, struct rb_blocking_region_buffer *region)
+{
+    native_mutex_lock(&th->vm->global_vm_lock);
+    rb_thread_set_current(th);
+    thread_debug("leave blocking region (%p)\n", (void *)th);
+    remove_signal_thread_list(th);
+    th->blocking_region_buffer = 0;
+    reset_unblock_function(th, &region->oldubf);
+    if (th->status == THREAD_STOPPED) {
+	th->status = region->prev_status;
+    }
+}
+
+struct rb_blocking_region_buffer *
+rb_thread_blocking_region_begin(void)
+{
+    rb_thread_t *th = GET_THREAD();
+    struct rb_blocking_region_buffer *region = ALLOC(struct rb_blocking_region_buffer);
+    blocking_region_begin(th, region, ubf_select, th);
+    return region;
+}
+
+void
+rb_thread_blocking_region_end(struct rb_blocking_region_buffer *region)
+{
+    rb_thread_t *th = GET_THREAD();
+    blocking_region_end(th, region);
+    xfree(region);
+    RUBY_VM_CHECK_INTS();
+}
+
 /*
  * rb_thread_blocking_region - permit concurrent/parallel execution.
  *
@@ -965,8 +1026,14 @@ rb_thread_schedule(void)
  *         GVL (cause synchronization problem).  If you need to do it,
  *         read source code of C APIs and confirm by yourself.
  *
+ *   NOTE: In short, this API is difficult to use safely.  I recommend you
+ *         use other ways if you have.  We lack experiences to use this API.
+ *         Please report your problem related on it.
+ *
  *   Safe C API:
  *     * rb_thread_interrupted() - check interrupt flag
+ *     * ruby_xalloc(), ruby_xrealloc(), ruby_xfree() -
+ *         if they called without GVL, acquire GVL automatically.
  */
 VALUE
 rb_thread_blocking_region(
@@ -986,6 +1053,103 @@ rb_thread_blocking_region(
     }, ubf, data2);
 
     return val;
+}
+
+/* alias of rb_thread_blocking_region() */
+
+VALUE
+rb_thread_call_without_gvl(
+    rb_blocking_function_t *func, void *data1,
+    rb_unblock_function_t *ubf, void *data2)
+{
+    return rb_thread_blocking_region(func, data1, ubf, data2);
+}
+
+/*
+ * rb_thread_call_with_gvl - re-enter into Ruby world while releasing GVL.
+ *
+ ***
+ *** This API is EXPERIMENTAL!
+ *** We do not guarantee that this API remains in ruby 1.9.2 or later.
+ ***
+ *
+ * While releasing GVL using rb_thread_blocking_region() or
+ * rb_thread_call_without_gvl(), you can not access Ruby values or invoke methods.
+ * If you need to access it, you must use this function rb_thread_call_with_gvl().
+ *
+ * This function rb_thread_call_with_gvl() does:
+ * (1) acquire GVL.
+ * (2) call passed function `func'.
+ * (3) release GVL.
+ * (4) return a value which is returned at (2).
+ *
+ * NOTE: You should not return Ruby object at (2) because such Object
+ *       will not marked.
+ *
+ * NOTE: If an exception is raised in `func', this function "DOES NOT"
+ *       protect (catch) the exception.  If you have any resources
+ *       which should free before throwing exception, you need use
+ *       rb_protect() in `func' and return a value which represents
+ *       exception is raised.
+ *
+ * NOTE: This functions should not be called by a thread which
+ *       is not created as Ruby thread (created by Thread.new or so).
+ *       In other words, this function *DOES NOT* associate
+ *       NON-Ruby thread to Ruby thread.
+ */
+void *
+rb_thread_call_with_gvl(void *(*func)(void *), void *data1)
+{
+    rb_thread_t *th = ruby_thread_from_native();
+    struct rb_blocking_region_buffer *brb;
+    struct rb_unblock_callback prev_unblock;
+    void *r;
+
+    if (th == 0) {
+	/* Error is occurred, but we can't use rb_bug()
+	 * because this thread is not Ruby's thread.
+         * What should we do?
+	 */
+
+	fprintf(stderr, "[BUG] rb_thread_call_with_gvl() is called by non-ruby thread\n");
+	exit(1);
+    }
+
+    brb = (struct rb_blocking_region_buffer *)th->blocking_region_buffer;
+    prev_unblock = th->unblock;
+
+    if (brb == 0) {
+	rb_bug("rb_thread_call_with_gvl: called by a thread which has GVL.");
+    }
+
+    blocking_region_end(th, brb);
+    /* enter to Ruby world: You can access Ruby values, methods and so on. */
+    r = (*func)(data1);
+    /* levae from Ruby world: You can not access Ruby values, etc. */
+    blocking_region_begin(th, brb, prev_unblock.func, prev_unblock.arg);
+    return r;
+}
+
+/*
+ * ruby_thread_has_gvl_p - check if current native thread has GVL.
+ *
+ ***
+ *** This API is EXPERIMENTAL!
+ *** We do not guarantee that this API remains in ruby 1.9.2 or later.
+ ***
+ */
+
+int
+ruby_thread_has_gvl_p(void)
+{
+    rb_thread_t *th = ruby_thread_from_native();
+
+    if (th && th->blocking_region_buffer == 0) {
+	return 1;
+    }
+    else {
+	return 0;
+    }
 }
 
 /*
@@ -1020,8 +1184,12 @@ thread_s_pass(VALUE klass)
  */
 
 void
-rb_thread_execute_interrupts(rb_thread_t *th)
+rb_threadptr_execute_interrupts(rb_thread_t *th)
 {
+    if (GET_VM()->main_thread == th) {
+	while (rb_signal_buff_size() && !th->exec_signal) native_thread_yield();
+    }
+
     if (th->raised_flag) return;
 
     while (th->interrupt_flag) {
@@ -1090,18 +1258,18 @@ rb_gc_mark_threads(void)
 /*****************************************************/
 
 static void
-rb_thread_ready(rb_thread_t *th)
+rb_threadptr_ready(rb_thread_t *th)
 {
-    rb_thread_interrupt(th);
+    rb_threadptr_interrupt(th);
 }
 
 static VALUE
-rb_thread_raise(int argc, VALUE *argv, rb_thread_t *th)
+rb_threadptr_raise(rb_thread_t *th, int argc, VALUE *argv)
 {
     VALUE exc;
 
   again:
-    if (rb_thread_dead(th)) {
+    if (rb_threadptr_dead(th)) {
 	return Qnil;
     }
 
@@ -1112,34 +1280,49 @@ rb_thread_raise(int argc, VALUE *argv, rb_thread_t *th)
 
     exc = rb_make_exception(argc, argv);
     th->thrown_errinfo = exc;
-    rb_thread_ready(th);
+    rb_threadptr_ready(th);
     return Qnil;
 }
 
 void
-rb_thread_signal_raise(void *thptr, int sig)
+rb_threadptr_signal_raise(rb_thread_t *th, int sig)
 {
     VALUE argv[2];
-    rb_thread_t *th = thptr;
 
     argv[0] = rb_eSignal;
     argv[1] = INT2FIX(sig);
-    rb_thread_raise(2, argv, th->vm->main_thread);
+    rb_threadptr_raise(th->vm->main_thread, 2, argv);
 }
 
 void
-rb_thread_signal_exit(void *thptr)
+rb_threadptr_signal_exit(rb_thread_t *th)
 {
     VALUE argv[2];
-    rb_thread_t *th = thptr;
 
     argv[0] = rb_eSystemExit;
     argv[1] = rb_str_new2("exit");
-    rb_thread_raise(2, argv, th->vm->main_thread);
+    rb_threadptr_raise(th->vm->main_thread, 2, argv);
+}
+
+#if defined(POSIX_SIGNAL) && defined(SIGSEGV) && defined(HAVE_SIGALTSTACK)
+#define USE_SIGALTSTACK
+#endif
+
+void
+ruby_thread_stack_overflow(rb_thread_t *th)
+{
+    th->raised_flag = 0;
+#ifdef USE_SIGALTSTACK
+    th->raised_flag = 0;
+    rb_exc_raise(sysstack_error);
+#else
+    th->errinfo = sysstack_error;
+    TH_JUMP_TAG(th, TAG_RAISE);
+#endif
 }
 
 int
-rb_thread_set_raised(rb_thread_t *th)
+rb_threadptr_set_raised(rb_thread_t *th)
 {
     if (th->raised_flag & RAISED_EXCEPTION) {
 	return 1;
@@ -1149,7 +1332,7 @@ rb_thread_set_raised(rb_thread_t *th)
 }
 
 int
-rb_thread_reset_raised(rb_thread_t *th)
+rb_threadptr_reset_raised(rb_thread_t *th)
 {
     if (!(th->raised_flag & RAISED_EXCEPTION)) {
 	return 0;
@@ -1188,7 +1371,7 @@ thread_raise_m(int argc, VALUE *argv, VALUE self)
 {
     rb_thread_t *th;
     GetThreadPtr(self, th);
-    rb_thread_raise(argc, argv, th);
+    rb_threadptr_raise(th, argc, argv);
     return Qnil;
 }
 
@@ -1222,9 +1405,9 @@ rb_thread_kill(VALUE thread)
 	rb_exit(EXIT_SUCCESS);
     }
 
-    thread_debug("rb_thread_kill: %p (%p)\n", th, (void *)th->thread_id);
+    thread_debug("rb_thread_kill: %p (%p)\n", (void *)th, (void *)th->thread_id);
 
-    rb_thread_interrupt(th);
+    rb_threadptr_interrupt(th);
     th->thrown_errinfo = eKillSignal;
     th->status = THREAD_TO_KILL;
 
@@ -1294,7 +1477,7 @@ rb_thread_wakeup(VALUE thread)
     if (th->status == THREAD_KILLED) {
 	rb_raise(rb_eThreadError, "killed thread");
     }
-    rb_thread_ready(th);
+    rb_threadptr_ready(th);
     if (th->status != THREAD_TO_KILL) {
 	th->status = THREAD_RUNNABLE;
     }
@@ -1576,7 +1759,7 @@ thread_status_name(enum rb_thread_status status)
 }
 
 static int
-rb_thread_dead(rb_thread_t *th)
+rb_threadptr_dead(rb_thread_t *th)
 {
     return th->status == THREAD_KILLED;
 }
@@ -1610,7 +1793,7 @@ rb_thread_status(VALUE thread)
     rb_thread_t *th;
     GetThreadPtr(thread, th);
 
-    if (rb_thread_dead(th)) {
+    if (rb_threadptr_dead(th)) {
 	if (!NIL_P(th->errinfo) && !FIXNUM_P(th->errinfo)
 	    /* TODO */ ) {
 	    return Qnil;
@@ -1639,7 +1822,7 @@ rb_thread_alive_p(VALUE thread)
     rb_thread_t *th;
     GetThreadPtr(thread, th);
 
-    if (rb_thread_dead(th))
+    if (rb_threadptr_dead(th))
 	return Qfalse;
     return Qtrue;
 }
@@ -1662,7 +1845,7 @@ rb_thread_stop_p(VALUE thread)
     rb_thread_t *th;
     GetThreadPtr(thread, th);
 
-    if (rb_thread_dead(th))
+    if (rb_threadptr_dead(th))
 	return Qtrue;
     if (th->status == THREAD_STOPPED || th->status == THREAD_STOPPED_FOREVER)
 	return Qtrue;
@@ -1840,7 +2023,7 @@ vm_living_thread_num(rb_vm_t *vm)
 }
 
 int
-rb_thread_alone()
+rb_thread_alone(void)
 {
     int num = 1;
     if (GET_THREAD()->vm->living_threads) {
@@ -1949,6 +2132,34 @@ rb_thread_priority_set(VALUE thread, VALUE prio)
 /* for IO */
 
 #if defined(NFDBITS) && defined(HAVE_RB_FD_INIT)
+
+/*
+ * several Unix platforms support file descriptors bigger than FD_SETSIZE
+ * in select(2) system call.
+ *
+ * - Linux 2.2.12 (?)
+ * - NetBSD 1.2 (src/sys/kern/sys_generic.c:1.25)
+ *   select(2) documents how to allocate fd_set dynamically.
+ *   http://netbsd.gw.com/cgi-bin/man-cgi?select++NetBSD-4.0
+ * - FreeBSD 2.2 (src/sys/kern/sys_generic.c:1.19)
+ * - OpenBSD 2.0 (src/sys/kern/sys_generic.c:1.4)
+ *   select(2) documents how to allocate fd_set dynamically.
+ *   http://www.openbsd.org/cgi-bin/man.cgi?query=select&manpath=OpenBSD+4.4
+ * - HP-UX documents how to allocate fd_set dynamically.
+ *   http://docs.hp.com/en/B2355-60105/select.2.html
+ * - Solaris 8 has select_large_fdset
+ *
+ * When fd_set is not big enough to hold big file descriptors,
+ * it should be allocated dynamically.
+ * Note that this assumes fd_set is structured as bitmap.
+ *
+ * rb_fd_init allocates the memory.
+ * rb_fd_term free the memory.
+ * rb_fd_set may re-allocates bitmap.
+ *
+ * So rb_fd_set doesn't reject file descriptors bigger than FD_SETSIZE.
+ */
+
 void
 rb_fd_init(volatile rb_fdset_t *fds)
 {
@@ -1977,8 +2188,8 @@ rb_fd_zero(rb_fdset_t *fds)
 static void
 rb_fd_resize(int n, rb_fdset_t *fds)
 {
-    int m = howmany(n + 1, NFDBITS) * sizeof(fd_mask);
-    int o = howmany(fds->maxfd, NFDBITS) * sizeof(fd_mask);
+    size_t m = howmany(n + 1, NFDBITS) * sizeof(fd_mask);
+    size_t o = howmany(fds->maxfd, NFDBITS) * sizeof(fd_mask);
 
     if (m < sizeof(fd_set)) m = sizeof(fd_set);
     if (o < sizeof(fd_set)) o = sizeof(fd_set);
@@ -2014,7 +2225,7 @@ rb_fd_isset(int n, const rb_fdset_t *fds)
 void
 rb_fd_copy(rb_fdset_t *dst, const fd_set *src, int max)
 {
-    int size = howmany(max, NFDBITS) * sizeof(fd_mask);
+    size_t size = howmany(max, NFDBITS) * sizeof(fd_mask);
 
     if (size < sizeof(fd_set)) size = sizeof(fd_set);
     dst->maxfd = max;
@@ -2039,6 +2250,52 @@ rb_fd_select(int n, rb_fdset_t *readfds, rb_fdset_t *writefds, rb_fdset_t *excep
         e = rb_fd_ptr(exceptfds);
     }
     return select(n, r, w, e, timeout);
+}
+
+#undef FD_ZERO
+#undef FD_SET
+#undef FD_CLR
+#undef FD_ISSET
+
+#define FD_ZERO(f)	rb_fd_zero(f)
+#define FD_SET(i, f)	rb_fd_set(i, f)
+#define FD_CLR(i, f)	rb_fd_clr(i, f)
+#define FD_ISSET(i, f)	rb_fd_isset(i, f)
+
+#elif defined(_WIN32)
+
+void
+rb_fd_init(volatile rb_fdset_t *set)
+{
+    set->capa = FD_SETSIZE;
+    set->fdset = ALLOC(fd_set);
+    FD_ZERO(set->fdset);
+}
+
+void
+rb_fd_term(rb_fdset_t *set)
+{
+    xfree(set->fdset);
+    set->fdset = NULL;
+    set->capa = 0;
+}
+
+void
+rb_fd_set(int fd, rb_fdset_t *set)
+{
+    unsigned int i;
+    SOCKET s = rb_w32_get_osfhandle(fd);
+
+    for (i = 0; i < set->fdset->fd_count; i++) {
+        if (set->fdset->fd_array[i] == s) {
+            return;
+        }
+    }
+    if (set->fdset->fd_count >= (unsigned)set->capa) {
+	set->capa = (set->fdset->fd_count / FD_SETSIZE + 1) * FD_SETSIZE;
+	set->fdset = xrealloc(set->fdset, sizeof(unsigned int) + sizeof(SOCKET) * set->capa);
+    }
+    set->fdset->fd_array[set->fdset->fd_count++] = s;
 }
 
 #undef FD_ZERO
@@ -2168,7 +2425,7 @@ do_select(int n, fd_set *read, fd_set *write, fd_set *except,
 		double d = limit - timeofday();
 
 		wait_rest.tv_sec = (unsigned int)d;
-		wait_rest.tv_usec = (long)((d-(double)wait_rest.tv_sec)*1e6);
+		wait_rest.tv_usec = (int)((d-(double)wait_rest.tv_sec)*1e6);
 		if (wait_rest.tv_sec < 0)  wait_rest.tv_sec = 0;
 		if (wait_rest.tv_usec < 0) wait_rest.tv_usec = 0;
 	    }
@@ -2190,6 +2447,7 @@ rb_thread_wait_fd_rw(int fd, int read)
     if (fd < 0) {
 	rb_raise(rb_eIOError, "closed stream");
     }
+    if (rb_thread_alone()) return;
     while (result <= 0) {
 	rb_fdset_t set;
 	rb_fd_init(&set);
@@ -2243,6 +2501,37 @@ rb_thread_select(int max, fd_set * read, fd_set * write, fd_set * except,
 }
 
 
+int
+rb_thread_fd_select(int max, rb_fdset_t * read, rb_fdset_t * write, rb_fdset_t * except,
+		    struct timeval *timeout)
+{
+    fd_set *r = NULL, *w = NULL, *e = NULL;
+
+    if (!read && !write && !except) {
+	if (!timeout) {
+	    rb_thread_sleep_forever();
+	    return 0;
+	}
+	rb_thread_wait_for(*timeout);
+	return 0;
+    }
+
+    if (read) {
+        rb_fd_resize(max - 1, read);
+        r = rb_fd_ptr(read);
+    }
+    if (write) {
+        rb_fd_resize(max - 1, write);
+        w = rb_fd_ptr(write);
+    }
+    if (except) {
+        rb_fd_resize(max - 1, except);
+        e = rb_fd_ptr(except);
+    }
+    return do_select(max, r, w, e, timeout);
+}
+
+
 /*
  * for GC
  */
@@ -2276,21 +2565,22 @@ int rb_get_next_signal(void);
 static void
 timer_thread_function(void *arg)
 {
-    rb_vm_t *vm = arg; /* TODO: fix me for Multi-VM */
+    rb_vm_t *vm = GET_VM(); /* TODO: fix me for Multi-VM */
     int sig;
+    rb_thread_t *mth;
 
     /* for time slice */
     RUBY_VM_SET_TIMER_INTERRUPT(vm->running_thread);
 
     /* check signal */
-    if ((sig = rb_get_next_signal()) > 0) {
-	rb_thread_t *mth = vm->main_thread;
+    mth = vm->main_thread;
+    if (!mth->exec_signal && (sig = rb_get_next_signal()) > 0) {
 	enum rb_thread_status prev_status = mth->status;
 	thread_debug("main_thread: %s, sig: %d\n",
 		     thread_status_name(prev_status), sig);
 	mth->exec_signal = sig;
 	if (mth->status != THREAD_KILLED) mth->status = THREAD_RUNNABLE;
-	rb_thread_interrupt(mth);
+	rb_threadptr_interrupt(mth);
 	mth->status = prev_status;
     }
 
@@ -2309,8 +2599,7 @@ timer_thread_function(void *arg)
 void
 rb_thread_stop_timer_thread(void)
 {
-    if (timer_thread_id) {
-	system_working = 0;
+    if (timer_thread_id && native_stop_timer_thread()) {
 	native_thread_join(timer_thread_id);
 	timer_thread_id = 0;
     }
@@ -2325,6 +2614,7 @@ rb_thread_reset_timer_thread(void)
 void
 rb_thread_start_timer_thread(void)
 {
+    system_working = 1;
     rb_thread_create_timer_thread();
 }
 
@@ -2352,14 +2642,29 @@ clear_coverage(void)
     }
 }
 
+static void
+rb_thread_atfork_internal(int (*atfork)(st_data_t, st_data_t, st_data_t))
+{
+    rb_thread_t *th = GET_THREAD();
+    rb_vm_t *vm = th->vm;
+    VALUE thval = th->self;
+    vm->main_thread = th;
+
+    st_foreach(vm->living_threads, atfork, (st_data_t)th);
+    st_clear(vm->living_threads);
+    st_insert(vm->living_threads, thval, (st_data_t)th->thread_id);
+    vm->sleeper = 0;
+    clear_coverage();
+}
+
 static int
-terminate_atfork_i(st_data_t key, st_data_t val, rb_thread_t *current_th)
+terminate_atfork_i(st_data_t key, st_data_t val, st_data_t current_th)
 {
     VALUE thval = key;
     rb_thread_t *th;
     GetThreadPtr(thval, th);
 
-    if (th != current_th) {
+    if (th != (rb_thread_t *)current_th) {
 	thread_cleanup_func(th);
     }
     return ST_CONTINUE;
@@ -2368,27 +2673,18 @@ terminate_atfork_i(st_data_t key, st_data_t val, rb_thread_t *current_th)
 void
 rb_thread_atfork(void)
 {
-    rb_thread_t *th = GET_THREAD();
-    rb_vm_t *vm = th->vm;
-    VALUE thval = th->self;
-    vm->main_thread = th;
-
-    st_foreach(vm->living_threads, terminate_atfork_i, (st_data_t)th);
-    st_clear(vm->living_threads);
-    st_insert(vm->living_threads, thval, (st_data_t) th->thread_id);
-    vm->sleeper = 0;
-    clear_coverage();
+    rb_thread_atfork_internal(terminate_atfork_i);
     rb_reset_random_seed();
 }
 
 static int
-terminate_atfork_before_exec_i(st_data_t key, st_data_t val, rb_thread_t *current_th)
+terminate_atfork_before_exec_i(st_data_t key, st_data_t val, st_data_t current_th)
 {
     VALUE thval = key;
     rb_thread_t *th;
     GetThreadPtr(thval, th);
 
-    if (th != current_th) {
+    if (th != (rb_thread_t *)current_th) {
 	thread_cleanup_func_before_exec(th);
     }
     return ST_CONTINUE;
@@ -2397,16 +2693,7 @@ terminate_atfork_before_exec_i(st_data_t key, st_data_t val, rb_thread_t *curren
 void
 rb_thread_atfork_before_exec(void)
 {
-    rb_thread_t *th = GET_THREAD();
-    rb_vm_t *vm = th->vm;
-    VALUE thval = th->self;
-    vm->main_thread = th;
-
-    st_foreach(vm->living_threads, terminate_atfork_before_exec_i, (st_data_t)th);
-    st_clear(vm->living_threads);
-    st_insert(vm->living_threads, thval, (st_data_t) th->thread_id);
-    vm->sleeper = 0;
-    clear_coverage();
+    rb_thread_atfork_internal(terminate_atfork_before_exec_i);
 }
 
 struct thgroup {
@@ -2475,7 +2762,7 @@ thgroup_list(VALUE group)
 {
     VALUE ary = rb_ary_new();
     struct thgroup_list_params param;
-    
+
     param.ary = ary;
     param.group = group;
     st_foreach(GET_THREAD()->vm->living_threads, thgroup_list_i, (st_data_t) & param);
@@ -2622,7 +2909,7 @@ thgroup_add(VALUE group, VALUE thread)
 #define GetMutexPtr(obj, tobj) \
   Data_Get_Struct(obj, mutex_t, tobj)
 
-static const char *mutex_unlock(mutex_t *mutex);
+static const char *mutex_unlock(mutex_t *mutex, rb_thread_t volatile *th);
 
 static void
 mutex_free(void *ptr)
@@ -2631,7 +2918,8 @@ mutex_free(void *ptr)
 	mutex_t *mutex = ptr;
 	if (mutex->th) {
 	    /* rb_warn("free locked mutex"); */
-	    mutex_unlock(mutex);
+	    const char *err = mutex_unlock(mutex, mutex->th);
+	    if (err) rb_bug("%s", err);
 	}
 	native_mutex_destroy(&mutex->lock);
 	native_cond_destroy(&mutex->cond);
@@ -2709,10 +2997,6 @@ rb_mutex_trylock(VALUE self)
     VALUE locked = Qfalse;
     GetMutexPtr(self, mutex);
 
-    if (mutex->th == GET_THREAD()) {
-	rb_raise(rb_eThreadError, "deadlock; recursive locking");
-    }
-
     native_mutex_lock(&mutex->lock);
     if (mutex->th == 0) {
 	mutex->th = GET_THREAD();
@@ -2784,10 +3068,15 @@ lock_interrupt(void *ptr)
 VALUE
 rb_mutex_lock(VALUE self)
 {
+
     if (rb_mutex_trylock(self) == Qfalse) {
 	mutex_t *mutex;
 	rb_thread_t *th = GET_THREAD();
 	GetMutexPtr(self, mutex);
+
+	if (mutex->th == GET_THREAD()) {
+	    rb_raise(rb_eThreadError, "deadlock; recursive locking");
+	}
 
 	while (mutex->th != th) {
 	    int interrupted;
@@ -2831,10 +3120,9 @@ rb_mutex_lock(VALUE self)
 }
 
 static const char *
-mutex_unlock(mutex_t *mutex)
+mutex_unlock(mutex_t *mutex, rb_thread_t volatile *th)
 {
     const char *err = NULL;
-    rb_thread_t *th = GET_THREAD();
     mutex_t *th_mutex;
 
     native_mutex_lock(&mutex->lock);
@@ -2842,7 +3130,7 @@ mutex_unlock(mutex_t *mutex)
     if (mutex->th == 0) {
 	err = "Attempt to unlock a mutex which is not locked";
     }
-    else if (mutex->th != GET_THREAD()) {
+    else if (mutex->th != th) {
 	err = "Attempt to unlock a mutex which is locked by another thread";
     }
     else {
@@ -2893,14 +3181,14 @@ rb_mutex_unlock(VALUE self)
     mutex_t *mutex;
     GetMutexPtr(self, mutex);
 
-    err = mutex_unlock(mutex);
-    if (err) rb_raise(rb_eThreadError, err);
+    err = mutex_unlock(mutex, GET_THREAD());
+    if (err) rb_raise(rb_eThreadError, "%s", err);
 
     return self;
 }
 
 static void
-rb_mutex_unlock_all(mutex_t *mutexes)
+rb_mutex_unlock_all(mutex_t *mutexes, rb_thread_t *th)
 {
     const char *err;
     mutex_t *mutex;
@@ -2910,7 +3198,7 @@ rb_mutex_unlock_all(mutex_t *mutexes)
 	/* rb_warn("mutex #<%p> remains to be locked by terminated thread",
 		mutexes); */
 	mutexes = mutex->next_mutex;
-	err = mutex_unlock(mutex);
+	err = mutex_unlock(mutex, th);
 	if (err) rb_bug("invalid keeping_mutexes: %s", err);
     }
 }
@@ -2977,7 +3265,7 @@ mutex_sleep(int argc, VALUE *argv, VALUE self)
  */
 
 VALUE
-rb_thread_synchronize(VALUE mutex, VALUE (*func)(VALUE arg), VALUE arg)
+rb_mutex_synchronize(VALUE mutex, VALUE (*func)(VALUE arg), VALUE arg)
 {
     rb_mutex_lock(mutex);
     return rb_ensure(func, arg, rb_mutex_unlock, mutex);
@@ -2986,165 +3274,91 @@ rb_thread_synchronize(VALUE mutex, VALUE (*func)(VALUE arg), VALUE arg)
 /*
  * Document-class: Barrier
  */
-typedef struct rb_thread_list_struct rb_thread_list_t;
-
-struct rb_thread_list_struct {
-    rb_thread_t *th;
-    rb_thread_list_t *next;
-};
-
-static void
-thlist_mark(void *ptr)
-{
-    rb_thread_list_t *q = ptr;
-
-    for (; q; q = q->next) {
-	rb_gc_mark(q->th->self);
-    }
-}
-
-static void
-thlist_free(void *ptr)
-{
-    rb_thread_list_t *q = ptr, *next;
-
-    for (; q; q = next) {
-	next = q->next;
-	ruby_xfree(q);
-    }
-}
-
-static int
-thlist_signal(rb_thread_list_t **list, unsigned int maxth, rb_thread_t **woken_thread)
-{
-    int woken = 0;
-    rb_thread_list_t *q;
-
-    while ((q = *list) != NULL) {
-	rb_thread_t *th = q->th;
-
-	*list = q->next;
-	ruby_xfree(q);
-	if (th->status != THREAD_KILLED) {
-	    rb_thread_ready(th);
-	    if (!woken && woken_thread) *woken_thread = th;
-	    if (++woken >= maxth && maxth) break;
-	}
-    }
-    return woken;
-}
-
-typedef struct {
-    rb_thread_t *owner;
-    rb_thread_list_t *waiting, **tail;
-} rb_barrier_t;
-
-static void
-barrier_mark(void *ptr)
-{
-    rb_barrier_t *b = ptr;
-
-    if (b->owner) rb_gc_mark(b->owner->self);
-    thlist_mark(b->waiting);
-}
-
-static void
-barrier_free(void *ptr)
-{
-    rb_barrier_t *b = ptr;
-
-    b->owner = 0;
-    thlist_free(b->waiting);
-    b->waiting = 0;
-    ruby_xfree(ptr);
-}
-
 static VALUE
 barrier_alloc(VALUE klass)
 {
-    VALUE volatile obj;
-    rb_barrier_t *barrier;
-
-    obj = Data_Make_Struct(klass, rb_barrier_t, barrier_mark, barrier_free, barrier);
-    barrier->owner = GET_THREAD();
-    barrier->waiting = 0;
-    barrier->tail = &barrier->waiting;
-    return obj;
+    return Data_Wrap_Struct(klass, rb_gc_mark, 0, (void *)mutex_alloc(0));
 }
 
 VALUE
 rb_barrier_new(void)
 {
-    return barrier_alloc(rb_cBarrier);
+    VALUE barrier = barrier_alloc(rb_cBarrier);
+    rb_mutex_lock((VALUE)DATA_PTR(barrier));
+    return barrier;
 }
 
 VALUE
 rb_barrier_wait(VALUE self)
 {
-    rb_barrier_t *barrier;
-    rb_thread_list_t *q;
+    VALUE mutex = (VALUE)DATA_PTR(self);
+    mutex_t *m;
 
-    Data_Get_Struct(self, rb_barrier_t, barrier);
-    if (!barrier->owner || barrier->owner->status == THREAD_KILLED) {
-	barrier->owner = 0;
-	if (thlist_signal(&barrier->waiting, 1, &barrier->owner)) return Qfalse;
-	return Qtrue;
-    }
-    else if (barrier->owner == GET_THREAD()) {
-	return Qfalse;
-    }
-    else {
-	*barrier->tail = q = ALLOC(rb_thread_list_t);
-	q->th = GET_THREAD();
-	q->next = 0;
-	barrier->tail = &q->next;
-	rb_thread_sleep_forever();
-	return barrier->owner == GET_THREAD() ? Qtrue : Qfalse;
-    }
+    if (!mutex) return Qfalse;
+    GetMutexPtr(mutex, m);
+    if (m->th == GET_THREAD()) return Qfalse;
+    rb_mutex_lock(mutex);
+    if (DATA_PTR(self)) return Qtrue;
+    rb_mutex_unlock(mutex);
+    return Qfalse;
 }
 
 VALUE
 rb_barrier_release(VALUE self)
 {
-    rb_barrier_t *barrier;
-    unsigned int n;
+    return rb_mutex_unlock((VALUE)DATA_PTR(self));
+}
 
-    Data_Get_Struct(self, rb_barrier_t, barrier);
-    if (barrier->owner != GET_THREAD()) {
-	rb_raise(rb_eThreadError, "not owned");
-    }
-    n = thlist_signal(&barrier->waiting, 0, &barrier->owner);
-    return n ? UINT2NUM(n) : Qfalse;
+VALUE
+rb_barrier_destroy(VALUE self)
+{
+    VALUE mutex = (VALUE)DATA_PTR(self);
+    DATA_PTR(self) = 0;
+    return rb_mutex_unlock(mutex);
 }
 
 /* variables for recursive traversals */
 static ID recursive_key;
 
 static VALUE
-recursive_check(VALUE hash, VALUE obj)
+recursive_check(VALUE hash, VALUE obj, VALUE paired_obj)
 {
     if (NIL_P(hash) || TYPE(hash) != T_HASH) {
 	return Qfalse;
     }
     else {
-	VALUE list = rb_hash_aref(hash, ID2SYM(rb_frame_this_func()));
+	VALUE sym = ID2SYM(rb_frame_this_func());
+	VALUE list = rb_hash_aref(hash, sym);
+	VALUE pair_list;
 
 	if (NIL_P(list) || TYPE(list) != T_HASH)
 	    return Qfalse;
-	if (NIL_P(rb_hash_lookup(list, obj)))
+	pair_list = rb_hash_lookup2(list, obj, Qundef);
+	if (pair_list == Qundef)
 	    return Qfalse;
+	if (paired_obj) {
+	    if (TYPE(pair_list) != T_HASH) {
+		if (pair_list != paired_obj)
+		    return Qfalse;
+	    }
+	    else {
+		if (NIL_P(rb_hash_lookup(pair_list, paired_obj)))
+		    return Qfalse;
+	    }
+	}
 	return Qtrue;
     }
 }
 
 static VALUE
-recursive_push(VALUE hash, VALUE obj)
+recursive_push(VALUE hash, VALUE obj, VALUE paired_obj)
 {
-    VALUE list, sym;
+    VALUE list, sym, pair_list;
 
     sym = ID2SYM(rb_frame_this_func());
     if (NIL_P(hash) || TYPE(hash) != T_HASH) {
 	hash = rb_hash_new();
+	OBJ_UNTRUST(hash);
 	rb_thread_local_aset(rb_thread_current(), recursive_key, hash);
 	list = Qnil;
     }
@@ -3153,61 +3367,101 @@ recursive_push(VALUE hash, VALUE obj)
     }
     if (NIL_P(list) || TYPE(list) != T_HASH) {
 	list = rb_hash_new();
+	OBJ_UNTRUST(list);
 	rb_hash_aset(hash, sym, list);
     }
-    rb_hash_aset(list, obj, Qtrue);
+    if (!paired_obj) {
+	rb_hash_aset(list, obj, Qtrue);
+    }
+    else if ((pair_list = rb_hash_lookup2(list, obj, Qundef)) == Qundef) {
+	rb_hash_aset(list, obj, paired_obj);
+    }
+    else {
+	if (TYPE(pair_list) != T_HASH){
+	    VALUE other_paired_obj = pair_list;
+	    pair_list = rb_hash_new();
+	    OBJ_UNTRUST(pair_list);
+	    rb_hash_aset(pair_list, other_paired_obj, Qtrue);
+	    rb_hash_aset(list, obj, pair_list);
+	}
+	rb_hash_aset(pair_list, paired_obj, Qtrue);
+    }
     return hash;
 }
 
 static void
-recursive_pop(VALUE hash, VALUE obj)
+recursive_pop(VALUE hash, VALUE obj, VALUE paired_obj)
 {
-    VALUE list, sym;
+    VALUE list, sym, pair_list, symname, thrname;
 
     sym = ID2SYM(rb_frame_this_func());
     if (NIL_P(hash) || TYPE(hash) != T_HASH) {
-	VALUE symname;
-	VALUE thrname;
 	symname = rb_inspect(sym);
 	thrname = rb_inspect(rb_thread_current());
-
 	rb_raise(rb_eTypeError, "invalid inspect_tbl hash for %s in %s",
 		 StringValuePtr(symname), StringValuePtr(thrname));
     }
     list = rb_hash_aref(hash, sym);
     if (NIL_P(list) || TYPE(list) != T_HASH) {
-	VALUE symname = rb_inspect(sym);
-	VALUE thrname = rb_inspect(rb_thread_current());
+	symname = rb_inspect(sym);
+	thrname = rb_inspect(rb_thread_current());
 	rb_raise(rb_eTypeError, "invalid inspect_tbl list for %s in %s",
 		 StringValuePtr(symname), StringValuePtr(thrname));
+    }
+    if (paired_obj) {
+	pair_list = rb_hash_lookup2(list, obj, Qundef);
+	if (pair_list == Qundef) {
+	    symname = rb_inspect(sym);
+	    thrname = rb_inspect(rb_thread_current());
+	    rb_raise(rb_eTypeError, "invalid inspect_tbl pair_list for %s in %s",
+		     StringValuePtr(symname), StringValuePtr(thrname));
+	}
+	if (TYPE(pair_list) == T_HASH) {
+	    rb_hash_delete(pair_list, paired_obj);
+	    if (!RHASH_EMPTY_P(pair_list)) {
+		return; /* keep hash until is empty */
+	    }
+	}
     }
     rb_hash_delete(list, obj);
 }
 
-VALUE
-rb_exec_recursive(VALUE (*func) (VALUE, VALUE, int), VALUE obj, VALUE arg)
+static VALUE
+exec_recursive(VALUE (*func) (VALUE, VALUE, int), VALUE obj, VALUE pairid, VALUE arg)
 {
-    VALUE hash = rb_thread_local_aref(rb_thread_current(), recursive_key);
+    volatile VALUE hash = rb_thread_local_aref(rb_thread_current(), recursive_key);
     VALUE objid = rb_obj_id(obj);
 
-    if (recursive_check(hash, objid)) {
+    if (recursive_check(hash, objid, pairid)) {
 	return (*func) (obj, arg, Qtrue);
     }
     else {
 	VALUE result = Qundef;
 	int state;
 
-	hash = recursive_push(hash, objid);
+	hash = recursive_push(hash, objid, pairid);
 	PUSH_TAG();
 	if ((state = EXEC_TAG()) == 0) {
 	    result = (*func) (obj, arg, Qfalse);
 	}
 	POP_TAG();
-	recursive_pop(hash, objid);
+	recursive_pop(hash, objid, pairid);
 	if (state)
 	    JUMP_TAG(state);
 	return result;
     }
+}
+
+VALUE
+rb_exec_recursive(VALUE (*func) (VALUE, VALUE, int), VALUE obj, VALUE arg)
+{
+    return exec_recursive(func, obj, 0, arg);
+}
+
+VALUE
+rb_exec_recursive_paired(VALUE (*func) (VALUE, VALUE, int), VALUE obj, VALUE paired_obj, VALUE arg)
+{
+    return exec_recursive(func, obj, rb_obj_id(paired_obj), arg);
 }
 
 /* tracer */
@@ -3234,14 +3488,29 @@ thread_reset_event_flags(rb_thread_t *th)
     }
 }
 
-void
-rb_thread_add_event_hook(rb_thread_t *th,
+static void
+rb_threadptr_add_event_hook(rb_thread_t *th, 
 			 rb_event_hook_func_t func, rb_event_flag_t events, VALUE data)
 {
     rb_event_hook_t *hook = alloc_event_hook(func, events, data);
     hook->next = th->event_hooks;
     th->event_hooks = hook;
     thread_reset_event_flags(th);
+}
+
+static rb_thread_t *
+thval2thread_t(VALUE thval)
+{
+    rb_thread_t *th;
+    GetThreadPtr(thval, th);
+    return th;
+}
+
+void
+rb_thread_add_event_hook(VALUE thval,
+			 rb_event_hook_func_t func, rb_event_flag_t events, VALUE data)
+{
+    rb_threadptr_add_event_hook(thval2thread_t(thval), func, events, data);
 }
 
 static int
@@ -3264,6 +3533,32 @@ static void
 set_threads_event_flags(int flag)
 {
     st_foreach(GET_VM()->living_threads, set_threads_event_flags_i, (st_data_t) flag);
+}
+
+static inline void
+exec_event_hooks(const rb_event_hook_t *hook, rb_event_flag_t flag, VALUE self, ID id, VALUE klass)
+{
+    for (; hook; hook = hook->next) {
+	if (flag & hook->flag) {
+	    (*hook->func)(flag, hook->data, self, id, klass);
+	}
+    }
+}
+
+void
+rb_threadptr_exec_event_hooks(rb_thread_t *th, rb_event_flag_t flag, VALUE self, ID id, VALUE klass)
+{
+    const VALUE errinfo = th->errinfo;
+    const rb_event_flag_t wait_event = th->event_flags;
+
+    if (self == rb_mRubyVMFrozenCore) return;
+    if (wait_event & flag) {
+	exec_event_hooks(th->event_hooks, flag, self, id, klass);
+    }
+    if (wait_event & RUBY_EVENT_VM) {
+	exec_event_hooks(th->vm->event_hooks, flag, self, id, klass);
+    }
+    th->errinfo = errinfo;
 }
 
 void
@@ -3302,12 +3597,18 @@ remove_event_hook(rb_event_hook_t **root, rb_event_hook_func_t func)
     return -1;
 }
 
-int
-rb_thread_remove_event_hook(rb_thread_t *th, rb_event_hook_func_t func)
+static int
+rb_threadptr_revmove_event_hook(rb_thread_t *th, rb_event_hook_func_t func)
 {
     int ret = remove_event_hook(&th->event_hooks, func);
     thread_reset_event_flags(th);
     return ret;
+}
+
+int
+rb_thread_remove_event_hook(VALUE thval, rb_event_hook_func_t func)
+{
+    return rb_threadptr_revmove_event_hook(thval2thread_t(thval), func);
 }
 
 int
@@ -3329,7 +3630,7 @@ clear_trace_func_i(st_data_t key, st_data_t val, st_data_t flag)
 {
     rb_thread_t *th;
     GetThreadPtr((VALUE)key, th);
-    rb_thread_remove_event_hook(th, 0);
+    rb_threadptr_revmove_event_hook(th, 0);
     return ST_CONTINUE;
 }
 
@@ -3409,7 +3710,7 @@ thread_add_trace_func(rb_thread_t *th, VALUE trace)
 	rb_raise(rb_eTypeError, "trace_func needs to be Proc");
     }
 
-    rb_thread_add_event_hook(th, call_trace_func, RUBY_EVENT_ALL, trace);
+    rb_threadptr_add_event_hook(th, call_trace_func, RUBY_EVENT_ALL, trace);
 }
 
 static VALUE
@@ -3426,7 +3727,7 @@ thread_set_trace_func_m(VALUE obj, VALUE trace)
 {
     rb_thread_t *th;
     GetThreadPtr(obj, th);
-    rb_thread_remove_event_hook(th, call_trace_func);
+    rb_threadptr_revmove_event_hook(th, call_trace_func);
 
     if (NIL_P(trace)) {
 	return Qnil;
@@ -3474,8 +3775,9 @@ static VALUE
 call_trace_proc(VALUE args, int tracing)
 {
     struct call_trace_func_args *p = (struct call_trace_func_args *)args;
+    const char *srcfile = rb_sourcefile();
     VALUE eventname = rb_str_new2(get_event_name(p->event));
-    VALUE filename = rb_str_new2(rb_sourcefile());
+    VALUE filename = srcfile ? rb_str_new2(srcfile) : Qnil;
     VALUE argv[6];
     int line = rb_sourceline();
     ID id = 0;
@@ -3504,7 +3806,7 @@ call_trace_proc(VALUE args, int tracing)
     argv[1] = filename;
     argv[2] = INT2FIX(line);
     argv[3] = id ? ID2SYM(id) : Qnil;
-    argv[4] = p->self ? rb_binding_new() : Qnil;
+    argv[4] = (p->self && srcfile) ? rb_binding_new() : Qnil;
     argv[5] = klass ? klass : Qnil;
 
     return rb_proc_call_with_block(p->proc, 6, argv, Qnil);
@@ -3514,7 +3816,7 @@ static void
 call_trace_func(rb_event_flag_t event, VALUE proc, VALUE self, ID id, VALUE klass)
 {
     struct call_trace_func_args args;
-    
+
     args.event = event;
     args.proc = proc;
     args.self = self;
@@ -3537,7 +3839,7 @@ ruby_suppress_tracing(VALUE (*func)(VALUE, int), VALUE arg, int always)
 	th->tracing = 1;
     }
 
-    raised = rb_thread_reset_raised(th);
+    raised = rb_threadptr_reset_raised(th);
 
     PUSH_TAG();
     if ((state = EXEC_TAG()) == 0) {
@@ -3545,7 +3847,7 @@ ruby_suppress_tracing(VALUE (*func)(VALUE, int), VALUE arg, int always)
     }
 
     if (raised) {
-	rb_thread_set_raised(th);
+	rb_threadptr_set_raised(th);
     }
     POP_TAG();
 
@@ -3555,6 +3857,14 @@ ruby_suppress_tracing(VALUE (*func)(VALUE, int), VALUE arg, int always)
     }
 
     return result;
+}
+
+VALUE rb_thread_backtrace(VALUE thval);
+
+static VALUE
+rb_thread_backtrace_m(VALUE thval)
+{
+    return rb_thread_backtrace(thval);
 }
 
 /*
@@ -3613,6 +3923,7 @@ Init_Thread(void)
     rb_define_method(rb_cThread, "abort_on_exception=", rb_thread_abort_exc_set, 1);
     rb_define_method(rb_cThread, "safe_level", rb_thread_safe_level, 0);
     rb_define_method(rb_cThread, "group", rb_thread_group, 0);
+    rb_define_method(rb_cThread, "backtrace", rb_thread_backtrace_m, 0);
 
     rb_define_method(rb_cThread, "inspect", rb_thread_inspect, 0);
 
@@ -3651,7 +3962,7 @@ Init_Thread(void)
     {
 	/* main thread setting */
 	{
-	    /* acquire global interpreter lock */
+	    /* acquire global vm lock */
 	    rb_thread_lock_t *lp = &GET_THREAD()->vm->global_vm_lock;
 	    native_mutex_initialize(lp);
 	    native_mutex_lock(lp);
@@ -3738,7 +4049,7 @@ rb_check_deadlock(rb_vm_t *vm)
 	printf("%d %d %p %p\n", vm->living_threads->num_entries, vm->sleeper, GET_THREAD(), vm->main_thread);
 	st_foreach(vm->living_threads, debug_i, (st_data_t)0);
 #endif
-	rb_thread_raise(2, argv, vm->main_thread);
+	rb_threadptr_raise(vm->main_thread, 2, argv);
     }
 }
 

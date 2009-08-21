@@ -7,6 +7,7 @@ class TestM17N < Test::Unit::TestCase
   end
 
   module AESU
+    def ua(str) str.dup.force_encoding("US-ASCII") end
     def a(str) str.dup.force_encoding("ASCII-8BIT") end
     def e(str) str.dup.force_encoding("EUC-JP") end
     def s(str) str.dup.force_encoding("Windows-31J") end
@@ -48,7 +49,7 @@ class TestM17N < Test::Unit::TestCase
       if enc == r.encoding
         assert_nothing_raised { r =~ "\xc2\xa1".force_encoding(enc) }
       else
-        assert_raise(ArgumentError) { r =~ "\xc2\xa1".force_encoding(enc) }
+        assert_raise(Encoding::CompatibilityError) { r =~ "\xc2\xa1".force_encoding(enc) }
       end
     }
   end
@@ -241,6 +242,9 @@ class TestM17N < Test::Unit::TestCase
       u("\xfc"),
       "\u3042",
       "ascii",
+
+      "\u3042".encode("UTF-16LE"),
+      "\u3042".encode("UTF-16BE"),
     ].each do |str|
       assert_equal(str, eval(str.dump), "[ruby-dev:33142]")
     end
@@ -385,9 +389,9 @@ class TestM17N < Test::Unit::TestCase
       assert_equal(nil, r =~ s("a"))
       assert_equal(nil, r =~ u("a"))
       assert_equal(0, r =~ a("\xc2\xa1"))
-      assert_raise(ArgumentError) { r =~ e("\xc2\xa1") }
-      assert_raise(ArgumentError) { r =~ s("\xc2\xa1") }
-      assert_raise(ArgumentError) { r =~ u("\xc2\xa1") }
+      assert_raise(Encoding::CompatibilityError) { r =~ e("\xc2\xa1") }
+      assert_raise(Encoding::CompatibilityError) { r =~ s("\xc2\xa1") }
+      assert_raise(Encoding::CompatibilityError) { r =~ u("\xc2\xa1") }
     }
   end
 
@@ -402,10 +406,10 @@ class TestM17N < Test::Unit::TestCase
       assert_equal(0, r =~ e("a"))
       assert_equal(0, r =~ s("a"))
       assert_equal(0, r =~ u("a"))
-      assert_raise(ArgumentError) { r =~ a("\xc2\xa1") }
+      assert_raise(Encoding::CompatibilityError) { r =~ a("\xc2\xa1") }
       assert_equal(nil, r =~ e("\xc2\xa1"))
-      assert_raise(ArgumentError) { r =~ s("\xc2\xa1") }
-      assert_raise(ArgumentError) { r =~ u("\xc2\xa1") }
+      assert_raise(Encoding::CompatibilityError) { r =~ s("\xc2\xa1") }
+      assert_raise(Encoding::CompatibilityError) { r =~ u("\xc2\xa1") }
     }
 
     [/\xc2\xa1/e, eval(e(%{/\xc2\xa1/})), eval(e(%q{/\xc2\xa1/}))].each {|r|
@@ -413,10 +417,10 @@ class TestM17N < Test::Unit::TestCase
       assert_equal(nil, r =~ e("a"))
       assert_equal(nil, r =~ s("a"))
       assert_equal(nil, r =~ u("a"))
-      assert_raise(ArgumentError) { r =~ a("\xc2\xa1") }
+      assert_raise(Encoding::CompatibilityError) { r =~ a("\xc2\xa1") }
       assert_equal(0, r =~ e("\xc2\xa1"))
-      assert_raise(ArgumentError) { r =~ s("\xc2\xa1") }
-      assert_raise(ArgumentError) { r =~ u("\xc2\xa1") }
+      assert_raise(Encoding::CompatibilityError) { r =~ s("\xc2\xa1") }
+      assert_raise(Encoding::CompatibilityError) { r =~ u("\xc2\xa1") }
     }
   end
 
@@ -430,7 +434,7 @@ class TestM17N < Test::Unit::TestCase
   def test_regexp_windows_31j
     begin
       Regexp.new("\xa1".force_encoding("windows-31j")) =~ "\xa1\xa1".force_encoding("euc-jp")
-    rescue ArgumentError
+    rescue Encoding::CompatibilityError
       err = $!
     end
     assert_match(/windows-31j/i, err.message)
@@ -438,18 +442,18 @@ class TestM17N < Test::Unit::TestCase
 
   def test_regexp_embed
     r = eval(e("/\xc2\xa1/"))
-    assert_raise(ArgumentError) { eval(s("/\xc2\xa1\#{r}/s")) }
-    assert_raise(ArgumentError) { eval(s("/\#{r}\xc2\xa1/s")) }
+    assert_raise(RegexpError) { eval(s("/\xc2\xa1\#{r}/s")) }
+    assert_raise(RegexpError) { eval(s("/\#{r}\xc2\xa1/s")) }
 
     r = /\xc2\xa1/e
-    assert_raise(ArgumentError) { eval(s("/\xc2\xa1\#{r}/s")) }
-    assert_raise(ArgumentError) { eval(s("/\#{r}\xc2\xa1/s")) }
+    assert_raise(RegexpError) { eval(s("/\xc2\xa1\#{r}/s")) }
+    assert_raise(RegexpError) { eval(s("/\#{r}\xc2\xa1/s")) }
 
     r = eval(e("/\xc2\xa1/"))
-    assert_raise(ArgumentError) { /\xc2\xa1#{r}/s }
+    assert_raise(RegexpError) { /\xc2\xa1#{r}/s }
 
     r = /\xc2\xa1/e
-    assert_raise(ArgumentError) { /\xc2\xa1#{r}/s }
+    assert_raise(RegexpError) { /\xc2\xa1#{r}/s }
 
     r1 = Regexp.new('foo'.force_encoding("ascii-8bit"))
     r2 = eval('/bar#{r1}/'.force_encoding('ascii-8bit'))
@@ -767,7 +771,7 @@ class TestM17N < Test::Unit::TestCase
     #assert_strenc("\"\xC2\xA1\"", 'Windows-31J', s("%p") % s("\xc2\xa1"))
     assert_strenc("\"\xC2\xA1\"", 'UTF-8', u("%p") % u("\xc2\xa1"))
 
-    assert_strenc('"\xC2\xA1"', 'US-ASCII', "%10p" % a("\xc2\xa1"))
+    assert_strenc('"\xC2\xA1"', 'ASCII-8BIT', "%10p" % a("\xc2\xa1"))
     assert_strenc("       \"\xC2\xA1\"", 'EUC-JP', "%10p" % e("\xc2\xa1"))
     #assert_strenc("       \"\xC2\xA1\"", 'Windows-31J', "%10p" % s("\xc2\xa1"))
     assert_strenc("       \"\xC2\xA1\"", 'UTF-8', "%10p" % u("\xc2\xa1"))
@@ -959,6 +963,21 @@ class TestM17N < Test::Unit::TestCase
     assert_equal(Encoding::EUC_JP, "\xa4\xa2".force_encoding("euc-jp").gsub(/./, '\&').encoding)
   end
 
+  def test_sub2
+    s = "\x80".force_encoding("ASCII-8BIT")
+    r = Regexp.new("\x80".force_encoding("ASCII-8BIT"))
+    s2 = s.sub(r, "")
+    assert(s2.empty?)
+    assert(s2.ascii_only?)
+  end
+
+  def test_sub3
+    repl = "\x81".force_encoding("sjis")
+    assert_equal(false, repl.valid_encoding?)
+    s = "a@".sub(/a/, repl)
+    assert(s.valid_encoding?)
+  end
+
   def test_insert
     s = e("\xa3\xb0\xa3\xb1\xa3\xb2\xa3\xb3\xa3\xb4")
     assert_equal(e("\xa3\xb0\xa3\xb1\xa3\xb2\xa3\xb3\xa3\xb4a"), s.insert(-1, "a"))
@@ -1092,10 +1111,10 @@ class TestM17N < Test::Unit::TestCase
   end
 
   def test_symbol_op
-    ops = %w[
+    ops = %w"
       .. ... + - +(binary) -(binary) * / % ** +@ -@ | ^ & ! <=> > >= < <= ==
       === != =~ !~ ~ ! [] []= << >> :: `
-    ] #`
+    "
     ops.each do |op|
       assert_equal(Encoding::US_ASCII, op.intern.encoding, "[ruby-dev:33449]")
     end
@@ -1114,9 +1133,10 @@ class TestM17N < Test::Unit::TestCase
   end
 
   def test_env
+    locale_encoding = Encoding.find("locale")
     ENV.each {|k, v|
-      assert_equal(Encoding::ASCII_8BIT, k.encoding)
-      assert_equal(Encoding::ASCII_8BIT, v.encoding)
+      assert_equal(locale_encoding, k.encoding)
+      assert_equal(locale_encoding, v.encoding)
     }
   end
 
@@ -1149,7 +1169,7 @@ class TestM17N < Test::Unit::TestCase
   end
 
   def test_bignum_to_s
-    assert_equal(Encoding::US_ASCII, (1<<129).to_s.encoding)
+    assert_equal(Encoding::US_ASCII, (1 << 129).to_s.encoding)
   end
 
   def test_array_to_s
@@ -1235,7 +1255,7 @@ class TestM17N < Test::Unit::TestCase
     assert_regexp_usascii_literal('/\u1234#{%q"\x80"}/', nil, SyntaxError)
     assert_regexp_usascii_literal('/\u1234#{"\x80"}/', nil, SyntaxError)
     assert_regexp_usascii_literal('/\u1234\x80/', nil, SyntaxError)
-    assert_regexp_usascii_literal('/\u1234#{}\x80/', nil, ArgumentError)
+    assert_regexp_usascii_literal('/\u1234#{}\x80/', nil, RegexpError)
   end
 
   def test_gbk
@@ -1281,6 +1301,7 @@ class TestM17N < Test::Unit::TestCase
 
   def test_compatible
     assert_nil Encoding.compatible?("",0)
+    assert_equal(Encoding::UTF_8, Encoding.compatible?(u(""), ua("abc")))
     assert_equal(Encoding::UTF_8, Encoding.compatible?(Encoding::UTF_8, Encoding::UTF_8))
     assert_equal(Encoding::UTF_8, Encoding.compatible?(Encoding::UTF_8, Encoding::US_ASCII))
     assert_equal(Encoding::ASCII_8BIT,
@@ -1291,6 +1312,10 @@ class TestM17N < Test::Unit::TestCase
   def test_force_encoding
     assert(("".center(1, "\x80".force_encoding("utf-8")); true),
            "moved from btest/knownbug, [ruby-dev:33807]")
+    a = "".force_encoding("ascii-8bit") << 0xC3 << 0xB6
+    assert_equal(1, a.force_encoding("utf-8").size, '[ruby-core:22437]')
+    b = "".force_encoding("ascii-8bit") << 0xC3.chr << 0xB6.chr
+    assert_equal(1, b.force_encoding("utf-8").size, '[ruby-core:22437]')
   end
 
   def test_combchar_codepoint

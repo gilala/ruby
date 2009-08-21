@@ -27,11 +27,15 @@ class TestRequire < Test::Unit::TestCase
       end
     INPUT
 
-    assert_in_out_err(["-S", "foo/" * 10000 + "foo"], "") do |r, e|
-      assert_equal([], r)
-      assert_operator(2, :<=, e.size)
-      assert_equal("openpath: pathname too long (ignored)", e.first)
-      assert_match(/\(LoadError\)/, e.last)
+    begin
+      assert_in_out_err(["-S", "foo/" * 10000 + "foo"], "") do |r, e|
+        assert_equal([], r)
+        assert_operator(2, :<=, e.size)
+        assert_equal("openpath: pathname too long (ignored)", e.first)
+        assert_match(/\(LoadError\)/, e.last)
+      end
+    rescue Errno::EINVAL
+      # too long commandline may be blocked by OS.
     end
   end
 
@@ -190,5 +194,54 @@ class TestRequire < Test::Unit::TestCase
     INPUT
 
     assert_raise(ArgumentError) { at_exit }
+  end
+
+  def test_tainted_loadpath
+    t = Tempfile.new(["test_ruby_test_require", ".rb"])
+    abs_dir, file = File.dirname(t.path), File.basename(t.path)
+    abs_dir = File.expand_path(abs_dir).untaint
+
+    assert_in_out_err([], <<-INPUT, %w(:ok), [])
+      abs_dir = "#{ abs_dir }"
+      $: << abs_dir
+      require "#{ file }"
+      p :ok
+    INPUT
+
+    assert_in_out_err([], <<-INPUT, %w(:ok), [])
+      abs_dir = "#{ abs_dir }"
+      $: << abs_dir.taint
+      require "#{ file }"
+      p :ok
+    INPUT
+
+    assert_in_out_err([], <<-INPUT, %w(:ok), [])
+      abs_dir = "#{ abs_dir }"
+      $: << abs_dir.taint
+      $SAFE = 1
+      begin
+        require "#{ file }"
+      rescue SecurityError
+        p :ok
+      end
+    INPUT
+
+    assert_in_out_err([], <<-INPUT, %w(:ok), [])
+      abs_dir = "#{ abs_dir }"
+      $: << abs_dir.taint
+      $SAFE = 1
+      begin
+        require "#{ file }"
+      rescue SecurityError
+        p :ok
+      end
+    INPUT
+
+    assert_in_out_err([], <<-INPUT, %w(:ok), [])
+      abs_dir = "#{ abs_dir }"
+      $: << abs_dir << 'elsewhere'.taint
+      require "#{ file }"
+      p :ok
+    INPUT
   end
 end

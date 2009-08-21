@@ -34,32 +34,37 @@
 #define VMDEBUG 3
 #endif
 
-/* VM state version */
+enum {
+  BOP_PLUS,
+  BOP_MINUS,
+  BOP_MULT,
+  BOP_DIV,
+  BOP_MOD,
+  BOP_EQ,
+  BOP_EQQ,
+  BOP_LT,
+  BOP_LE,
+  BOP_LTLT,
+  BOP_AREF,
+  BOP_ASET,
+  BOP_LENGTH,
+  BOP_SUCC,
+  BOP_GT,
+  BOP_GE,
+  BOP_NOT,
+  BOP_NEQ,
 
+  BOP_LAST_
+};
+
+extern char ruby_vm_redefined_flag[BOP_LAST_];
 extern VALUE ruby_vm_global_state_version;
-extern VALUE ruby_vm_redefined_flag;
+extern VALUE ruby_vm_const_missing_count;
 
 #define GET_VM_STATE_VERSION() (ruby_vm_global_state_version)
 #define INC_VM_STATE_VERSION() \
   (ruby_vm_global_state_version = (ruby_vm_global_state_version+1) & 0x8fffffff)
 
-#define BOP_PLUS     0x01
-#define BOP_MINUS    0x02
-#define BOP_MULT     0x04
-#define BOP_DIV      0x08
-#define BOP_MOD      0x10
-#define BOP_EQ       0x20
-#define BOP_LT       0x40
-#define BOP_LE       0x80
-#define BOP_LTLT    0x100
-#define BOP_AREF    0x200
-#define BOP_ASET    0x400
-#define BOP_LENGTH  0x800
-#define BOP_SUCC   0x1000
-#define BOP_GT     0x2000
-#define BOP_GE     0x4000
-#define BOP_NOT    0x8000
-#define BOP_NEQ   0x10000
 
 /**********************************************************/
 /* deal with stack                                        */
@@ -133,10 +138,10 @@ extern VALUE ruby_vm_redefined_flag;
 
 #define GET_PREV_DFP(dfp)                ((VALUE *)((dfp)[0] & ~0x03))
 
-#define GET_GLOBAL(entry)       rb_gvar_get((struct global_entry*)entry)
-#define SET_GLOBAL(entry, val)  rb_gvar_set((struct global_entry*)entry, val)
+#define GET_GLOBAL(entry)       rb_gvar_get((struct rb_global_entry*)entry)
+#define SET_GLOBAL(entry, val)  rb_gvar_set((struct rb_global_entry*)entry, val)
 
-#define GET_CONST_INLINE_CACHE(dst) ((IC) * (GET_PC() + (dst) + 1))
+#define GET_CONST_INLINE_CACHE(dst) ((IC) * (GET_PC() + (dst) + 2))
 
 /**********************************************************/
 /* deal with values                                       */
@@ -151,12 +156,12 @@ extern VALUE ruby_vm_redefined_flag;
 #define COPY_CREF(c1, c2) do {  \
   NODE *__tmp_c2 = (c2); \
   c1->nd_clss = __tmp_c2->nd_clss; \
-  c1->nd_visi = __tmp_c2->nd_visi; \
+  c1->nd_visi = __tmp_c2->nd_visi;\
   c1->nd_next = __tmp_c2->nd_next; \
 } while (0)
 
-#define CALL_METHOD(num, blockptr, flag, id, mn, recv, klass) do { \
-    VALUE v = vm_call_method(th, GET_CFP(), num, blockptr, flag, id, mn, recv, klass); \
+#define CALL_METHOD(num, blockptr, flag, id, me, recv) do { \
+    VALUE v = vm_call_method(th, GET_CFP(), num, blockptr, flag, id, me, recv); \
     if (v == Qundef) { \
 	RESTORE_REGS(); \
 	NEXT_INSN(); \
@@ -180,12 +185,12 @@ extern VALUE ruby_vm_redefined_flag;
 
 /* optimize insn */
 #define FIXNUM_2_P(a, b) ((a) & (b) & 1)
-#define BASIC_OP_UNREDEFINED_P(op) ((ruby_vm_redefined_flag & (op)) == 0)
+#define BASIC_OP_UNREDEFINED_P(op) (LIKELY(ruby_vm_redefined_flag[op] == 0))
 #define HEAP_CLASS_OF(obj) RBASIC(obj)->klass
 
 #define CALL_SIMPLE_METHOD(num, id, recv) do { \
     VALUE klass = CLASS_OF(recv); \
-    CALL_METHOD(num, 0, 0, id, rb_method_node(klass, id), recv, CLASS_OF(recv)); \
+    CALL_METHOD(num, 0, 0, id, rb_method_entry(klass, id), recv); \
 } while (0)
 
 #endif /* RUBY_INSNHELPER_H */

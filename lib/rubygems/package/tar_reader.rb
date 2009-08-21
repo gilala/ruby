@@ -3,13 +3,20 @@
 # See LICENSE.txt for additional licensing information.
 #--
 
-require 'rubygems/package'
+##
+# TarReader reads tar files and allows iteration over their items
 
 class Gem::Package::TarReader
 
   include Gem::Package
 
+  ##
+  # Raised if the tar IO is not seekable
+
   class UnexpectedEOF < StandardError; end
+
+  ##
+  # Creates a new TarReader on +io+ and yields it to the block, if given.
 
   def self.new(io)
     reader = super
@@ -25,13 +32,23 @@ class Gem::Package::TarReader
     nil
   end
 
+  ##
+  # Creates a new tar file reader on +io+ which needs to respond to #pos,
+  # #eof?, #read, #getc and #pos=
+
   def initialize(io)
     @io = io
     @init_pos = io.pos
   end
 
+  ##
+  # Close the tar file
+
   def close
   end
+
+  ##
+  # Iterates over files in the tarball yielding each entry
 
   def each
     loop do
@@ -46,17 +63,17 @@ class Gem::Package::TarReader
       yield entry
 
       skip = (512 - (size % 512)) % 512
+      pending = size - entry.bytes_read
 
-      if @io.respond_to? :seek then
+      begin
         # avoid reading...
-        @io.seek(size - entry.bytes_read, IO::SEEK_CUR)
-      else
-        pending = size - entry.bytes_read
-
+        @io.seek pending, IO::SEEK_CUR
+        pending = 0
+      rescue Errno::EINVAL, NameError
         while pending > 0 do
-          bread = @io.read([pending, 4096].min).size
+          bytes_read = @io.read([pending, 4096].min).size
           raise UnexpectedEOF if @io.eof?
-          pending -= bread
+          pending -= bytes_read
         end
       end
 
@@ -83,4 +100,6 @@ class Gem::Package::TarReader
   end
 
 end
+
+require 'rubygems/package/tar_reader/entry'
 

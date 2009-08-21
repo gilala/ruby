@@ -4,7 +4,6 @@
 # See LICENSE.txt for permissions.
 #++
 
-require 'test/unit'
 require File.join(File.expand_path(File.dirname(__FILE__)), 'gemutilities')
 require 'rubygems/builder'
 
@@ -25,7 +24,7 @@ class TestGemBuilder < RubyGemTestCase
   def test_build_validates
     builder = Gem::Builder.new Gem::Specification.new
 
-    assert_raise Gem::InvalidSpecificationException do
+    assert_raises Gem::InvalidSpecificationException do
       builder.build
     end
   end

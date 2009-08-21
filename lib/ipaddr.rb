@@ -66,19 +66,19 @@ end
 # == Example
 #
 #   require 'ipaddr'
-#   
+#
 #   ipaddr1 = IPAddr.new "3ffe:505:2::1"
-#   
+#
 #   p ipaddr1			#=> #<IPAddr: IPv6:3ffe:0505:0002:0000:0000:0000:0000:0001/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff>
-#   
+#
 #   p ipaddr1.to_s		#=> "3ffe:505:2::1"
-#   
+#
 #   ipaddr2 = ipaddr1.mask(48)	#=> #<IPAddr: IPv6:3ffe:0505:0002:0000:0000:0000:0000:0000/ffff:ffff:ffff:0000:0000:0000:0000:0000>
-#   
+#
 #   p ipaddr2.to_s		#=> "3ffe:505:2::"
-#   
+#
 #   ipaddr3 = IPAddr.new "192.168.2.0/24"
-#   
+#
 #   p ipaddr3			#=> #<IPAddr: IPv4:192.168.2.0/255.255.255.0>
 
 class IPAddr
@@ -331,6 +331,16 @@ class IPAddr
   end
   include Comparable
 
+  # Checks equality used by Hash.
+  def eql?(other)
+    return self.class == other.class && self.hash == other.hash && self == other
+  end
+
+  # Returns a hash value used by Hash, Set, and Array classes
+  def hash
+    return ([@addr, @mask_addr].hash << 1) | (ipv4? ? 0 : 1)
+  end
+
   # Creates a Range object for the network address.
   def to_range
     begin_addr = (@addr & @mask_addr)
@@ -425,7 +435,7 @@ class IPAddr
   # Creates a new ipaddr object either from a human readable IP
   # address representation in string, or from a packed in_addr value
   # followed by an address family.
-  # 
+  #
   # In the former case, the following are the valid formats that will
   # be recognized: "address", "address/prefixlen" and "address/mask",
   # where IPv6 address may be enclosed in square brackets (`[' and
@@ -433,7 +443,7 @@ class IPAddr
   # IP address.  Although the address family is determined
   # automatically from a specified string, you can specify one
   # explicitly by the optional second argument.
-  # 
+  #
   # Otherwise an IP addess is generated from a packed in_addr value
   # and an address family.
   #
@@ -810,4 +820,31 @@ class TC_Operator < Test::Unit::TestCase
 
   end
 
+  def test_hash
+    a1 = IPAddr.new('192.168.2.0')
+    a2 = IPAddr.new('192.168.2.0')
+    a3 = IPAddr.new('3ffe:505:2::1')
+    a4 = IPAddr.new('3ffe:505:2::1')
+    a5 = IPAddr.new('127.0.0.1')
+    a6 = IPAddr.new('::1')
+    a7 = IPAddr.new('192.168.2.0/25')
+    a8 = IPAddr.new('192.168.2.0/25')
+
+    h = { a1 => 'ipv4', a2 => 'ipv4', a3 => 'ipv6', a4 => 'ipv6', a5 => 'ipv4', a6 => 'ipv6', a7 => 'ipv4', a8 => 'ipv4'}
+    assert_equal(5, h.size)
+    assert_equal('ipv4', h[a1])
+    assert_equal('ipv4', h[a2])
+    assert_equal('ipv6', h[a3])
+    assert_equal('ipv6', h[a4])
+
+    require 'set'
+    s = Set[a1, a2, a3, a4, a5, a6, a7, a8]
+    assert_equal(5, s.size)
+    assert_equal(true, s.include?(a1))
+    assert_equal(true, s.include?(a2))
+    assert_equal(true, s.include?(a3))
+    assert_equal(true, s.include?(a4))
+    assert_equal(true, s.include?(a5))
+    assert_equal(true, s.include?(a6))
+  end
 end

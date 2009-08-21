@@ -1,3 +1,5 @@
+"exec" "${RUBY-ruby}" "-x" "$0" "$@"; true # -*- mode: ruby; coding: utf-8 -*-
+#!./ruby
 # $Id$
 
 # NOTE:
@@ -95,8 +97,13 @@ End
 
   unless quiet
     puts Time.now
-    patchlevel = defined?(RUBY_PATCHLEVEL) ? " patchlevel #{RUBY_PATCHLEVEL}" : ''
-    puts "Driver is ruby #{RUBY_VERSION} (#{RUBY_RELEASE_DATE}#{patchlevel}) [#{RUBY_PLATFORM}]"
+    if defined?(RUBY_DESCRIPTION)
+      puts "Driver is #{RUBY_DESCRIPTION}"
+    elsif defined?(RUBY_PATCHLEVEL)
+      puts "Driver is ruby #{RUBY_VERSION} (#{RUBY_RELEASE_DATE}#{RUBY_PLATFORM}) [#{RUBY_PLATFORM}]"
+    else
+      puts "Driver is ruby #{RUBY_VERSION} (#{RUBY_RELEASE_DATE}) [#{RUBY_PLATFORM}]"
+    end
     puts "Target is #{`#{@ruby} -v`.chomp}"
     puts
     $stdout.flush
@@ -118,7 +125,11 @@ def exec_test(pathes)
   end
   $stderr.puts
   if @error == 0
-    $stderr.puts "PASS #{@count} tests"
+    if @count == 0
+      $stderr.puts "No tests, no problem"
+    else
+      $stderr.puts "PASS all #{@count} tests"
+    end
     exit true
   else
     @errbuf.each do |msg|

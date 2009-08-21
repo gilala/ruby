@@ -25,13 +25,13 @@
 #define BITSPERDIG (SIZEOF_BDIGITS*CHAR_BIT)
 #define EXTENDSIGN(n, l) (((~0 << (n)) >> (((n)*(l)) % BITSPERDIG)) & ~(~0 << (n)))
 
-static void fmt_setup(char*,int,int,int,int);
+static void fmt_setup(char*,size_t,int,int,int,int);
 
 static char*
 remove_sign_bits(char *str, int base)
 {
     char *s, *t;
-    
+
     s = t = str;
 
     if (base == 16) {
@@ -83,10 +83,12 @@ sign_bits(int base, const char *p)
 #define FPREC0 128
 
 #define CHECK(l) do {\
+    int cr = ENC_CODERANGE(result);\
     while (blen + (l) >= bsiz) {\
 	bsiz*=2;\
     }\
     rb_str_resize(result, bsiz);\
+    ENC_CODERANGE_SET(result, cr);\
     buf = RSTRING_PTR(result);\
 } while (0)
 
@@ -103,17 +105,28 @@ sign_bits(int base, const char *p)
 } while (0)
 
 #define GETARG() (nextvalue != Qundef ? nextvalue : \
-    posarg < 0 ? \
+    posarg == -1 ? \
     (rb_raise(rb_eArgError, "unnumbered(%d) mixed with numbered", nextarg), 0) : \
+    posarg == -2 ? \
+    (rb_raise(rb_eArgError, "unnumbered(%d) mixed with named", nextarg), 0) : \
     (posarg = nextarg++, GETNTHARG(posarg)))
 
 #define GETPOSARG(n) (posarg > 0 ? \
     (rb_raise(rb_eArgError, "numbered(%d) after unnumbered(%d)", n, posarg), 0) : \
+    posarg == -2 ? \
+    (rb_raise(rb_eArgError, "numbered(%d) after named", n), 0) : \
     ((n < 1) ? (rb_raise(rb_eArgError, "invalid index - %d$", n), 0) : \
 	       (posarg = -1, GETNTHARG(n))))
 
 #define GETNTHARG(nth) \
     ((nth >= argc) ? (rb_raise(rb_eArgError, "too few arguments"), 0) : argv[nth])
+
+#define GETNAMEARG(id, name, len) ( \
+    posarg > 0 ? \
+    (rb_raise(rb_eArgError, "named%.*s after unnumbered(%d)", (len), (name), posarg), 0) : \
+    posarg == -1 ? \
+    (rb_raise(rb_eArgError, "named%.*s after numbered", (len), (name)), 0) :	\
+    (posarg = -2, rb_hash_lookup2(get_hash(&hash, argc, argv), id, Qundef)))
 
 #define GETNUM(n, val) \
     for (; p < end && rb_enc_isdigit(*p, enc); p++) {	\
@@ -141,15 +154,30 @@ sign_bits(int base, const char *p)
     val = NUM2INT(tmp); \
 } while (0)
 
+static VALUE
+get_hash(volatile VALUE *hash, int argc, const VALUE *argv)
+{
+    VALUE tmp;
+
+    if (*hash != Qundef) return *hash;
+    if (argc != 2) {
+	rb_raise(rb_eArgError, "one hash required");
+    }
+    tmp = rb_check_convert_type(argv[1], T_HASH, "Hash", "to_hash");
+    if (NIL_P(tmp)) {
+	rb_raise(rb_eArgError, "one hash required");
+    }
+    return (*hash = tmp);
+}
 
 /*
  *  call-seq:
  *     format(format_string [, arguments...] )   => string
  *     sprintf(format_string [, arguments...] )  => string
- *  
+ *
  *  Returns the string resulting from applying <i>format_string</i> to
  *  any additional arguments.  Within the format string, any characters
- *  other than format sequences are copied to the result. 
+ *  other than format sequences are copied to the result.
  *
  *  The syntax of a format sequence is follows.
  *
@@ -185,13 +213,13 @@ sign_bits(int base, const char *p)
  *
  *      Field |  Float Format
  *      ------+--------------------------------------------------------------
- *        e   | Convert floating point argument into exponential notation 
+ *        e   | Convert floating point argument into exponential notation
  *            | with one digit before the decimal point as [-]d.dddddde[+-]dd.
  *            | The precision specifies the number of digits after the decimal
  *            | point (defaulting to six).
  *        E   | Equivalent to `e', but uses an uppercase E to indicate
  *            | the exponent.
- *        f   | Convert floating point argument as [-]ddd.dddddd, 
+ *        f   | Convert floating point argument as [-]ddd.dddddd,
  *            | where the precision specifies the number of digits after
  *            | the decimal point.
  *        g   | Convert a floating point number using exponential form
@@ -209,13 +237,13 @@ sign_bits(int base, const char *p)
  *            | sequence contains a precision, at most that many characters
  *            | will be copied.
  *        %   | A percent sign itself will be displayed.  No argument taken.
- *     
+ *
  *  The flags modifies the behavior of the formats.
  *  The flag characters are:
  *
  *    Flag     | Applies to    | Meaning
  *    ---------+---------------+-----------------------------------------
- *    space    | bBdiouxX      | Leave a space at the start of 
+ *    space    | bBdiouxX      | Leave a space at the start of
  *             | eEfgG         | non-negative numbers.
  *             | (numeric fmt) | For `o', `x', `X', `b' and `B', use
  *             |               | a minus sign with absolute value for
@@ -251,9 +279,9 @@ sign_bits(int base, const char *p)
  *             | (numeric fmt) | is used for negative numbers formatted as
  *             |               | complements.
  *    ---------+---------------+-----------------------------------------
- *    *        | all           | Use the next argument as the field width. 
+ *    *        | all           | Use the next argument as the field width.
  *             |               | If negative, left-justify the result. If the
- *             |               | asterisk is followed by a number and a dollar 
+ *             |               | asterisk is followed by a number and a dollar
  *             |               | sign, use the indicated argument as the width.
  *
  *  Examples of flags:
@@ -311,7 +339,7 @@ sign_bits(int base, const char *p)
  *   sprintf("%#g", 123.4)  #=> "123.400"
  *   sprintf("%g", 123456)  #=> "123456"
  *   sprintf("%#g", 123456) #=> "123456."
- *     
+ *
  *  The field width is an optional integer, followed optionally by a
  *  period and a precision.  The width specifies the minimum number of
  *  characters that will be written to the result for this field.
@@ -364,7 +392,7 @@ sign_bits(int base, const char *p)
  *   # precision for `e' is number of
  *   # digits after the decimal point           <------>
  *   sprintf("%20.8e", 1234.56789) #=> "      1.23456789e+03"
- *                                    
+ *
  *   # precision for `f' is number of
  *   # digits after the decimal point               <------>
  *   sprintf("%20.8f", 1234.56789) #=> "       1234.56789000"
@@ -405,6 +433,8 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
     int blen, bsiz;
     VALUE result;
 
+    long scanned = 0;
+    int coderange = ENC_CODERANGE_7BIT;
     int width, prec, flags = FNONE;
     int nextarg = 1;
     int posarg = 0;
@@ -412,6 +442,7 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
     VALUE nextvalue;
     VALUE tmp;
     VALUE str;
+    volatile VALUE hash = Qundef;
 
 #define CHECK_FOR_WIDTH(f)				 \
     if ((f) & FWIDTH) {					 \
@@ -442,13 +473,19 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
     rb_enc_copy(result, fmt);
     buf = RSTRING_PTR(result);
     memset(buf, 0, bsiz);
+    ENC_CODERANGE_SET(result, coderange);
 
     for (; p < end; p++) {
 	const char *t;
 	int n;
+	ID id = 0;
 
 	for (t = p; t < end && *t != '%'; t++) ;
 	PUSH(p, t - p);
+	if (coderange != ENC_CODERANGE_BROKEN && scanned < blen) {
+	    scanned = rb_str_coderange_scan_restartable(buf+scanned, buf+blen, enc, &coderange);
+	    ENC_CODERANGE_SET(result, coderange);
+	}
 	if (t >= end) {
 	    /* end of fmt string */
 	    goto sprint_exit;
@@ -513,6 +550,32 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
 	    flags |= FWIDTH;
 	    goto retry;
 
+	  case '<':
+	  case '{':
+	    {
+		const char *start = p;
+		char term = (*p == '<') ? '>' : '}';
+
+		for (; p < end && *p != term; ) {
+		    p += rb_enc_mbclen(p, end, enc);
+		}
+		if (p >= end) {
+		    rb_raise(rb_eArgError, "malformed name - unmatched parenthesis");
+		}
+		if (id) {
+		    rb_raise(rb_eArgError, "name%.*s after <%s>",
+			     (int)(p - start + 1), start, rb_id2name(id));
+		}
+		id = rb_intern3(start + 1, p - start - 1, enc);
+		nextvalue = GETNAMEARG(ID2SYM(id), start, (int)(p - start + 1));
+		if (nextvalue == Qundef) {
+		    rb_raise(rb_eKeyError, "key%.*s not found", (int)(p - start + 1), start);
+		}
+		if (term == '}') goto format_s;
+		p++;
+		goto retry;
+	    }
+
 	  case '*':
 	    CHECK_FOR_WIDTH(flags);
 	    flags |= FWIDTH;
@@ -566,13 +629,13 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
 		    if (rb_enc_strlen(RSTRING_PTR(tmp),RSTRING_END(tmp),enc) != 1) {
 			rb_raise(rb_eArgError, "%%c requires a character");
 		    }
-		    c = rb_enc_codepoint(RSTRING_PTR(tmp), RSTRING_END(tmp), enc);
+		    c = rb_enc_codepoint_len(RSTRING_PTR(tmp), RSTRING_END(tmp), &n, enc);
 		}
 		else {
 		    c = NUM2INT(val);
+		    n = rb_enc_codelen(c, enc);
 		}
-		n = rb_enc_codelen(c, enc);
-		if (n == 0) {
+		if (n <= 0) {
 		    rb_raise(rb_eArgError, "invalid character");
 		}
 		if (!(flags & FWIDTH)) {
@@ -597,6 +660,7 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
 
 	  case 's':
 	  case 'p':
+	  format_s:
 	    {
 		VALUE arg = GETARG();
 		long len, slen;
@@ -605,6 +669,14 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
 		str = rb_obj_as_string(arg);
 		if (OBJ_TAINTED(str)) tainted = 1;
 		len = RSTRING_LEN(str);
+		rb_str_set_len(result, blen);
+		if (coderange != ENC_CODERANGE_BROKEN && scanned < blen) {
+		    int cr = coderange;
+		    scanned = rb_str_coderange_scan_restartable(buf+scanned, buf+blen, enc, &cr);
+		    ENC_CODERANGE_SET(result,
+				      (cr == ENC_CODERANGE_UNKNOWN ?
+				       ENC_CODERANGE_BROKEN : (coderange = cr)));
+		}
 		enc = rb_enc_check(result, str);
 		if (flags&(FPREC|FWIDTH)) {
 		    slen = rb_enc_strlen(RSTRING_PTR(str),RSTRING_END(str),enc);
@@ -753,8 +825,8 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
 			    sc = ' ';
 			    width--;
 			}
-			sprintf(fbuf, "%%l%c", c);
-			sprintf(nbuf, fbuf, v);
+			snprintf(fbuf, sizeof(fbuf), "%%l%c", c);
+			snprintf(nbuf, sizeof(nbuf), fbuf, v);
 			s = nbuf;
 		    }
 		    else {
@@ -762,8 +834,8 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
 			if (v < 0) {
 			    dots = 1;
 			}
-			sprintf(fbuf, "%%l%c", *p == 'X' ? 'x' : *p);
-			sprintf(++s, fbuf, v);
+			snprintf(fbuf, sizeof(fbuf), "%%l%c", *p == 'X' ? 'x' : *p);
+			snprintf(++s, sizeof(nbuf) - 1, fbuf, v);
 			if (v < 0) {
 			    char d = 0;
 
@@ -932,8 +1004,8 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
 		    if ((flags & FWIDTH) && need < width)
 			need = width;
 
-		    CHECK(need);
-		    sprintf(&buf[blen], "%*s", need, "");
+		    CHECK(need + 1);
+		    snprintf(&buf[blen], need + 1, "%*s", need, "");
 		    if (flags & FMINUS) {
 			if (!isnan(fval) && fval < 0.0)
 			    buf[blen++] = '-';
@@ -941,7 +1013,7 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
 			    buf[blen++] = '+';
 			else if (flags & FSPACE)
 			    blen++;
-			strncpy(&buf[blen], expr, strlen(expr));
+			memcpy(&buf[blen], expr, strlen(expr));
 		    }
 		    else {
 			if (!isnan(fval) && fval < 0.0)
@@ -950,14 +1022,14 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
 			    buf[blen + need - strlen(expr) - 1] = '+';
 			else if ((flags & FSPACE) && need > width)
 			    blen++;
-			strncpy(&buf[blen + need - strlen(expr)], expr,
-				strlen(expr));
+			memcpy(&buf[blen + need - strlen(expr)], expr,
+			       strlen(expr));
 		    }
 		    blen += strlen(&buf[blen]);
 		    break;
 		}
 
-		fmt_setup(fbuf, *p, flags, width, prec);
+		fmt_setup(fbuf, sizeof(fbuf), *p, flags, width, prec);
 		need = 0;
 		if (*p != 'e' && *p != 'E') {
 		    i = INT_MIN;
@@ -971,7 +1043,7 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
 		need += 20;
 
 		CHECK(need);
-		sprintf(&buf[blen], fbuf, fval);
+		snprintf(&buf[blen], need, fbuf, fval);
 		blen += strlen(&buf[blen]);
 	    }
 	    break;
@@ -994,8 +1066,9 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
 }
 
 static void
-fmt_setup(char *buf, int c, int flags, int width, int prec)
+fmt_setup(char *buf, size_t size, int c, int flags, int width, int prec)
 {
+    char *end = buf + size;
     *buf++ = '%';
     if (flags & FSHARP) *buf++ = '#';
     if (flags & FPLUS)  *buf++ = '+';
@@ -1004,12 +1077,12 @@ fmt_setup(char *buf, int c, int flags, int width, int prec)
     if (flags & FSPACE) *buf++ = ' ';
 
     if (flags & FWIDTH) {
-	sprintf(buf, "%d", width);
+	snprintf(buf, end - buf, "%d", width);
 	buf += strlen(buf);
     }
 
     if (flags & FPREC) {
-	sprintf(buf, ".%d", prec);
+	snprintf(buf, end - buf, ".%d", prec);
 	buf += strlen(buf);
     }
 
@@ -1033,10 +1106,9 @@ fmt_setup(char *buf, int c, int flags, int width, int prec)
 #  define u_quad_t unsigned LONG_LONG
 # endif
 #endif
-#undef vsnprintf
 #undef snprintf
 #define FLOATING_POINT 1
-#define BSD__dtoa dtoa
+#define BSD__dtoa ruby_dtoa
 #include "missing/vsnprintf.c"
 
 static int

@@ -12,6 +12,20 @@ extern "C" {
 #endif
 #endif
 
+#ifndef RUBY_LIB
+#include "ruby/config.h"
+#include "ruby/defines.h"
+#ifdef RUBY_EXTCONF_H
+#include RUBY_EXTCONF_H
+#endif
+#endif
+
+#if   defined STDC_HEADERS
+#include <stddef.h>
+#elif defined HAVE_STDLIB_H
+#include <stdlib.h>
+#endif
+
 #if SIZEOF_LONG == SIZEOF_VOIDP
 typedef unsigned long st_data_t;
 #elif SIZEOF_LONG_LONG == SIZEOF_VOIDP
@@ -61,7 +75,7 @@ struct st_table {
 #endif
     st_index_t num_entries : ST_INDEX_BITS - 1;
     struct st_table_entry **bins;
-    struct st_table_entry *head;
+    struct st_table_entry *head, *tail;
 };
 
 #define st_is_member(table,key) st_lookup(table,key,(st_data_t *)0)
@@ -79,6 +93,7 @@ st_table *st_init_strcasetable_with_size(int);
 int st_delete(st_table *, st_data_t *, st_data_t *); /* returns 0:notfound 1:deleted */
 int st_delete_safe(st_table *, st_data_t *, st_data_t *, st_data_t);
 int st_insert(st_table *, st_data_t, st_data_t);
+int st_insert2(st_table *, st_data_t, st_data_t, st_data_t (*)(st_data_t));
 int st_lookup(st_table *, st_data_t, st_data_t *);
 int st_get_key(st_table *, st_data_t, st_data_t *);
 int st_foreach(st_table *, int (*)(ANYARGS), st_data_t);
@@ -92,6 +107,7 @@ int st_numcmp(st_data_t, st_data_t);
 int st_numhash(st_data_t);
 int st_strcasecmp(const char *s1, const char *s2);
 int st_strncasecmp(const char *s1, const char *s2, size_t n);
+size_t st_memsize(st_table *);
 
 #if defined(__cplusplus)
 #if 0
