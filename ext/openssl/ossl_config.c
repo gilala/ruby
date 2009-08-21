@@ -192,6 +192,16 @@ ossl_config_add_value(VALUE self, VALUE section, VALUE name, VALUE value)
 #endif
 }
 
+#if !defined(OSSL_NO_CONF_API)
+static VALUE
+ossl_config_add_value_m(VALUE self, VALUE section, VALUE name, VALUE value)
+{
+    return ossl_config_add_value(self, section, name, value);
+}
+#else
+#define ossl_config_add_value_m rb_f_notimplement
+#endif
+
 static VALUE
 ossl_config_get_value(VALUE self, VALUE section, VALUE name)
 {
@@ -300,7 +310,7 @@ get_conf_section(CONF_VALUE *cv, VALUE ary)
     rb_ary_push(ary, rb_str_new2(cv->section));
 }
 
-static IMPLEMENT_LHASH_DOALL_ARG_FN(get_conf_section, CONF_VALUE*, VALUE);
+static IMPLEMENT_LHASH_DOALL_ARG_FN(get_conf_section, CONF_VALUE*, VALUE)
 
 static VALUE
 ossl_config_get_sections(VALUE self)
@@ -338,7 +348,7 @@ dump_conf_value(CONF_VALUE *cv, VALUE str)
     rb_str_cat2(str, "\n");
 }
 
-static IMPLEMENT_LHASH_DOALL_ARG_FN(dump_conf_value, CONF_VALUE*, VALUE);
+static IMPLEMENT_LHASH_DOALL_ARG_FN(dump_conf_value, CONF_VALUE*, VALUE)
 
 static VALUE
 dump_conf(CONF *conf)
@@ -382,7 +392,7 @@ each_conf_value(CONF_VALUE *cv, void* dummy)
     }
 }
 
-static IMPLEMENT_LHASH_DOALL_ARG_FN(each_conf_value, CONF_VALUE*, void*);
+static IMPLEMENT_LHASH_DOALL_ARG_FN(each_conf_value, CONF_VALUE*, void*)
 
 static VALUE
 ossl_config_each(VALUE self)
@@ -456,7 +466,7 @@ Init_ossl_config()
     rb_define_method(cConfig, "initialize", ossl_config_initialize, -1);
     rb_define_method(cConfig, "get_value", ossl_config_get_value, 2);
     rb_define_method(cConfig, "value", ossl_config_get_value_old, -1);
-    rb_define_method(cConfig, "add_value", ossl_config_add_value, 3);
+    rb_define_method(cConfig, "add_value", ossl_config_add_value_m, 3);
     rb_define_method(cConfig, "[]", ossl_config_get_section, 1);
     rb_define_method(cConfig, "section", ossl_config_get_section_old, 1);
     rb_define_method(cConfig, "[]=", ossl_config_set_section, 2);

@@ -290,7 +290,7 @@ rb_gdbm_fetch(GDBM_FILE dbm, datum key)
     str = rb_str_new(val.dptr, val.dsize);
     free(val.dptr);
     OBJ_TAINT(str);
-    return (VALUE)str;
+    return str;
 }
 
 static VALUE
@@ -344,6 +344,7 @@ rb_gdbm_nextkey(GDBM_FILE dbm, VALUE keystr)
         return Qnil;
 
     str = rb_str_new(key2.dptr, key2.dsize);
+    free(key2.dptr);
     OBJ_TAINT(str);
     return str;
 }
@@ -396,13 +397,13 @@ fgdbm_fetch_m(int argc, VALUE *argv, VALUE obj)
 
 /*
  * call-seq:
- *      gdbm.index(value) -> key
+ *      gdbm.key(value) -> key
  *
  * Returns the _key_ for a given _value_. If several keys may map to the
  * same value, the key that is found first will be returned.
  */
 static VALUE
-fgdbm_index(VALUE obj, VALUE valstr)
+fgdbm_key(VALUE obj, VALUE valstr)
 {
     struct dbmdata *dbmp;
     GDBM_FILE dbm;
@@ -422,6 +423,14 @@ fgdbm_index(VALUE obj, VALUE valstr)
         }
     }
     return Qnil;
+}
+
+/* :nodoc: */
+static VALUE
+fgdbm_index(VALUE obj, VALUE value)
+{
+    rb_warn("GDBM#index is deprecated; use GDBM#key");
+    return fgdbm_key(obj, value);
 }
 
 /*
@@ -1180,6 +1189,7 @@ Init_gdbm(void)
     rb_define_method(rb_cGDBM, "[]=", fgdbm_store, 2);
     rb_define_method(rb_cGDBM, "store", fgdbm_store, 2);
     rb_define_method(rb_cGDBM, "index",  fgdbm_index, 1);
+    rb_define_method(rb_cGDBM, "key",  fgdbm_key, 1);
     rb_define_method(rb_cGDBM, "select",  fgdbm_select, 0);
     rb_define_method(rb_cGDBM, "values_at",  fgdbm_values_at, -1);
     rb_define_method(rb_cGDBM, "length", fgdbm_length, 0);

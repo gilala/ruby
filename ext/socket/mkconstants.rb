@@ -1,21 +1,315 @@
-$out ||= $stdout
+require 'optparse'
+require 'erb'
 
-# workaround for NetBSD, OpenBSD and etc.
-$out.puts("#define pseudo_AF_FTIP pseudo_AF_RTIP")
+opt = OptionParser.new
 
-# skip empty lines and comment lines
-DATA.each_line do |s|
-  name, value = s.scan(/\S+/)
-  if name && name[0] != ?#
-    $out.puts("#ifdef #{name}")
-    $out.puts("    sock_define_const(\"#{name}\", #{name});")
-    if value
-    $out.puts("#else")
-    $out.puts("    sock_define_const(\"#{name}\", #{value});")
-    end
-    $out.puts("#endif")
-    $out.puts
+opt.def_option('-h', 'help') {
+  puts opt
+  exit 0
+}
+
+opt_o = nil
+opt.def_option('-o FILE', 'specify output file') {|filename|
+  opt_o = filename
+}
+
+opt_H = nil
+opt.def_option('-H FILE', 'specify output header file') {|filename|
+  opt_H = filename
+}
+
+C_ESC = {
+  "\\" => "\\\\",
+  '"' => '\"',
+  "\n" => '\n',
+}
+
+0x00.upto(0x1f) {|ch| C_ESC[[ch].pack("C")] ||= "\\%03o" % ch }
+0x7f.upto(0xff) {|ch| C_ESC[[ch].pack("C")] = "\\%03o" % ch }
+C_ESC_PAT = Regexp.union(*C_ESC.keys)
+
+def c_str(str)
+  '"' + str.gsub(C_ESC_PAT) {|s| C_ESC[s]} + '"'
+end
+
+opt.parse!
+
+
+
+h = {}
+DATA.each_line {|s|
+  name, default_value = s.scan(/\S+/)
+  next unless name && name[0] != ?#
+  if h.has_key? name
+    warn "#{$.}: warning: duplicate name: #{name}"
+    next
   end
+  h[name] = default_value
+}
+DEFS = h.to_a
+
+def each_const
+  DEFS.each {|name, default_value|
+    if name =~ /\AINADDR_/
+      make_value = "UINT2NUM"
+    else
+      make_value = "INT2NUM"
+    end
+    guard = nil
+    if /\A(AF_INET6|PF_INET6|IPV6_.*)\z/ =~ name
+      # IPv6 is not supported although AF_INET6 is defined on bcc32/mingw
+      guard = "defined(INET6)"
+    end
+    yield guard, make_value, name, default_value
+  }
+end
+
+def each_name(pat)
+  DEFS.each {|name, default_value|
+    next if pat !~ name
+    yield name
+  }
+end
+
+ERB.new(<<'EOS', nil, '%').def_method(Object, "gen_const_decls")
+% each_const {|guard, make_value, name, default_value|
+%   if default_value
+#ifndef <%=name%>
+# define <%=name%> <%=default_value%>
+#endif
+%   end
+% }
+EOS
+
+ERB.new(<<'EOS', nil, '%').def_method(Object, "gen_const_defs_in_guard(make_value, name, default_value)")
+#if defined(<%=name%>)
+    rb_define_const(rb_cSocket, <%=c_str name%>, <%=make_value%>(<%=name%>));
+    rb_define_const(rb_mSockConst, <%=c_str name%>, <%=make_value%>(<%=name%>));
+#endif
+EOS
+
+ERB.new(<<'EOS', nil, '%').def_method(Object, "gen_const_defs")
+% each_const {|guard, make_value, name, default_value|
+%   if guard
+#if <%=guard%>
+<%= gen_const_defs_in_guard(make_value, name, default_value).chomp %>
+#endif
+%   else
+<%= gen_const_defs_in_guard(make_value, name, default_value).chomp %>
+%   end
+% }
+EOS
+
+def reverse_each_name(pat)
+  DEFS.reverse_each {|name, default_value|
+    next if pat !~ name
+    yield name
+  }
+end
+
+def each_names_with_len(pat, prefix_optional=nil)
+  h = {}
+  DEFS.each {|name, default_value|
+    next if pat !~ name
+    (h[name.length] ||= []) << [name, name]
+  }
+  if prefix_optional
+    if Regexp === prefix_optional
+      prefix_pat = prefix_optional
+    else
+      prefix_pat = /\A#{Regexp.escape prefix_optional}/
+    end
+    DEFS.each {|const, default_value|
+      next if pat !~ const
+      next if prefix_pat !~ const
+      name = $'
+      (h[name.length] ||= []) << [name, const]
+    }
+  end
+  hh = {}
+  h.each {|len, pairs|
+    pairs.each {|name, const|
+      raise "name crash: #{name}" if hh[name]
+      hh[name] = true
+    }
+  }
+  h.keys.sort.each {|len|
+    yield h[len], len
+  }
+end
+
+ERB.new(<<'EOS', nil, '%').def_method(Object, "gen_name_to_int_decl(funcname, pat, prefix_optional, guard=nil)")
+%if guard
+#ifdef <%=guard%>
+int <%=funcname%>(const char *str, int len, int *valp);
+#endif
+%else
+int <%=funcname%>(const char *str, int len, int *valp);
+%end
+EOS
+
+ERB.new(<<'EOS', nil, '%').def_method(Object, "gen_name_to_int_func_in_guard(funcname, pat, prefix_optional, guard=nil)")
+int
+<%=funcname%>(const char *str, int len, int *valp)
+{
+    switch (len) {
+%    each_names_with_len(pat, prefix_optional) {|pairs, len|
+      case <%=len%>:
+%      pairs.each {|name, const|
+#ifdef <%=const%>
+        if (memcmp(str, <%=c_str name%>, <%=len%>) == 0) { *valp = <%=const%>; return 0; }
+#endif
+%      }
+        return -1;
+
+%    }
+      default:
+        return -1;
+    }
+}
+EOS
+
+ERB.new(<<'EOS', nil, '%').def_method(Object, "gen_name_to_int_func(funcname, pat, prefix_optional, guard=nil)")
+%if guard
+#ifdef <%=guard%>
+<%=gen_name_to_int_func_in_guard(funcname, pat, prefix_optional, guard)%>
+#endif
+%else
+<%=gen_name_to_int_func_in_guard(funcname, pat, prefix_optional, guard)%>
+%end
+EOS
+
+NAME_TO_INT_DEFS = []
+def def_name_to_int(funcname, pat, prefix_optional, guard=nil)
+  decl = gen_name_to_int_decl(funcname, pat, prefix_optional, guard)
+  func = gen_name_to_int_func(funcname, pat, prefix_optional, guard)
+  NAME_TO_INT_DEFS << [decl, func]
+end
+
+def reverse_each_name_with_prefix_optional(pat, prefix_pat)
+  reverse_each_name(pat) {|n|
+    yield n, n
+  }
+  if prefix_pat
+    reverse_each_name(pat) {|n|
+      next if prefix_pat !~ n
+      yield n, $'
+    }
+  end
+end
+
+ERB.new(<<'EOS', nil, '%').def_method(Object, "gen_int_to_name_hash(hash_var, pat, prefix_pat)")
+    <%=hash_var%> = st_init_numtable();
+% reverse_each_name_with_prefix_optional(pat, prefix_pat) {|n,s|
+#ifdef <%=n%>
+    st_insert(<%=hash_var%>, (st_data_t)<%=n%>, (st_data_t)rb_intern2(<%=c_str s%>, <%=s.length%>));
+#endif
+% }
+EOS
+
+ERB.new(<<'EOS', nil, '%').def_method(Object, "gen_int_to_name_func(func_name, hash_var)")
+ID
+<%=func_name%>(int val)
+{
+    st_data_t name;
+    if (st_lookup(<%=hash_var%>, (st_data_t)val, &name))
+        return (ID)name;
+    return 0;
+}
+EOS
+
+ERB.new(<<'EOS', nil, '%').def_method(Object, "gen_int_to_name_decl(func_name, hash_var)")
+ID <%=func_name%>(int val);
+EOS
+
+INTERN_DEFS = []
+def def_intern(func_name, pat, prefix_optional=nil)
+  prefix_pat = nil
+  if prefix_optional
+    if Regexp === prefix_optional
+      prefix_pat = prefix_optional
+    else
+      prefix_pat = /\A#{Regexp.escape prefix_optional}/
+    end
+  end
+  hash_var = "#{func_name}_hash"
+  vardef = "static st_table *#{hash_var};"
+  gen_hash = gen_int_to_name_hash(hash_var, pat, prefix_pat)
+  decl = gen_int_to_name_decl(func_name, hash_var)
+  func = gen_int_to_name_func(func_name, hash_var)
+  INTERN_DEFS << [vardef, gen_hash, decl, func]
+end
+
+def_name_to_int("rsock_family_to_int", /\A(AF_|PF_)/, "AF_")
+def_name_to_int("rsock_socktype_to_int", /\ASOCK_/, "SOCK_")
+def_name_to_int("rsock_ipproto_to_int", /\AIPPROTO_/, "IPPROTO_")
+def_name_to_int("rsock_unknown_level_to_int", /\ASOL_SOCKET\z/, "SOL_")
+def_name_to_int("rsock_ip_level_to_int", /\A(SOL_SOCKET\z|IPPROTO_)/, /\A(SOL_|IPPROTO_)/)
+def_name_to_int("rsock_so_optname_to_int", /\ASO_/, "SO_")
+def_name_to_int("rsock_ip_optname_to_int", /\AIP_/, "IP_")
+def_name_to_int("rsock_ipv6_optname_to_int", /\AIPV6_/, "IPV6_", "IPPROTO_IPV6")
+def_name_to_int("rsock_tcp_optname_to_int", /\ATCP_/, "TCP_")
+def_name_to_int("rsock_udp_optname_to_int", /\AUDP_/, "UDP_")
+def_name_to_int("rsock_shutdown_how_to_int", /\ASHUT_/, "SHUT_")
+def_name_to_int("rsock_scm_optname_to_int", /\ASCM_/, "SCM_")
+
+def_intern('rsock_intern_family',  /\AAF_/)
+def_intern('rsock_intern_family_noprefix',  /\AAF_/, "AF_")
+def_intern('rsock_intern_protocol_family',  /\APF_/)
+def_intern('rsock_intern_socktype',  /\ASOCK_/)
+def_intern('rsock_intern_ipproto',  /\AIPPROTO_/)
+def_intern('rsock_intern_iplevel',  /\A(SOL_SOCKET\z|IPPROTO_)/, /\A(SOL_|IPPROTO_)/)
+def_intern('rsock_intern_so_optname',  /\ASO_/, "SO_")
+def_intern('rsock_intern_ip_optname',  /\AIP_/, "IP_")
+def_intern('rsock_intern_ipv6_optname',  /\AIPV6_/, "IPV6_")
+def_intern('rsock_intern_tcp_optname',  /\ATCP_/, "TCP_")
+def_intern('rsock_intern_udp_optname',  /\AUDP_/, "UDP_")
+def_intern('rsock_intern_scm_optname',  /\ASCM_/, "SCM_")
+def_intern('rsock_intern_local_optname',  /\ALOCAL_/, "LOCAL_")
+
+result = ERB.new(<<'EOS', nil, '%').result(binding)
+/* autogenerated file */
+
+<%= INTERN_DEFS.map {|vardef, gen_hash, decl, func| vardef }.join("\n") %>
+
+static void
+init_constants(void)
+{
+    /* for rdoc */
+    /* rb_cSocket = rb_define_class("Socket", rb_cBasicSocket); */
+    /* rb_mSockConst = rb_define_module_under(rb_cSocket, "Constants"); */
+
+<%= gen_const_defs %>
+<%= INTERN_DEFS.map {|vardef, gen_hash, decl, func| gen_hash }.join("\n") %>
+}
+
+<%= NAME_TO_INT_DEFS.map {|decl, func| func }.join("\n") %>
+
+<%= INTERN_DEFS.map {|vardef, gen_hash, decl, func| func }.join("\n") %>
+
+EOS
+
+header_result = ERB.new(<<'EOS', nil, '%').result(binding)
+/* autogenerated file */
+<%= gen_const_decls %>
+<%= NAME_TO_INT_DEFS.map {|decl, func| decl }.join("\n") %>
+<%= INTERN_DEFS.map {|vardef, gen_hash, decl, func| decl }.join("\n") %>
+EOS
+
+if opt_H
+  File.open(opt_H, 'w') {|f|
+    f << header_result
+  }
+else
+  result = header_result + result
+end
+
+if opt_o
+  File.open(opt_o, 'w') {|f|
+    f << result
+  }
+else
+  $stdout << result
 end
 
 __END__
@@ -27,8 +321,12 @@ SOCK_RDM
 SOCK_SEQPACKET
 SOCK_PACKET
 
+AF_UNSPEC
+PF_UNSPEC
 AF_INET
 PF_INET
+AF_INET6
+PF_INET6
 AF_UNIX
 PF_UNIX
 AF_AX25
@@ -37,8 +335,6 @@ AF_IPX
 PF_IPX
 AF_APPLETALK
 PF_APPLETALK
-AF_UNSPEC
-PF_UNSPEC
 AF_LOCAL
 PF_LOCAL
 AF_IMPLINK
@@ -97,6 +393,8 @@ AF_NETGRAPH
 PF_NETGRAPH
 AF_MAX
 PF_MAX
+AF_PACKET
+PF_PACKET
 
 AF_E164
 PF_XTP
@@ -119,6 +417,14 @@ MSG_SEND
 MSG_HAVEMORE
 MSG_RCVMORE
 MSG_COMPAT
+MSG_PROXY
+MSG_FIN
+MSG_SYN
+MSG_CONFIRM
+MSG_RST
+MSG_ERRQUEUE
+MSG_NOSIGNAL
+MSG_MORE
 
 SOL_SOCKET
 SOL_IP
@@ -178,6 +484,14 @@ IP_RECVOPTS
 IP_RECVRETOPTS
 IP_RECVDSTADDR
 IP_RETOPTS
+IP_MINTTL
+IP_DONTFRAG
+IP_SENDSRCADDR
+IP_ONESBCAST
+IP_RECVTTL
+IP_RECVIF
+IP_RECVSLLA
+IP_PORTRANGE
 IP_MULTICAST_IF
 IP_MULTICAST_TTL
 IP_MULTICAST_LOOP
@@ -186,6 +500,35 @@ IP_DROP_MEMBERSHIP
 IP_DEFAULT_MULTICAST_TTL
 IP_DEFAULT_MULTICAST_LOOP
 IP_MAX_MEMBERSHIPS
+IP_ROUTER_ALERT
+IP_PKTINFO
+IP_PKTOPTIONS
+IP_MTU_DISCOVER
+IP_RECVERR
+IP_RECVTOS
+IP_MTU
+IP_FREEBIND
+IP_IPSEC_POLICY
+IP_XFRM_POLICY
+IP_PASSSEC
+IP_PMTUDISC_DONT
+IP_PMTUDISC_WANT
+IP_PMTUDISC_DO
+IP_UNBLOCK_SOURCE
+IP_BLOCK_SOURCE
+IP_ADD_SOURCE_MEMBERSHIP
+IP_DROP_SOURCE_MEMBERSHIP
+IP_MSFILTER
+
+MCAST_JOIN_GROUP
+MCAST_BLOCK_SOURCE
+MCAST_UNBLOCK_SOURCE
+MCAST_LEAVE_GROUP
+MCAST_JOIN_SOURCE_GROUP
+MCAST_LEAVE_SOURCE_GROUP
+MCAST_MSFILTER
+MCAST_EXCLUDE
+MCAST_INCLUDE
 
 SO_DEBUG
 SO_REUSEADDR
@@ -224,6 +567,11 @@ SO_ATTACH_FILTER
 SO_DETACH_FILTER
 SO_PEERNAME
 SO_TIMESTAMP
+SO_TIMESTAMPNS
+SO_BINTIME
+SO_RECVUCRED
+SO_MAC_EXEMPT
+SO_ALLZONES
 
 SOPRI_INTERACTIVE
 SOPRI_NORMAL
@@ -233,6 +581,21 @@ IPX_TYPE
 
 TCP_NODELAY
 TCP_MAXSEG
+TCP_CORK
+TCP_DEFER_ACCEPT
+TCP_INFO
+TCP_KEEPCNT
+TCP_KEEPIDLE
+TCP_KEEPINTVL
+TCP_LINGER2
+TCP_MD5SIG
+TCP_NOOPT
+TCP_NOPUSH
+TCP_QUICKACK
+TCP_SYNCNT
+TCP_WINDOW_CLAMP
+
+UDP_CORK
 
 EAI_ADDRFAMILY
 EAI_AGAIN
@@ -303,3 +666,18 @@ IPV6_USE_MIN_MTU
 
 INET_ADDRSTRLEN
 INET6_ADDRSTRLEN
+IFNAMSIZ
+
+SOMAXCONN
+
+SCM_RIGHTS
+SCM_TIMESTAMP
+SCM_TIMESTAMPNS
+SCM_BINTIME
+SCM_CREDENTIALS
+SCM_CREDS
+SCM_UCRED
+
+LOCAL_PEERCRED
+LOCAL_CREDS
+LOCAL_CONNWAIT

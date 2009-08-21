@@ -19,6 +19,8 @@ TkPackage.require('BLT')
 module Tk
   module BLT
     TkComm::TkExtlibAutoloadModule.unshift(self)
+    # Require autoload-symbols which is a same name as widget classname.
+    # Those are used at  TkComm._genobj_for_tkwidget method.
 
     extend TkCore
 
@@ -26,14 +28,14 @@ module Tk
     PATCH_LEVEL = tk_call('set', 'blt_patchLevel')
 
     begin
-      lib = INTERP._invoke('set', 'blt_library')
+      lib = TkCore::INTERP._invoke('set', 'blt_library')
     rescue
       lib = ''
     end
     LIBRARY  = TkVarAccess.new('blt_library', lib)
 
     begin
-      lib = INTERP._invoke('set', 'blt_libPath')
+      lib = TkCore::INTERP._invoke('set', 'blt_libPath')
     rescue
       lib = ''
     end

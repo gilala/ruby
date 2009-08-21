@@ -48,6 +48,8 @@ module DL
     def wrap_arg(arg, ty, funcs, &block)
         funcs ||= []
         case arg
+        when nil
+          return 0
         when CPtr
           return arg.to_i
         when IO
@@ -61,6 +63,8 @@ module DL
           if( block )
             arg.bind_at_call(&block)
             funcs.push(arg)
+          elsif !arg.bound?
+            raise(RuntimeError, "block must be given.")
           end
           return arg.to_i
         when String

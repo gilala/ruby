@@ -23,6 +23,9 @@
 #include <ocidl.h>
 #include <olectl.h>
 #include <ole2.h>
+#if defined(HAVE_TYPE_IMULTILANGUAGE2) || defined(HAVE_TYPE_IMULTILANGUAGE)
+#include <mlang.h>
+#endif
 #include <stdlib.h>
 #include <math.h>
 #ifdef HAVE_STDARG_PROTOTYPES
@@ -81,6 +84,15 @@
 #define V_UINTREF(X) V_UNION(X, puintVal)
 #endif
 
+/*
+ * unfortunately IID_IMultiLanguage2 is not included in any libXXX.a 
+ * in Cygwin(mingw32).
+ */
+#if defined(__CYGWIN__) ||  defined(__MINGW32__)
+#undef IID_IMultiLanguage2
+const IID IID_IMultiLanguage2 = {0xDCCFC164, 0x2B38, 0x11d2, {0xB7, 0xEC, 0x00, 0xC0, 0x4F, 0x8F, 0x5D, 0x9A}};
+#endif
+
 #define OLE_RELEASE(X) (X) ? ((X)->lpVtbl->Release(X)) : 0
 
 #define OLE_ADDREF(X) (X) ? ((X)->lpVtbl->AddRef(X)) : 0
@@ -118,7 +130,7 @@
 
 #define WC2VSTR(x) ole_wc2vstr((x), TRUE)
 
-#define WIN32OLE_VERSION "1.3.1"
+#define WIN32OLE_VERSION "1.4.1"
 
 typedef HRESULT (STDAPICALLTYPE FNCOCREATEINSTANCEEX)
     (REFCLSID, IUnknown*, DWORD, COSERVERINFO*, DWORD, MULTI_QI*);
@@ -208,6 +220,14 @@ static IMessageFilterVtbl message_filter;
 static IMessageFilter imessage_filter = { &message_filter };
 static IMessageFilter* previous_filter;
 
+#if defined(HAVE_TYPE_IMULTILANGUAGE2)
+static IMultiLanguage2 *pIMultiLanguage = NULL;
+#elif defined(HAVE_TYPE_IMULTILANGUAGE)
+static IMultiLanguage *pIMultiLanguage = NULL;
+#else
+#define pIMultiLanguage NULL /* dummy */
+#endif
+
 struct oledata {
     IDispatch *pDispatch;
 };
@@ -258,16 +278,15 @@ static HRESULT ( STDMETHODCALLTYPE GetTypeInfo )(IDispatch __RPC_FAR * This, UIN
 static HRESULT ( STDMETHODCALLTYPE GetIDsOfNames )(IDispatch __RPC_FAR * This, REFIID riid, LPOLESTR __RPC_FAR *rgszNames, UINT cNames, LCID lcid, DISPID __RPC_FAR *rgDispId);
 static HRESULT ( STDMETHODCALLTYPE Invoke )( IDispatch __RPC_FAR * This, DISPID dispIdMember, REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS __RPC_FAR *pDispParams, VARIANT __RPC_FAR *pVarResult, EXCEPINFO __RPC_FAR *pExcepInfo, UINT __RPC_FAR *puArgErr);
 static IDispatch* val2dispatch(VALUE val);
-static void time2d(int hh, int mm, int ss, double *pv);
-static void d2time(double v, int *hh, int *mm, int *ss);
-static void civil2jd(int y, int m, int d, long *jd);
-static void jd2civil(long day, int *yy, int *mm, int *dd);
-static void double2time(double v, int *y, int *m, int *d, int *hh, int *mm, int *ss);
-static double time_object2date(VALUE tmobj);
-static VALUE date2time_str(double date);
+static double rbtime2vtdate(VALUE tmobj);
+static VALUE vtdate2rbtime(double date);
 static rb_encoding *ole_cp2encoding(UINT cp);
 static UINT ole_encoding2cp(rb_encoding *enc);
-static UINT ole_init_cp();
+NORETURN(static void failed_load_conv51932(void));
+#ifndef pIMultiLanguage
+static void load_conv_function51932(void);
+#endif
+static UINT ole_init_cp(void);
 static char *ole_wc2mb(LPWSTR pw);
 static VALUE ole_hresult2msg(HRESULT hr);
 static void ole_freeexceptinfo(EXCEPINFO *pExInfo);
@@ -767,126 +786,41 @@ val2dispatch(VALUE val)
     return &pdisp->dispatch;
 }
 
-static void
-time2d(int hh, int mm, int ss, double *pv)
-{
-    *pv =  (hh * 60.0 * 60.0 + mm * 60.0 + ss) / 86400.0;
-}
-
-static void
-d2time(double v, int *hh, int *mm, int *ss)
-{
-    double d_hh, d_mm, d_ss;
-    int    i_hh, i_mm, i_ss;
-
-    double d = fabs(v * 86400.0);
-
-    d_hh = d / 3600.0;
-    i_hh = (int)d_hh;
-
-    d = d - i_hh * 3600.0;
-
-    d_mm = d / 60.0;
-    i_mm = (int)d_mm;
-
-    d = d - i_mm * 60.0;
-
-    d_ss = d * 10.0 + 5;
-    
-    i_ss = (int)d_ss / 10;
-
-    if(i_ss == 60) {
-        i_mm += 1;
-        i_ss = 0;
-    }
-
-    if (i_mm == 60) {
-        i_hh += 1;
-        i_mm = 0;
-    }
-    if (i_hh == 24) {
-        i_hh = 0;
-    }
-    
-    *hh = i_hh;
-    *mm = i_mm;
-    *ss = i_ss;
-}
-
-static void
-civil2jd(int y, int m, int d, long *jd)
-{
-    long a, b;
-    if (m <= 2) {
-        y -= 1;
-        m += 12;
-    }
-    a = (long)(y / 100.0);
-    b = 2 - a + (long)(a / 4.0);
-    *jd = (long)(365.25 * (double)(y + 4716))
-         + (long)(30.6001 * (m + 1))
-         + d + b - 1524;
-}
-
-static void
-jd2civil(long day, int *yy, int *mm, int *dd)
-{
-    long x, a, b, c, d, e;
-    x = (long)(((double)day - 1867216.25) / 36524.25);
-    a = day + 1 + x - (long)(x / 4.0);
-    b = a + 1524;
-    c = (long)(((double)b -122.1) /365.25);
-    d = (long)(365.25 * c);
-    e = (long)((double)(b - d) / 30.6001);
-    *dd = b - d - (long)(30.6001 * e);
-    if (e <= 13) {
-        *mm = e - 1;
-        *yy = c - 4716;
-    }
-    else {
-        *mm = e - 13;
-        *yy = c - 4715;
-    }
-}
-
-static void
-double2time(double v, int *y, int *m, int *d, int *hh, int *mm, int *ss)
-{
-    long day;
-    double t;
-
-    day = (long)v;
-    t = v - day;
-    jd2civil(2415019 + day, y, m, d);
-
-    d2time(t, hh, mm, ss);
-}
-
 static double
-time_object2date(VALUE tmobj)
+rbtime2vtdate(VALUE tmobj)
 {
-    long y, m, d, hh, mm, ss;
-    long day;
-    double t;
-    y = FIX2INT(rb_funcall(tmobj, rb_intern("year"), 0));
-    m = FIX2INT(rb_funcall(tmobj, rb_intern("month"), 0));
-    d = FIX2INT(rb_funcall(tmobj, rb_intern("mday"), 0));
-    hh = FIX2INT(rb_funcall(tmobj, rb_intern("hour"), 0));
-    mm = FIX2INT(rb_funcall(tmobj, rb_intern("min"), 0));
-    ss = FIX2INT(rb_funcall(tmobj, rb_intern("sec"), 0));
-    civil2jd(y, m, d, &day);
-    time2d(hh, mm, ss, &t);
-    return t + day - 2415019;
+    SYSTEMTIME st;
+    double t = 0;
+    memset(&st, 0, sizeof(SYSTEMTIME));
+    st.wYear = FIX2INT(rb_funcall(tmobj, rb_intern("year"), 0));
+    st.wMonth = FIX2INT(rb_funcall(tmobj, rb_intern("month"), 0));
+    st.wDay = FIX2INT(rb_funcall(tmobj, rb_intern("mday"), 0));
+    st.wHour = FIX2INT(rb_funcall(tmobj, rb_intern("hour"), 0));
+    st.wMinute = FIX2INT(rb_funcall(tmobj, rb_intern("min"), 0));
+    st.wSecond = FIX2INT(rb_funcall(tmobj, rb_intern("sec"), 0));
+    st.wMilliseconds = FIX2INT(rb_funcall(tmobj, rb_intern("nsec"), 0)) / 1000000;
+    SystemTimeToVariantTime(&st, &t);
+    return t;
 }
 
 static VALUE
-date2time_str(double date)
+vtdate2rbtime(double date)
 {
-    int y, m, d, hh, mm, ss;
-    double2time(date, &y, &m, &d, &hh, &mm, &ss);
-    return rb_sprintf(
-            "%04d/%02d/%02d %02d:%02d:%02d",
-            y, m, d, hh, mm, ss);
+    SYSTEMTIME st;
+    VALUE v;
+    VariantTimeToSystemTime(date, &st);
+
+    v = rb_funcall(rb_cTime, rb_intern("new"), 6,
+		      INT2FIX(st.wYear),
+		      INT2FIX(st.wMonth),
+		      INT2FIX(st.wDay),
+		      INT2FIX(st.wHour),
+		      INT2FIX(st.wMinute),
+		      INT2FIX(st.wSecond));
+    if (st.wMilliseconds > 0) {
+	return rb_funcall(v, rb_intern("+"), 1, rb_float_new((double)(st.wMilliseconds / 1000.0)));
+    }
+    return v;
 }
 
 #define ENC_MACHING_CP(enc,encname,cp) if(strcasecmp(rb_enc_name((enc)),(encname)) == 0) return cp
@@ -956,16 +890,78 @@ static UINT ole_encoding2cp(rb_encoding *enc)
     return CP_ACP;
 }
 
+static void
+failed_load_conv51932(void)
+{
+    rb_raise(eWIN32OLERuntimeError, "fail to load convert function for CP51932");
+}
+
+#ifndef pIMultiLanguage
+static void
+load_conv_function51932(void)
+{
+    HRESULT hr = E_NOINTERFACE;
+    void *p;
+    if (!pIMultiLanguage) {
+#if defined(HAVE_TYPE_IMULTILANGUAGE2)
+	hr = CoCreateInstance(&CLSID_CMultiLanguage, NULL, CLSCTX_INPROC_SERVER,
+		              &IID_IMultiLanguage2, &p);
+#elif defined(HAVE_TYPE_IMULTILANGUAGE)
+	hr = CoCreateInstance(&CLSID_CMultiLanguage, NULL, CLSCTX_INPROC_SERVER,
+		              &IID_IMultiLanguage, &p);
+#endif
+	if (FAILED(hr)) {
+	    failed_load_conv51932();
+	}
+	pIMultiLanguage = p;
+    }
+}
+#else
+#define load_conv_function51932() failed_load_conv51932()
+#endif
+
+#define conv_51932(cp) ((cp) == 51932 && (load_conv_function51932(), 1))
+
+static void
+set_ole_codepage(UINT cp)
+{
+    if (code_page_installed(cp)) {
+        cWIN32OLE_cp = cp;
+    } else {
+        switch(cp) {
+        case CP_ACP:
+        case CP_OEMCP:
+        case CP_MACCP:
+        case CP_THREAD_ACP:
+        case CP_SYMBOL:
+        case CP_UTF7:
+        case CP_UTF8:
+            cWIN32OLE_cp = cp;
+            break;
+        case 51932:
+            cWIN32OLE_cp = cp;
+            load_conv_function51932();
+            break;
+        default:
+            rb_raise(eWIN32OLERuntimeError, "codepage should be WIN32OLE::CP_ACP, WIN32OLE::CP_OEMCP, WIN32OLE::CP_MACCP, WIN32OLE::CP_THREAD_ACP, WIN32OLE::CP_SYMBOL, WIN32OLE::CP_UTF7, WIN32OLE::CP_UTF8, or installed codepage.");
+            break;
+        }
+    }
+    cWIN32OLE_enc = ole_cp2encoding(cWIN32OLE_cp);
+}
+
+
 static UINT
-ole_init_cp()
+ole_init_cp(void)
 {
     UINT cp;
     rb_encoding *encdef;
-    encdef = rb_default_external_encoding();
-    cp = ole_encoding2cp(encdef);
-    if (code_page_installed(cp)) {
-        cWIN32OLE_cp = cp;
+    encdef = rb_default_internal_encoding();
+    if (!encdef) {
+	encdef = rb_default_external_encoding();
     }
+    cp = ole_encoding2cp(encdef);
+    set_ole_codepage(cp);
     return cp;
 }
 
@@ -1015,7 +1011,9 @@ ole_cp2encoding(UINT cp)
 	  case CP_SYMBOL:
 	  case CP_UTF7:
 	  case CP_UTF8:
-	    // nothing ToDo
+	    break;
+	  case 51932:  
+	    load_conv_function51932();
 	    break;
 	  default:
             rb_raise(eWIN32OLERuntimeError, "codepage should be WIN32OLE::CP_ACP, WIN32OLE::CP_OEMCP, WIN32OLE::CP_MACCP, WIN32OLE::CP_THREAD_ACP, WIN32OLE::CP_SYMBOL, WIN32OLE::CP_UTF7, WIN32OLE::CP_UTF8, or installed codepage.");
@@ -1033,8 +1031,26 @@ ole_cp2encoding(UINT cp)
 static char *
 ole_wc2mb(LPWSTR pw)
 {
-    int size;
     LPSTR pm;
+    int size = 0;
+    if (conv_51932(cWIN32OLE_cp)) {
+#ifndef pIMultiLanguage
+	DWORD dw = 0;
+	HRESULT hr = pIMultiLanguage->lpVtbl->ConvertStringFromUnicode(pIMultiLanguage,
+		&dw, cWIN32OLE_cp, pw, NULL, NULL, &size);
+	if (FAILED(hr)) {
+            ole_raise(hr, eWIN32OLERuntimeError, "fail to convert Unicode to CP%d", cWIN32OLE_cp);
+	}
+	pm = ALLOC_N(char, size + 1);
+	hr = pIMultiLanguage->lpVtbl->ConvertStringFromUnicode(pIMultiLanguage,
+		&dw, cWIN32OLE_cp, pw, NULL, pm, &size);
+	if (FAILED(hr)) {
+            ole_raise(hr, eWIN32OLERuntimeError, "fail to convert Unicode to CP%d", cWIN32OLE_cp);
+	}
+	pm[size] = '\0';
+#endif
+        return pm;
+    }
     size = WideCharToMultiByte(cWIN32OLE_cp, 0, pw, -1, NULL, 0, NULL, NULL);
     if (size) {
         pm = ALLOC_N(char, size + 1);    
@@ -1227,15 +1243,17 @@ oleparam_free(struct oleparamdata *pole)
     free(pole);
 }
 
+
 static LPWSTR
 ole_vstr2wc(VALUE vstr)
 {
     rb_encoding *enc;
     int cp;
-    int size;
+    int size = 0;
     LPWSTR pw;
     st_data_t data;
     enc = rb_enc_get(vstr);
+
     if (st_lookup(enc2cp_table, (st_data_t)enc, &data)) {
         cp = data;
     } else {
@@ -1247,23 +1265,62 @@ ole_vstr2wc(VALUE vstr)
             cp == CP_THREAD_ACP ||
             cp == CP_SYMBOL ||
             cp == CP_UTF7 ||
-            cp == CP_UTF8 ) {
+            cp == CP_UTF8 ||
+            cp == 51932) {
             st_insert(enc2cp_table, (st_data_t)enc, (st_data_t)cp);
         } else {
             rb_raise(eWIN32OLERuntimeError, "not installed Windows codepage(%d) according to `%s'", cp, rb_enc_name(enc));
         }
     }
-    size = MultiByteToWideChar(cp, 0, StringValuePtr(vstr), -1, NULL, 0);
-    pw = SysAllocStringLen(NULL, size - 1);
-    MultiByteToWideChar(cp, 0, StringValuePtr(vstr), -1, pw, size);
+    if (conv_51932(cp)) {
+#ifndef pIMultiLanguage
+	DWORD dw = 0;
+	int len = RSTRING_LEN(vstr);
+	HRESULT hr = pIMultiLanguage->lpVtbl->ConvertStringToUnicode(pIMultiLanguage,
+		&dw, cp, RSTRING_PTR(vstr), &len, NULL, &size);
+	if (FAILED(hr)) {
+            ole_raise(hr, eWIN32OLERuntimeError, "fail to convert CP%d to Unicode", cp);
+	}
+	pw = SysAllocStringLen(NULL, size);
+	len = RSTRING_LEN(vstr);
+	hr = pIMultiLanguage->lpVtbl->ConvertStringToUnicode(pIMultiLanguage,
+		&dw, cp, RSTRING_PTR(vstr), &len, pw, &size);
+	if (FAILED(hr)) {
+            ole_raise(hr, eWIN32OLERuntimeError, "fail to convert CP%d to Unicode", cp);
+	}
+#endif
+	return pw;
+    }
+    size = MultiByteToWideChar(cp, 0, RSTRING_PTR(vstr), RSTRING_LEN(vstr), NULL, 0);
+    pw = SysAllocStringLen(NULL, size);
+    MultiByteToWideChar(cp, 0, RSTRING_PTR(vstr), RSTRING_LEN(vstr), pw, size);
     return pw;
 }
 
 static LPWSTR
 ole_mb2wc(char *pm, int len)
 {
-    int size;
+    int size = 0;
     LPWSTR pw;
+
+    if (conv_51932(cWIN32OLE_cp)) {
+#ifndef pIMultiLanguage
+	DWORD dw = 0;
+	int n = len;
+	HRESULT hr = pIMultiLanguage->lpVtbl->ConvertStringToUnicode(pIMultiLanguage,
+		&dw, cWIN32OLE_cp, pm, &n, NULL, &size);
+	if (FAILED(hr)) {
+            ole_raise(hr, eWIN32OLERuntimeError, "fail to convert CP%d to Unicode", cWIN32OLE_cp);
+	}
+	pw = SysAllocStringLen(NULL, size);
+	hr = pIMultiLanguage->lpVtbl->ConvertStringToUnicode(pIMultiLanguage,
+		&dw, cWIN32OLE_cp, pm, &n, pw, &size);
+	if (FAILED(hr)) {
+            ole_raise(hr, eWIN32OLERuntimeError, "fail to convert CP%d to Unicode", cWIN32OLE_cp);
+	}
+#endif
+	return pw;
+    }
     size = MultiByteToWideChar(cWIN32OLE_cp, 0, pm, len, NULL, 0);
     pw = SysAllocStringLen(NULL, size - 1);
     MultiByteToWideChar(cWIN32OLE_cp, 0, pm, len, pw, size);
@@ -1533,7 +1590,7 @@ ole_val2variant(VALUE val, VARIANT *var)
 
     if (rb_obj_is_kind_of(val, rb_cTime)) {
         V_VT(var) = VT_DATE;
-        V_DATE(var) = time_object2date(val);
+        V_DATE(var) = rbtime2vtdate(val);
         return;
     }
     switch (TYPE(val)) {
@@ -2185,7 +2242,7 @@ ole_variant2val(VARIANT *pvar)
         else
             date = V_DATE(pvar);
 
-        obj =  date2time_str(date);
+        obj =  vtdate2rbtime(date);
         break;
     }
     case VT_CY:
@@ -2597,6 +2654,7 @@ fole_s_connect(int argc, VALUE *argv, VALUE self)
     ole_initialize();
 
     rb_scan_args(argc, argv, "1*", &svr_name, &others);
+    Check_SafeStr(svr_name);
     if (rb_safe_level() > 0 && OBJ_TAINTED(svr_name)) {
         rb_raise(rb_eSecurityError, "Insecure Object Connection - %s",
                  StringValuePtr(svr_name));
@@ -2908,34 +2966,20 @@ code_page_installed(UINT cp)
  *  call-seq:
  *     WIN32OLE.codepage = CP
  * 
- *  Sets current codepage.
+ *  Sets current codepage. 
+ *  The WIN32OLE.codepage is initialized according to 
+ *  Encoding.default_internal.
+ *  If Encoding.default_internal is nil then WIN32OLE.codepage
+ *  is initialized according to Encoding.default_external.
+ *
  *     WIN32OLE.codepage = WIN32OLE::CP_UTF8
- *     WIN32OLE.codepage = 20932
+ *     WIN32OLE.codepage = 65001
  */
 static VALUE
 fole_s_set_code_page(VALUE self, VALUE vcp)
 {
     UINT cp = FIX2INT(vcp);
-
-    if (code_page_installed(cp)) {
-        cWIN32OLE_cp = cp;
-    } else {
-        switch(cp) {
-        case CP_ACP:
-        case CP_OEMCP:
-        case CP_MACCP:
-        case CP_THREAD_ACP:
-        case CP_SYMBOL:
-        case CP_UTF7:
-        case CP_UTF8:
-            cWIN32OLE_cp = cp;
-            break;
-        default:
-            rb_raise(eWIN32OLERuntimeError, "codepage should be WIN32OLE::CP_ACP, WIN32OLE::CP_OEMCP, WIN32OLE::CP_MACCP, WIN32OLE::CP_THREAD_ACP, WIN32OLE::CP_SYMBOL, WIN32OLE::CP_UTF7, WIN32OLE::CP_UTF8, or installed codepage.");
-            break;
-        }
-    }
-    cWIN32OLE_enc = ole_cp2encoding(cWIN32OLE_cp);
+    set_ole_codepage(cp);
     /*
      * Should this method return old codepage?
      */
@@ -3094,16 +3138,17 @@ fole_initialize(int argc, VALUE *argv, VALUE self)
     OLECHAR *pBuf;
     IDispatch *pDispatch;
     void *p;
-
     rb_secure(4);
     rb_call_super(0, 0);
     rb_scan_args(argc, argv, "11*", &svr_name, &host, &others);
 
+    Check_SafeStr(svr_name);
     if (rb_safe_level() > 0 && OBJ_TAINTED(svr_name)) {
         rb_raise(rb_eSecurityError, "Insecure Object Creation - %s",
                  StringValuePtr(svr_name));
     }
     if (!NIL_P(host)) {
+	Check_SafeStr(host);
         if (rb_safe_level() > 0 && OBJ_TAINTED(host)) {
             rb_raise(rb_eSecurityError, "Insecure Object Creation - %s",
                      StringValuePtr(svr_name));
@@ -5121,7 +5166,8 @@ foletypelib_guid(VALUE self)
 static VALUE
 foletypelib_name(VALUE self)
 {
-    return rb_ivar_get(self, rb_intern("name"));
+    VALUE name = rb_ivar_get(self, rb_intern("name"));
+    return rb_enc_str_new(StringValuePtr(name), strlen(StringValuePtr(name)), cWIN32OLE_enc);
 }
 
 /*
@@ -7542,11 +7588,13 @@ static VALUE
 rescue_callback(VALUE arg)
 {
     
+    VALUE error;
     VALUE e = rb_errinfo();
     VALUE bt = rb_funcall(e, rb_intern("backtrace"), 0);
     VALUE msg = rb_funcall(e, rb_intern("message"), 0);
     bt = rb_ary_entry(bt, 0);
-    fprintf(stdout, "%s: %s (%s)\n", StringValuePtr(bt), StringValuePtr(msg), rb_obj_classname(e));
+    error = rb_sprintf("%s: %s (%s)\n", StringValuePtr(bt), StringValuePtr(msg), rb_obj_classname(e));
+    rb_write_error(StringValuePtr(error));
     rb_backtrace();
     ruby_finalize();
     exit(-1);
@@ -8001,7 +8049,11 @@ find_default_source(VALUE ole, IID *piid, ITypeInfo **ppTypeInfo)
 static void
 ole_event_free(struct oleeventdata *poleev)
 {
-    OLE_FREE(poleev->pConnectionPoint);
+    if (poleev->pConnectionPoint) {
+        poleev->pConnectionPoint->lpVtbl->Unadvise(poleev->pConnectionPoint, poleev->dwCookie);
+        OLE_RELEASE(poleev->pConnectionPoint);
+        poleev->pConnectionPoint = NULL;
+    }
     free(poleev);
 }
 
@@ -8114,6 +8166,7 @@ fev_initialize(int argc, VALUE *argv, VALUE self)
     ev_advise(argc, argv, self);
     evs_push(self);
     rb_ivar_set(self, id_events, rb_ary_new());
+    fev_set_handler(self, Qnil);
     return self;
 }
 
@@ -8493,6 +8546,26 @@ folevariant_initialize(VALUE self, VALUE args)
     }
     VariantInit(&var);
     val = rb_ary_entry(args, 0);
+
+    if(!rb_obj_is_kind_of(val, cWIN32OLE) && 
+       !rb_obj_is_kind_of(val, cWIN32OLE_VARIANT) &&
+       !rb_obj_is_kind_of(val, rb_cTime)) {
+	switch (TYPE(val)) {
+	case T_ARRAY:
+	case T_STRING:
+	case T_FIXNUM:
+	case T_BIGNUM:
+	case T_FLOAT:
+	case T_TRUE:
+	case T_FALSE:
+	case T_NIL:
+	    break;
+	default:
+	    rb_raise(rb_eTypeError, "can not convert WIN32OLE_VARIANT from type %s",
+		     rb_obj_classname(val));
+	}
+    }
+
     Data_Get_Struct(self, struct olevariantdata, pvar);
     if (len == 1) {
         ole_val2variant(val, &(pvar->var));
@@ -9030,5 +9103,4 @@ Init_win32ole()
     init_enc2cp();
     atexit((void (*)(void))free_enc2cp);
     ole_init_cp();
-    cWIN32OLE_enc = ole_cp2encoding(cWIN32OLE_cp);
 }
