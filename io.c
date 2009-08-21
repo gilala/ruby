@@ -4407,39 +4407,7 @@ struct sysopen_struct {
     VALUE fname;
     int oflags;
     mode_t perm;
-#ifdef _WIN32
-    int wchar;
-#endif
 };
-
-#ifdef _WIN32
-static rb_encoding *
-w32_utf16(void)
-{
-    static rb_encoding *utf16 = (rb_encoding *)-1;
-    if (utf16 == (rb_encoding *)-1) {
-	utf16 = rb_enc_find("UTF-16LE");
-	if (utf16 == rb_ascii8bit_encoding())
-	    utf16 = NULL;
-    }
-    return utf16;
-}
-
-static int
-w32_conv_to_utf16(volatile VALUE *strp)
-{
-    rb_encoding *utf16 = w32_utf16();
-    if (utf16) {
-	VALUE wstr = rb_str_encode(*strp, rb_enc_from_encoding(utf16), 0, Qnil);
-	rb_enc_str_buf_cat(wstr, "", 1, utf16); /* workaround */
-	*strp = wstr;
-	return 1;
-    }
-    else {
-	return 0;
-    }
-}
-#endif
 
 static VALUE
 sysopen_func(void *ptr)
@@ -4447,10 +4415,10 @@ sysopen_func(void *ptr)
     const struct sysopen_struct *data = ptr;
     const char *fname = RSTRING_PTR(data->fname); 
 #ifdef _WIN32
-    if (data->wchar)
-	return (VALUE)rb_w32_wopen((WCHAR *)fname, data->oflags, data->perm);
-#endif
+    return (VALUE)rb_w32_wopen((WCHAR *)fname, data->oflags, data->perm);
+#else
     return (VALUE)open(fname, data->oflags, data->perm);
+#endif
 }
 
 static inline int
@@ -4468,14 +4436,9 @@ rb_sysopen(VALUE fname, int oflags, mode_t perm)
 #ifdef O_BINARY
     oflags |= O_BINARY;
 #endif
-    data.fname = fname;
+    data.fname = rb_str_conv_for_path(fname);
     data.oflags = oflags;
     data.perm = perm;
-#ifdef _WIN32
-    if ((data.wchar = w32_conv_to_utf16(&data.fname)) != 0) {
-	OBJ_FREEZE(data.fname);
-    }
-#endif
 
     fd = rb_sysopen_internal(&data);
     if (fd < 0) {

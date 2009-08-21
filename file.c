@@ -142,6 +142,46 @@ rb_get_path(VALUE obj)
     return rb_get_path_check(obj, rb_safe_level());
 }
 
+VALUE
+rb_str_conv_for_path(VALUE path)
+{
+#ifdef _WIN32
+    static rb_encoding *utf16 = (rb_encoding *)-1;
+    VALUE wpath;
+    if (utf16 == (rb_encoding *)-1) {
+	utf16 = rb_enc_find("UTF-16LE");
+	if (utf16 == rb_ascii8bit_encoding())
+	    utf16 = NULL;
+    }
+    if (utf16 && rb_enc_get(path) != rb_ascii8bit_encoding()) {
+	wpath = rb_str_encode(path, rb_enc_from_encoding(utf16), 0, Qnil);
+	rb_enc_str_buf_cat(wpath, "", 1, utf16); /* workaround */
+	return wpath;
+    }
+    else if (RSTRING_LEN(path) > 0) {
+	UINT cp = AreFileApisANSI() ? CP_ACP : CP_OEMCP;
+	int len = MultiByteToWideChar(cp, 0, RSTRING_PTR(path), -1, NULL, 0);
+	WCHAR *tmp;
+	if (len <= 0)
+	    rb_raise(rb_eArgError, "broken pathname");
+	tmp = ALLOCA_N(WCHAR, len);
+	len = MultiByteToWideChar(cp, 0, RSTRING_PTR(path), -1, tmp, len);
+	if (len <= 0)
+	    rb_raise(rb_eArgError, "broken pathname");
+	wpath = rb_str_new((char *)tmp, len * sizeof(WCHAR));
+	OBJ_INFECT(wpath, path);
+	return wpath;
+    }
+    else
+	return path;
+#elif defined __APPLE__
+    return rb_str_encode(path, rb_enc_from_encoding(rb_filesystem_encoding()),
+			 0, Qnil);
+#else
+    return path;
+#endif
+}
+
 static long
 apply2files(void (*func)(const char *, void *), VALUE vargs, void *arg)
 {

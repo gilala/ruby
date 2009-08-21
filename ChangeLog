@@ -1,8 +1,14 @@
-Thu Sep 25 15:16:48 2008  NAKAMURA Usaku  <usa@ruby-lang.org>
+Fri Aug 21 17:12:39 2009  NAKAMURA Usaku  <usa@ruby-lang.org>
 
-	* transcode.c (rb_transcode_convertible): follow changes.
+	* file.c, include/ruby/intern.h (rb_str_conv_for_path): new function
+	  to convert encoding for pathname.
 
-	* win32/win32.c (rb_w32_parse_cmdline, rb_w32_write_console): ditto.
+	* io.c (rb_sysopen): use above function.
+
+	* dir.c (dir_chdir, dir_s_chroot, dir_s_mkdir, dir_s_rmdir): ditto.
+
+	* win32/win32.c, include/ruby/win32.h (rb_w32_wmkdir): new function
+	  to make directory with WCHAR pathname.
 
 Fri Aug 21 15:13:08 2009  NARUSE, Yui  <naruse@ruby-lang.org>
 

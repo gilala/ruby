@@ -718,7 +718,12 @@ dir_close(VALUE dir)
 static void
 dir_chdir(VALUE path)
 {
+    path = rb_str_conv_for_path(path);
+#ifdef _WIN32
+    if (_wchdir((WCHAR *)RSTRING_PTR(path)) < 0)
+#else
     if (chdir(RSTRING_PTR(path)) < 0)
+#endif
 	rb_sys_fail(RSTRING_PTR(path));
 }
 
@@ -883,6 +888,7 @@ dir_s_chroot(VALUE dir, VALUE path)
 {
     check_dirname(&path);
 
+    path = rb_str_conv_for_path(path);
     if (chroot(RSTRING_PTR(path)) == -1)
 	rb_sys_fail(RSTRING_PTR(path));
 
@@ -919,7 +925,12 @@ dir_s_mkdir(int argc, VALUE *argv, VALUE obj)
     }
 
     check_dirname(&path);
+    path = rb_str_conv_for_path(path);
+#ifdef _WIN32
+    if (rb_w32_wmkdir((WCHAR *)RSTRING_PTR(path), mode) == -1)
+#else
     if (mkdir(RSTRING_PTR(path), mode) == -1)
+#endif
 	rb_sys_fail(RSTRING_PTR(path));
 
     return INT2FIX(0);
@@ -938,7 +949,12 @@ static VALUE
 dir_s_rmdir(VALUE obj, VALUE dir)
 {
     check_dirname(&dir);
+    dir = rb_str_conv_for_path(dir);
+#ifdef _WIN32
+    if (_wrmdir((WCHAR *)RSTRING_PTR(dir)) < 0)
+#else
     if (rmdir(RSTRING_PTR(dir)) < 0)
+#endif
 	rb_sys_fail(RSTRING_PTR(dir));
 
     return INT2FIX(0);

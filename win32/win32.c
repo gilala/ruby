@@ -5163,6 +5163,24 @@ rb_w32_utime(const char *path, const struct utimbuf *times)
 }
 
 int
+rb_w32_wmkdir(const WCHAR *path, int mode)
+{
+    int ret = -1;
+    RUBY_CRITICAL(do {
+	if (CreateDirectoryW(path, NULL) == FALSE) {
+	    errno = map_errno(GetLastError());
+	    break;
+	}
+	if (_wchmod(path, mode) == -1) {
+	    RemoveDirectoryW(path);
+	    break;
+	}
+	ret = 0;
+    } while (0));
+    return ret;
+}
+
+int
 rb_w32_mkdir(const char *path, int mode)
 {
     int ret = -1;
