@@ -175,8 +175,12 @@ rb_str_conv_for_path(VALUE path)
     else
 	return path;
 #elif defined __APPLE__
-    return rb_str_encode(path, rb_enc_from_encoding(rb_filesystem_encoding()),
-			 0, Qnil);
+    rb_encoding *enc = rb_enc_get(path);
+    rb_encoding *fenc = rb_filesystem_encoding();
+    if (enc != fenc && enc != rb_ascii8bit_encoding())
+	return rb_str_encode(path, rb_enc_from_encoding(fenc), 0, Qnil);
+    else
+	return path;
 #else
     return path;
 #endif
