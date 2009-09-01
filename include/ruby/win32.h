@@ -262,7 +262,9 @@ extern void   rb_w32_free_environ(char **);
 extern int    rb_w32_map_errno(DWORD);
 
 extern int chown(const char *, int, int);
+extern int rb_w32_wchown(const WCHAR *, int, int);
 extern int link(const char *, const char *);
+extern int rb_w32_wlink(const WCHAR *, const WCHAR *);
 extern int gettimeofday(struct timeval *, struct timezone *);
 extern rb_pid_t waitpid (rb_pid_t, int *, int);
 extern rb_pid_t rb_w32_spawn(int, const char *, const char*);
@@ -278,7 +280,9 @@ extern int rb_w32_wmkdir(const WCHAR *, int);
 extern int rb_w32_mkdir(const char *, int);
 extern int rb_w32_rmdir(const char *);
 extern int rb_w32_unlink(const char *);
+extern int rb_w32_wunlink(const WCHAR *);
 extern int rb_w32_stati64(const char *, struct stati64 *);
+extern int rb_w32_wstati64(const WCHAR *, struct stati64 *);
 
 #ifdef __BORLANDC__
 extern int rb_w32_fstati64(int, struct stati64 *);
@@ -559,6 +563,7 @@ int  rb_w32_pipe(int[2]);
 size_t rb_w32_read(int, void *, size_t);
 size_t rb_w32_write(int, const void *, size_t);
 int  rb_w32_utime(const char *, const struct utimbuf *);
+int  rb_w32_wutime(const WCHAR *, const struct utimbuf *);
 long rb_w32_write_console(unsigned long, int);
 int  WINAPI rb_w32_Sleep(unsigned long msec);
 int  rb_w32_wait_events_blocking(HANDLE *events, int num, DWORD timeout);

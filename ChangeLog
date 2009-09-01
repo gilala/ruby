@@ -1,3 +1,27 @@
+Tue Sep  1 17:24:05 2009  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* win32/win32.c (rb_w32_opendir, link, rb_w32_stati64, rb_w32_utime,
+	  rb_w32_unlink): use WCHAR path internally.
+
+	* win32/win32.c, include/ruby/win32.h (rb_w32_wchown, rb_w32_wlink,
+	  rb_w32_wstati64, rb_w32_wutime, rb_w32_wunlink): new functions those
+	  accept WCHAR path.
+
+	* file.c (rb_stat, eaccess, access_internal, rb_file_s_ftype,
+	  chmod_internal, rb_file_chmod, rb_file_chown, utime_internal,
+	  rb_file_s_link, unlink_internal, rb_file_s_rename): use WCHAR version
+	  runtime functions on Win32.
+
+	* file.c (rb_str_conv_for_path): guarantee that the return path always
+	  ended with NUL charcter.
+
+	* file.c (apply2files, rb_stat, rb_file_s_lstat, rb_file_symlink_p,
+	  rb_file_readable_p, rb_file_writable_p, rb_file_executable_p,
+	  check3rdbyte, rb_file_identical_p, rb_file_chmod, rb_file_chown,
+	  rb_file_s_link, rb_file_s_symlink, rb_file_s_rename): call
+	  rb_str_conv_for_path() before passing the path to system, and
+	  simple use RSTRING_PTR() instead of StringValueCStr().
+
 Wed Aug 26 13:19:41 2009  NAKAMURA Usaku  <usa@ruby-lang.org>
 
 	* file.c (rb_str_conv_for_path): should check necessity of converting
