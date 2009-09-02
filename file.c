@@ -70,6 +70,29 @@ int flock(int, int);
 #define lstat stat
 #endif
 
+/* define system APIs */
+#ifdef _WIN32
+#define STAT(p, s)	rb_w32_wstati64((WCHAR *)(p), s)
+#define LSTAT(p, s)	rb_w32_wstati64((WCHAR *)(p), s)
+#define ACCESS(p, m)	_waccess((WCHAR *)(p), m)
+#define CHMOD(p, m)	_wchmod((WCHAR *)(p), m)
+#define CHOWN(p, o, g)	rb_w32_wchown((WCHAR *)(p), o, g)
+#define UTIME(p, t)	rb_w32_wutime((WCHAR *)(p), t)
+#define LINK(f, t)	rb_w32_wlink((WCHAR *)(f), (WCHAR *)(t))
+#define UNLINK(p)	rb_w32_wunlink((WCHAR *)(p))
+#define RENAME(f, t)	_wrename((WCHAR *)(f), (WCHAR *)(t))
+#else
+#define STAT(p, s)	stat(p, s)
+#define LSTAT(p, s)	lstat(p, s)
+#define ACCESS(p, m)	access(p, m)
+#define CHMOD(p, m)	chmod(p, m)
+#define CHOWN(p, o, g)	chown(p, o, g)
+#define UTIME(p, t)	utime(p, t)
+#define LINK(f, t)	link(f, t)
+#define UNLINK(p)	unlink(p)
+#define RENAME(f, t)	rename(f, t)
+#endif
+
 #ifdef __BEOS__ /* should not change ID if -1 */
 static int
 be_chown(const char *path, uid_t owner, gid_t group)
@@ -772,11 +795,7 @@ rb_stat(VALUE file, struct stat *st)
     }
     FilePathValue(file);
     file = rb_str_conv_for_path(file);
-#ifdef _WIN32
-    return rb_w32_wstati64((WCHAR *)RSTRING_PTR(file), st);
-#else
-    return stat(RSTRING_PTR(file), st);
-#endif
+    return STAT(RSTRING_PTR(file), st);
 }
 
 #ifdef _WIN32
@@ -925,7 +944,7 @@ rb_file_lstat(VALUE obj)
     GetOpenFile(obj, fptr);
     if (NIL_P(fptr->pathv)) return Qnil;
     path = rb_str_conv_for_path(fptr->pathv);
-    if (lstat(RSTRING_PTR(path), &st) == -1) {
+    if (LSTAT(RSTRING_PTR(path), &st) == -1) {
 	rb_sys_fail_path(fptr->pathv);
     }
     return stat_new(&st);
@@ -981,11 +1000,7 @@ eaccess(const char *path, int mode)
     struct stat st;
     rb_uid_t euid;
 
-#ifdef _WIN32
-    if (_wstat((WCHAR *)path, &st) < 0)
-#else
-    if (stat(path, &st) < 0)
-#endif
+    if (STAT(path, &st) < 0)
 	return -1;
 
     euid = geteuid();
@@ -1015,7 +1030,7 @@ eaccess(const char *path, int mode)
 # if defined(_MSC_VER) || defined(__MINGW32__)
     mode &= ~1;
 # endif
-    return access(path, mode);
+    return ACCESS(path, mode);
 #endif
 }
 #endif
@@ -1023,11 +1038,7 @@ eaccess(const char *path, int mode)
 static inline int
 access_internal(const char *path, int mode)
 {
-#ifdef _WIN32
-    return _waccess((WCHAR *)path, mode);
-#else
-    return access(path, mode);
-#endif
+    return ACCESS(path, mode);
 }
 
 
@@ -1745,11 +1756,7 @@ rb_file_s_ftype(VALUE klass, VALUE fname)
     rb_secure(2);
     FilePathValue(fname);
     fname = rb_str_conv_for_path(fname);
-#ifdef _WIN32
-    if (rb_w32_wstati64((WCHAR *)RSTRING_PTR(fname), &st) == -1)
-#else
-    if (lstat(RSTRING_PTR(fname), &st) == -1)
-#endif
+    if (LSTAT(RSTRING_PTR(fname), &st) == -1)
 	rb_sys_fail(RSTRING_PTR(fname));
 
     return rb_file_ftype(&st);
@@ -1923,11 +1930,7 @@ rb_file_size(VALUE obj)
 static void
 chmod_internal(const char *path, void *mode)
 {
-#ifdef _WIN32
-    if (_wchmod((WCHAR *)path, *(int *)mode) < 0)
-#else
-    if (chmod(path, *(int *)mode) < 0)
-#endif
+    if (CHMOD(path, *(int *)mode) < 0)
 	rb_sys_fail(path);
 }
 
@@ -1992,11 +1995,7 @@ rb_file_chmod(VALUE obj, VALUE vmode)
 #else
     if (NIL_P(fptr->pathv)) return Qnil;
     path = rb_str_conv_for_path(fptr->pathv);
-# ifdef _WIN32
-    if (_wchmod((WCHAR *)RSTRING_PTR(path), mode) == -1)
-# else
-    if (chmod(RSTRING_PTR(path), mode) == -1)
-# endif
+    if (CHMOD(RSTRING_PTR(path), mode) == -1)
 	rb_sys_fail_path(fptr->pathv);
 #endif
 
@@ -2048,11 +2047,7 @@ static void
 chown_internal(const char *path, void *arg)
 {
     struct chown_args *args = arg;
-#ifdef _WIN32
-    if (rb_w32_wchown((WCHAR *)path, args->owner, args->group) < 0)
-#else
     if (chown(path, args->owner, args->group) < 0)
-#endif
 	rb_sys_fail(path);
 }
 
@@ -2128,11 +2123,7 @@ rb_file_chown(VALUE obj, VALUE owner, VALUE group)
 #ifndef HAVE_FCHOWN
     if (NIL_P(fptr->pathv)) return Qnil;
     path = rb_str_conv_for_path(fptr->pathv);
-# ifdef _WIN32
-    if (rb_w32_wchown((WCHAR *)RSTRING_PTR(path), o, g) == -1)
-# else
-    if (chown(RSTRING_PTR(path), o, g) == -1)
-# endif
+    if (CHOWN(RSTRING_PTR(path), o, g) == -1)
 	rb_sys_fail_path(fptr->pathv);
 #else
     if (fchown(fptr->fd, o, g) == -1)
@@ -2292,11 +2283,7 @@ utime_internal(const char *path, void *arg)
         utbuf.modtime = tsp[1].tv_sec;
         utp = &utbuf;
     }
-#ifdef _WIN32
-    if (rb_w32_wutime((WCHAR *)path, utp) < 0)
-#else
-    if (utime(path, utp) < 0)
-#endif
+    if (UTIME(path, utp) < 0)
 	utime_failed(path, tsp, v->atime, v->mtime);
 }
 
@@ -2388,11 +2375,7 @@ rb_file_s_link(VALUE klass, VALUE from, VALUE to)
     from = rb_str_conv_for_path(from);
     to = rb_str_conv_for_path(to);
 
-#ifdef _WIN32
-    if (rb_w32_wlink((WCHAR *)RSTRING_PTR(from), (WCHAR *)RSTRING_PTR(to)) < 0)
-#else
     if (link(RSTRING_PTR(from), RSTRING_PTR(to)) < 0)
-#endif
 	sys_fail2(from, to);
     return INT2FIX(0);
 }
@@ -2479,11 +2462,7 @@ rb_file_s_readlink(VALUE klass, VALUE path)
 static void
 unlink_internal(const char *path, void *arg)
 {
-#ifdef _WIN32
-    if (rb_w32_wunlink((WCHAR *)path) < 0)
-#else
-    if (unlink(path) < 0)
-#endif
+    if (UNLINK(path) < 0)
 	rb_sys_fail(path);
 }
 
@@ -2532,11 +2511,7 @@ rb_file_s_rename(VALUE klass, VALUE from, VALUE to)
 #if defined __CYGWIN__
     errno = 0;
 #endif
-#ifdef _WIN32
-    if (_wrename((WCHAR *)src, (WCHAR *)dst) < 0) {
-#else
-    if (rename(src, dst) < 0) {
-#endif
+    if (RENAME(src, dst) < 0) {
 #if defined DOSISH && !defined _WIN32
 	switch (errno) {
 	  case EEXIST:
@@ -3549,19 +3524,20 @@ rb_file_s_truncate(VALUE klass, VALUE path, VALUE len)
     rb_secure(2);
     pos = NUM2OFFT(len);
     FilePathValue(path);
+    path = rb_str_conv_for_path(path);
 #ifdef HAVE_TRUNCATE
-    if (truncate(StringValueCStr(path), pos) < 0)
+    if (truncate(RSTRING_PTR(path), pos) < 0)
 	rb_sys_fail(RSTRING_PTR(path));
 #else /* defined(HAVE_CHSIZE) */
     {
 	int tmpfd;
 
 #  ifdef _WIN32
-	if ((tmpfd = open(StringValueCStr(path), O_RDWR)) < 0) {
+	if ((tmpfd = rb_w32_wopen((WCHAR *)RSTRING_PTR(path), O_RDWR)) < 0) {
 	    rb_sys_fail(RSTRING_PTR(path));
 	}
 #  else
-	if ((tmpfd = open(StringValueCStr(path), 0)) < 0) {
+	if ((tmpfd = open(RSTRING_PTR(path), 0)) < 0) {
 	    rb_sys_fail(RSTRING_PTR(path));
 	}
 #  endif
@@ -3993,7 +3969,8 @@ rb_stat_init(VALUE obj, VALUE fname)
 
     rb_secure(2);
     FilePathValue(fname);
-    if (stat(StringValueCStr(fname), &st) == -1) {
+    fname = rb_str_conv_for_path(fname);
+    if (STAT(RSTRING_PTR(fname), &st) == -1) {
 	rb_sys_fail(RSTRING_PTR(fname));
     }
     if (DATA_PTR(obj)) {
