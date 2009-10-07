@@ -287,6 +287,7 @@ class TestRegexp < Test::Unit::TestCase
 
   def test_unescape
     assert_raise(ArgumentError) { s = '\\'; /#{ s }/ }
+    assert_equal(/\xFF/n, /#{ s="\\xFF" }/n)
     assert_equal(/\177/, (s = '\177'; /#{ s }/))
     assert_raise(ArgumentError) { s = '\u'; /#{ s }/ }
     assert_raise(ArgumentError) { s = '\u{ ffffffff }'; /#{ s }/ }
@@ -776,5 +777,13 @@ class TestRegexp < Test::Unit::TestCase
     assert_match(/^\u03b9\u0308\u0301$/i, "\u0390")
     assert_nothing_raised { 0x03ffffff.chr("utf-8").size }
     assert_nothing_raised { 0x7fffffff.chr("utf-8").size }
+  end
+
+  def test_matchdata
+    a = "haystack".match(/hay/)
+    b = "haystack".match(/hay/)
+    assert_equal(a, b, '[ruby-core:24748]')
+    h = {a => 42}
+    assert_equal(42, h[b], '[ruby-core:24748]')
   end
 end

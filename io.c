@@ -1046,6 +1046,7 @@ rb_io_tell(VALUE io)
     GetOpenFile(io, fptr);
     pos = io_tell(fptr);
     if (pos < 0 && errno) rb_sys_fail_path(fptr->pathv);
+    pos -= fptr->rbuf_len;
     return OFFT2NUM(pos);
 }
 
@@ -1304,7 +1305,7 @@ rb_io_set_sync(VALUE io, VALUE sync)
  *  operating system actually writes it to disk.
  *
  *  <code>NotImplementedError</code> is raised
- *  if the underlying operating system does not support <em>fsync(2)</em>. 
+ *  if the underlying operating system does not support <em>fsync(2)</em>.
  */
 
 static VALUE
@@ -1333,7 +1334,7 @@ rb_io_fsync(VALUE io)
  *  Immediately writes all buffered data in <em>ios</em> to disk.
  *
  *  <code>NotImplementedError</code> is raised
- *  if the underlying operating system does not support <em>fdatasync(2)</em>. 
+ *  if the underlying operating system does not support <em>fdatasync(2)</em>.
  */
 
 static VALUE
@@ -2279,7 +2280,7 @@ rb_io_getline_fast(rb_io_t *fptr, rb_encoding *enc)
     ENC_CODERANGE_SET(str, cr);
     fptr->lineno++;
     ARGF.last_lineno = fptr->lineno;
-    
+
     return str;
 }
 
@@ -3942,11 +3943,13 @@ rb_io_fmode_modestr(int fmode)
 static int
 io_encname_bom_p(const char *name, long len)
 {
+    static const char bom_prefix[] = "bom|utf-";
+    enum {bom_prefix_len = (int)sizeof(bom_prefix) - 1};
     if (!len) {
 	const char *p = strchr(name, ':');
-	len = p ? p - name : strlen(name);
+	len = p ? (long)(p - name) : (long)strlen(name);
     }
-    return len > 8 && STRNCASECMP(name, "bom|utf-", 8) == 0;
+    return len > bom_prefix_len && STRNCASECMP(name, bom_prefix, bom_prefix_len) == 0;
 }
 
 int
@@ -4413,7 +4416,7 @@ static VALUE
 sysopen_func(void *ptr)
 {
     const struct sysopen_struct *data = ptr;
-    const char *fname = RSTRING_PTR(data->fname); 
+    const char *fname = RSTRING_PTR(data->fname);
 #ifdef _WIN32
     return (VALUE)rb_w32_wopen((WCHAR *)fname, data->oflags, data->perm);
 #else
@@ -5271,17 +5274,19 @@ rb_scan_open_args(int argc, VALUE *argv,
     opt = pop_last_hash(&argc, argv);
     rb_scan_args(argc, argv, "12", &fname, &vmode, &vperm);
     FilePathValue(fname);
-#if defined __APPLE__
+#ifdef __APPLE__
     {
 	static rb_encoding *fs_encoding;
+	static rb_encoding *utf8mac_encoding;
 	rb_encoding *fname_encoding = rb_enc_get(fname);
 	if (!fs_encoding)
 	    fs_encoding = rb_filesystem_encoding();
+	if (!utf8mac_encoding)
+	    utf8mac_encoding = rb_enc_find("UTF8-MAC");
 	if (rb_usascii_encoding() != fname_encoding
 	    && rb_ascii8bit_encoding() != fname_encoding
-#if defined __APPLE__
 	    && rb_utf8_encoding() != fname_encoding
-#endif
+	    && utf8mac_encoding != fname_encoding
 	    && fs_encoding != fname_encoding) {
 	    static VALUE fs_enc;
 	    if (!fs_enc)
@@ -5646,20 +5651,17 @@ io_reopen(VALUE io, VALUE nfile)
     fd = fptr->fd;
     fd2 = orig->fd;
     if (fd != fd2) {
-	if (IS_PREP_STDIO(fptr)) {
-	    /* need to keep stdio objects */
+	if (IS_PREP_STDIO(fptr) || fd <= 2 || !fptr->stdio_file) {
+	    /* need to keep FILE objects of stdin, stdout and stderr */
 	    if (dup2(fd2, fd) < 0)
 		rb_sys_fail_path(orig->pathv);
 	}
 	else {
-            if (fptr->stdio_file)
-                fclose(fptr->stdio_file);
-            else
-                close(fptr->fd);
+            fclose(fptr->stdio_file);
             fptr->stdio_file = 0;
             fptr->fd = -1;
-	    if (dup2(fd2, fd) < 0)
-		rb_sys_fail_path(orig->pathv);
+            if (dup2(fd2, fd) < 0)
+                rb_sys_fail_path(orig->pathv);
             fptr->fd = fd;
 	}
 	rb_thread_fd_close(fd);
@@ -6251,7 +6253,7 @@ rb_io_stdio_file(rb_io_t *fptr)
  *
  *  Returns a new <code>IO</code> object (a stream) for the given
  *  <code>IO</code> object or integer file descriptor and mode
- *  string. See also <code>IO#fileno</code> and
+ *  string. See also <code>IO.sysopen</code> and
  *  <code>IO.for_fd</code>.
  *
  *  === Parameters
@@ -6296,7 +6298,8 @@ rb_io_stdio_file(rb_io_t *fptr)
  *
  *  === Example1
  *
- *     a = IO.new(2,"w")      # '2' is standard error
+ *     fd = IO.sysopen("/dev/tty", "w")
+ *     a = IO.new(fd,"w")
  *     $stderr.puts "Hello"
  *     a.puts "World"
  *
@@ -6306,10 +6309,15 @@ rb_io_stdio_file(rb_io_t *fptr)
  *     World
  *
  *  === Example2
- *     io = IO.new(2, mode: 'w:UTF-16LE', cr_newline: true)
+ *
+ *     require 'fcntl'
+ *
+ *     fd = STDERR.fcntl(Fcntl::F_DUPFD)
+ *     io = IO.new(fd, mode: 'w:UTF-16LE', cr_newline: true)
  *     io.puts "Hello, World!"
  *
- *     io = IO.new(2, mode: 'w', cr_newline: true, external_encoding: Encoding::UTF_16LE)
+ *     fd = STDERR.fcntl(Fcntl::F_DUPFD)
+ *     io = IO.new(fd, mode: 'w', cr_newline: true, external_encoding: Encoding::UTF_16LE)
  *     io.puts "Hello, World!"
  *
  *  both of aboves print "Hello, World!" in UTF-16LE to standard error output with
@@ -6418,6 +6426,7 @@ rb_file_initialize(int argc, VALUE *argv, VALUE io)
     return io;
 }
 
+/* :nodoc: */
 static VALUE
 rb_io_s_new(int argc, VALUE *argv, VALUE klass)
 {
@@ -6486,6 +6495,7 @@ argf_alloc(VALUE klass)
 
 #undef rb_argv
 
+/* :nodoc: */
 static VALUE
 argf_initialize(VALUE argf, VALUE argv)
 {
@@ -6495,6 +6505,7 @@ argf_initialize(VALUE argf, VALUE argv)
     return argf;
 }
 
+/* :nodoc: */
 static VALUE
 argf_initialize_copy(VALUE argf, VALUE orig)
 {
@@ -6508,6 +6519,24 @@ argf_initialize_copy(VALUE argf, VALUE orig)
     return argf;
 }
 
+/*
+ *  call-seq:
+ *     ARGF.lineno = number  => nil
+ *
+ *  Sets the line number of the current file in +ARGF+ to the given +Integer+.
+ *
+ *  +ARGF+ sets the line number automatically as you read data, so normally
+ *  you will not need to set it explicitly. To access the current line number
+ *  use +ARGF.lineno+.
+ *
+ *  For example:
+ *
+ *      ARGF.lineno      #=> 0
+ *      ARGF.readline    #=> "This is line 1\n"
+ *      ARGF.lineno      #=> 1
+ *      ARGF.lineno = 0  #=> nil
+ *      ARGF.lineno      #=> 0
+ */
 static VALUE
 argf_set_lineno(VALUE argf, VALUE val)
 {
@@ -6516,6 +6545,19 @@ argf_set_lineno(VALUE argf, VALUE val)
     return Qnil;
 }
 
+/*
+ *  call-seq:
+ *     ARGF.lineno => Integer
+ *
+ *  Returns the current line number of the current file in +ARGF+. This value
+ *  can be set manually with +ARGF.lineno=+.
+ *
+ *  For example:
+ *
+ *      ARGF.lineno   #=> 0
+ *      ARGF.readline #=> "This is line 1\n"
+ *      ARGF.lineno   #=> 1
+ */
 static VALUE
 argf_lineno(VALUE argf)
 {
@@ -6680,6 +6722,7 @@ static VALUE
 argf_getline(int argc, VALUE *argv, VALUE argf)
 {
     VALUE line;
+    int lineno = ARGF.lineno;
 
   retry:
     if (!next_argv()) return Qnil;
@@ -6700,7 +6743,7 @@ argf_getline(int argc, VALUE *argv, VALUE argf)
 	}
     }
     if (!NIL_P(line)) {
-	ARGF.lineno++;
+	ARGF.lineno = ++lineno;
 	ARGF.last_lineno = ARGF.lineno;
     }
     return line;
@@ -6765,6 +6808,21 @@ rb_f_gets(int argc, VALUE *argv, VALUE recv)
     return rb_funcall2(argf, rb_intern("gets"), argc, argv);
 }
 
+/*
+ *  call-seq:
+ *     ARGF.gets(sep=$/)     => String
+ *     ARGF.gets(limit)      => String
+ *     ARGF.gets(sep, limit) => String
+ *
+ *  Returns the next line from the current file in +ARGF+.
+ *
+ *  By default lines are assumed to be separated by +$/+; to use a different
+ *  character as a separator, supply it as a +String+ for the _sep_ argument.
+ *
+ *  The optional  _limit_ argument specifies how many characters of each line
+ *  to return. By default all characters are returned.
+ *
+ */
 static VALUE
 argf_gets(int argc, VALUE *argv, VALUE argf)
 {
@@ -6823,6 +6881,23 @@ rb_f_readline(int argc, VALUE *argv, VALUE recv)
     return rb_funcall2(argf, rb_intern("readline"), argc, argv);
 }
 
+
+/*
+ *  call-seq:
+ *     ARGF.readline(sep=$/)     => String
+ *     ARGF.readline(limit)      => String
+ *     ARGF.readline(sep, limit) => String
+ *
+ *  Returns the next line from the current file in +ARGF+.
+ *
+ *  By default lines are assumed to be separated by +$/+; to use a different
+ *  character as a separator, supply it as a +String+ for the _sep_ argument.
+ *
+ *  The optional  _limit_ argument specifies how many characters of each line
+ *  to return. By default all characters are returned.
+ *
+ *  An +EOFError+ is raised at the end of the file.
+ */
 static VALUE
 argf_readline(int argc, VALUE *argv, VALUE argf)
 {
@@ -6859,6 +6934,22 @@ rb_f_readlines(int argc, VALUE *argv, VALUE recv)
     return rb_funcall2(argf, rb_intern("readlines"), argc, argv);
 }
 
+/*
+ *  call-seq:
+ *     ARGF.readlines(sep=$/)     => Array
+ *     ARGF.readlines(limit)      => Array
+ *     ARGF.readlines(sep, limit) => Array
+ *
+ *     ARGF.to_a(sep=$/)     => Array
+ *     ARGF.to_a(limit)      => Array
+ *     ARGF.to_a(sep, limit) => Array
+ *
+ *  Reads +ARGF+'s current file in its entirety, returning an +Array+ of its
+ *  lines, one line per element. Lines are assumed to be separated by _sep_.
+ *
+ *     lines = ARGF.readlines
+ *     lines[0]                #=> "This is line one\n"
+ */
 static VALUE
 argf_readlines(int argc, VALUE *argv, VALUE argf)
 {
@@ -8393,6 +8484,22 @@ rb_stdio_set_default_encoding(void)
     rb_io_set_encoding(1, &val, rb_stderr);
 }
 
+/*
+ *  call-seq:
+ *     ARGF.external_encoding   => encoding
+ *
+ *  Returns the external encoding for files read from +ARGF+ as an +Encoding+
+ *  object. The external encoding is the encoding of the text as stored in a
+ *  file. Contrast with +ARGF.internal_encoding+, which is the encoding used
+ *  to represent this text within Ruby.
+ *
+ *  To set the external encoding use +ARGF.set_encoding+.
+ *
+ * For example:
+ *
+ *     ARGF.external_encoding  #=>  #<Encoding:UTF-8>
+ *
+ */
 static VALUE
 argf_external_encoding(VALUE argf)
 {
@@ -8402,6 +8509,19 @@ argf_external_encoding(VALUE argf)
     return rb_io_external_encoding(rb_io_check_io(ARGF.current_file));
 }
 
+/*
+ *  call-seq:
+ *     ARGF.internal_encoding   => encoding
+ *
+ *  Returns the internal encoding for strings read from +ARGF+ as an
+ *  +Encoding+ object.
+ *
+ *  If +ARGF.set_encoding+ has been called with two encoding names, the second
+ *  is returned. Otherwise, if +Encoding.default_external+ has been set, that
+ *  value is returned. Failing that, if a default external encoding was
+ *  specified on the command-line, that value is used. If the encoding is
+ *  unknown, nil is returned.
+ */
 static VALUE
 argf_internal_encoding(VALUE argf)
 {
@@ -8411,6 +8531,37 @@ argf_internal_encoding(VALUE argf)
     return rb_io_internal_encoding(rb_io_check_io(ARGF.current_file));
 }
 
+/*
+ *  call-seq:
+ *     ARGF.set_encoding(ext_enc)                => ARGF
+ *     ARGF.set_encoding("ext_enc:int_enc")      => ARGF
+ *     ARGF.set_encoding(ext_enc, int_enc)       => ARGF
+ *     ARGF.set_encoding("ext_enc:int_enc", opt) => ARGF
+ *     ARGF.set_encoding(ext_enc, int_enc, opt)  => ARGF
+ *
+ *  If single argument is specified, strings read from ARGF are tagged with
+ *  the encoding specified.
+ *
+ *  If two encoding names separated by a colon are given, e.g. "ascii:utf-8",
+ *  the read string is converted from the first encoding (external encoding)
+ *  to the second encoding (internal encoding), then tagged with the second
+ *  encoding.
+ *
+ *  If two arguments are specified, they must be encoding objects or encoding
+ *  names. Again, the first specifies the external encoding; the second
+ *  specifies the internal encoding.
+ *
+ *  If the external encoding and the internal encoding are specified, the
+ *  optional +Hash+ argument can be used to adjust the conversion process. The
+ *  structure of this hash is explained in the +String#encode+ documentation.
+ *
+ *  For example:
+ *
+ *      ARGF.set_encoding('ascii')         # Tag the input as US-ASCII text
+ *      ARGF.set_encoding(Encoding::UTF_8) # Tag the input as UTF-8 text
+ *      ARGF.set_encoding('utf-8','ascii') # Transcode the input from US-ASCII
+ *                                         # to UTF-8.
+ */
 static VALUE
 argf_set_encoding(int argc, VALUE *argv, VALUE argf)
 {
@@ -8425,6 +8576,18 @@ argf_set_encoding(int argc, VALUE *argv, VALUE argf)
     return argf;
 }
 
+/*
+ *  call-seq:
+ *     ARGF.tell  => Integer
+ *     ARGF.pos   => Integer
+ *
+ *  Returns the current offset (in bytes) of the current file in +ARGF+.
+ *
+ *     ARGF.pos    #=> 0
+ *     ARGF.gets   #=> "This is line one\n"
+ *     ARGF.pos    #=> 17
+ *
+ */
 static VALUE
 argf_tell(VALUE argf)
 {
@@ -8435,6 +8598,13 @@ argf_tell(VALUE argf)
     return rb_io_tell(ARGF.current_file);
 }
 
+/*
+ *  call-seq:
+ *     ARGF.seek(amount, whence=SEEK_SET) -> 0
+ *
+ *  Seeks to offset _amount_ (an +Integer+) in the +ARGF+ stream according to
+ *  the value of _whence_. See +IO#seek+ for further details.
+ */
 static VALUE
 argf_seek_m(int argc, VALUE *argv, VALUE argf)
 {
@@ -8445,6 +8615,17 @@ argf_seek_m(int argc, VALUE *argv, VALUE argf)
     return rb_io_seek_m(argc, argv, ARGF.current_file);
 }
 
+/*
+ *  call-seq:
+ *     ARGF.pos = position  => Integer
+ *
+ *  Seeks to the position given by _position_ (in bytes) in +ARGF+.
+ *
+ *  For example:
+ *
+ *      ARGF.pos = 17
+ *      ARGF.gets   #=> "This is line two\n"
+ */
 static VALUE
 argf_set_pos(VALUE argf, VALUE offset)
 {
@@ -8455,6 +8636,18 @@ argf_set_pos(VALUE argf, VALUE offset)
     return rb_io_set_pos(ARGF.current_file, offset);
 }
 
+/*
+ *  call-seq:
+ *     ARGF.rewind   => 0
+ *
+ *  Positions the current file to the beginning of input, resetting
+ *  +ARGF.lineno+ to zero.
+ *
+ *     ARGF.readline   #=> "This is line one\n"
+ *     ARGF.rewind     #=> 0
+ *     ARGF.lineno     #=> 0
+ *     ARGF.readline   #=> "This is line one\n"
+ */
 static VALUE
 argf_rewind(VALUE argf)
 {
@@ -8465,6 +8658,16 @@ argf_rewind(VALUE argf)
     return rb_io_rewind(ARGF.current_file);
 }
 
+/*
+ *  call-seq:
+ *     ARGF.fileno    => fixnum
+ *     ARGF.to_i      => fixnum
+ *
+ *  Returns an integer representing the numeric file descriptor for
+ *  the current file. Raises an +ArgumentError+ if there isn't a current file.
+ *
+ *     ARGF.fileno    #=> 3
+ */
 static VALUE
 argf_fileno(VALUE argf)
 {
@@ -8475,6 +8678,18 @@ argf_fileno(VALUE argf)
     return rb_io_fileno(ARGF.current_file);
 }
 
+/*
+ *  call-seq:
+ *     ARGF.to_io     => IO
+ *
+ *  Returns an +IO+ object representing the current file. This will be a
+ *  +File+ object unless the current file is a stream such as STDIN.
+ *
+ *  For example:
+ *
+ *     ARGF.to_io    #=> #<File:glark.txt>
+ *     ARGF.to_io    #=> #<IO:<STDIN>>
+ */
 static VALUE
 argf_to_io(VALUE argf)
 {
@@ -8482,6 +8697,24 @@ argf_to_io(VALUE argf)
     ARGF_FORWARD(0, 0);
     return ARGF.current_file;
 }
+
+/*
+ *  call-seq:
+ *     ARGF.eof?  => true or false
+ *     ARGF.eof   => true or false
+ *
+ *  Returns true if the current file in +ARGF+ is at end of file, i.e. it has
+ *  no data to read. The stream must be opened for reading or an +IOError+
+ *  will be raised.
+ *
+ *     $ echo "eof" | ruby argf.rb
+ *
+ *     ARGF.eof?                 #=> false
+ *     3.times { ARGF.readchar }
+ *     ARGF.eof?                 #=> false
+ *     ARGF.readchar             #=> "\n"
+ *     ARGF.eof?                 #=> true
+ */
 
 static VALUE
 argf_eof(VALUE argf)
@@ -8497,6 +8730,43 @@ argf_eof(VALUE argf)
     }
     return Qfalse;
 }
+
+/*
+ *  call-seq:
+ *     ARGF.read([length [, buffer]])    => string, buffer, or nil
+ *
+ *  Reads _length_ bytes from ARGF. The files named on the command line
+ *  are concatenated and treated as a single file by this method, so when
+ *  called without arguments the contents of this pseudo file are returned in
+ *  their entirety.
+ *
+ *  _length_ must be a non-negative integer or nil. If it is a positive
+ *  integer, +read+ tries to read at most _length_ bytes. It returns nil
+ *  if an EOF was encountered before anything could be read. Fewer than
+ *  _length_ bytes may be returned if an EOF is encountered during the read.
+ *
+ *  If _length_ is omitted or is _nil_, it reads until EOF. A String is
+ *  returned even if EOF is encountered before any data is read.
+ *
+ *  If _length_ is zero, it returns _""_.
+ *
+ *  If the optional _buffer_ argument is present, it must reference a String,
+ *  which will receive the data.
+ *
+ * For example:
+ *
+ *     $ echo "small" > small.txt
+ *     $ echo "large" > large.txt
+ *     $ ./glark.rb small.txt large.txt
+ *
+ *     ARGF.read      #=> "small\nlarge"
+ *     ARGF.read(200) #=> "small\nlarge"
+ *     ARGF.read(2)   #=> "sm"
+ *     ARGF.read(0)   #=> ""
+ *
+ *  Note that this method behaves like fread() function in C.  If you need the
+ *  behavior like read(2) system call, consider +ARGF.readpartial+.
+ */
 
 static VALUE
 argf_read(int argc, VALUE *argv, VALUE argf)
@@ -8557,6 +8827,34 @@ argf_forward_call(VALUE arg)
     return Qnil;
 }
 
+/*
+ *  call-seq:
+ *     ARGF.readpartial(maxlen)              => string
+ *     ARGF.readpartial(maxlen, outbuf)      => outbuf
+ *
+ *  Reads at most _maxlen_ bytes from the ARGF stream. It blocks only if
+ *  +ARGF+ has no data immediately available. If the optional _outbuf_
+ *  argument is present, it must reference a String, which will receive the
+ *  data. It raises <code>EOFError</code> on end of file.
+ *
+ *  +readpartial+ is designed for streams such as pipes, sockets, and ttys. It
+ *  blocks only when no data is immediately available. This means that it
+ *  blocks only when following all conditions hold:
+ *
+ *  * The buffer in the +IO+ object is empty.
+ *  * The content of the stream is empty.
+ *  * The stream has not reached EOF.
+ *
+ *  When +readpartial+ blocks, it waits for data or EOF. If some data is read,
+ *  +readpartial+ returns with the data. If EOF is reached, readpartial raises
+ *  an +EOFError+.
+ *
+ *  When +readpartial+ doesn't block, it returns or raises immediately.  If
+ *  the buffer is not empty, it returns the data in the buffer. Otherwise, if
+ *  the stream has some content, it returns the data in the stream. If the
+ *  stream reaches EOF an +EOFError+ is raised.
+ */
+
 static VALUE
 argf_readpartial(int argc, VALUE *argv, VALUE argf)
 {
@@ -8598,6 +8896,29 @@ argf_readpartial(int argc, VALUE *argv, VALUE argf)
     return tmp;
 }
 
+/*
+ *  call-seq:
+ *     ARGF.getc  => String or nil
+ *
+ *  Reads the next character from +ARGF+ and returns it as a +String+. Returns
+ *  +nil+ at the end of the stream.
+ *
+ *  +ARGF+ treats the files named on the command line as a single file created
+ *  by concatenating their contents. After returning the last character of the
+ *  first file, it returns the first character of the second file, and so on.
+ *
+ *  For example:
+ *
+ *     $ echo "foo" > file
+ *     $ ruby argf.rb file
+ *
+ *     ARGF.getc  #=> "f"
+ *     ARGF.getc  #=> "o"
+ *     ARGF.getc  #=> "o"
+ *     ARGF.getc  #=> "\n"
+ *     ARGF.getc  #=> nil
+ *     ARGF.getc  #=> nil
+ */
 static VALUE
 argf_getc(VALUE argf)
 {
@@ -8620,6 +8941,24 @@ argf_getc(VALUE argf)
     return ch;
 }
 
+/*
+ *  call-seq:
+ *     ARGF.getbyte  => Fixnum or nil
+ *
+ *  Gets the next 8-bit byte (0..255) from +ARGF+. Returns +nil+ if called at
+ *  the end of the stream.
+ *
+ *  For example:
+ *
+ *     $ echo "foo" > file
+ *     $ ruby argf.rb file
+ *
+ *     ARGF.getbyte #=> 102
+ *     ARGF.getbyte #=> 111
+ *     ARGF.getbyte #=> 111
+ *     ARGF.getbyte #=> 10
+ *     ARGF.getbyte #=> nil
+ */
 static VALUE
 argf_getbyte(VALUE argf)
 {
@@ -8642,6 +8981,24 @@ argf_getbyte(VALUE argf)
     return ch;
 }
 
+/*
+ *  call-seq:
+ *     ARGF.readchar  => String or nil
+ *
+ *  Reads the next character from +ARGF+ and returns it as a +String+. Raises
+ *  an +EOFError+ after the last character of the last file has been read.
+ *
+ *  For example:
+ *
+ *     $ echo "foo" > file
+ *     $ ruby argf.rb file
+ *
+ *     ARGF.readchar  #=> "f"
+ *     ARGF.readchar  #=> "o"
+ *     ARGF.readchar  #=> "o"
+ *     ARGF.readchar  #=> "\n"
+ *     ARGF.readchar  #=> end of file reached (EOFError)
+ */
 static VALUE
 argf_readchar(VALUE argf)
 {
@@ -8664,6 +9021,24 @@ argf_readchar(VALUE argf)
     return ch;
 }
 
+/*
+ *  call-seq:
+ *     ARGF.readbyte  => Fixnum
+ *
+ *  Reads the next 8-bit byte from ARGF and returns it as a +Fixnum+. Raises
+ *  an +EOFError+ after the last byte of the last file has been read.
+ *
+ *  For example:
+ *
+ *     $ echo "foo" > file
+ *     $ ruby argf.rb file
+ *
+ *     ARGF.readbyte  #=> 102
+ *     ARGF.readbyte  #=> 111
+ *     ARGF.readbyte  #=> 111
+ *     ARGF.readbyte  #=> 10
+ *     ARGF.readbyte  #=> end of file reached (EOFError)
+ */
 static VALUE
 argf_readbyte(VALUE argf)
 {
@@ -8677,6 +9052,43 @@ argf_readbyte(VALUE argf)
     return c;
 }
 
+/*
+ *  call-seq:
+ *     ARGF.lines(sep=$/)                      => Enumerator
+ *     ARGF.lines(sep=$/)          {|line| }   => Enumerator
+ *     ARGF.lines(sep=$/,limit)                => Enumerator
+ *     ARGF.lines(sep=$/,limit)    {|line| }   => Enumerator
+ *
+ *     ARGF.each_line(sep=$/)                  => Enumerator
+ *     ARGF.each_line(sep=$/)       {|line| }  => Enumerator
+ *     ARGF.each_line(sep=$/,limit)            => Enumerator
+ *     ARGF.each_line(sep=$/,limit) {|line| }  => Enumerator
+ *     ARGF.each(sep=$/)                       => Enumerator
+ *     ARGF.each(sep=$/)            {|line| }  => Enumerator
+ *     ARGF.each(sep=$/,limit)                 => Enumerator
+ *     ARGF.each(sep=$/,limit)      {|line| }  => Enumerator
+ *
+ *  Returns an enumerator which iterates over each line (separated by _sep_,
+ *  which defaults to your platform's newline character) of each file in
+ *  +ARGV+. If a block is supplied, each line in turn will be yielded to the
+ *  block. The optional _limit_ argument is a +Fixnum+ specifying the maximumn
+ *  length of each line; longer lines will be split according to this limit.
+ *
+ *  This method allows you to treat the files supplied on the command line as
+ *  a single file consisting of the concatenation of each named file. After
+ *  the last line of the first file has been returned, the first line of the
+ *  second file is returned. The +ARGF.filename+ and +ARGF.lineno+ methods can
+ *  be used to determine the filename and line number, respectively, of the
+ *  current line.
+ *
+ *  For example, the following code prints out each line of each named file
+ *  prefixed with its line number, displaying the filename once per file:
+ *
+ *     ARGF.lines do |line|
+ *       puts ARGF.filename if ARGF.lineno == 1
+ *       puts "#{ARGF.lineno}: #{line}"
+ *     end
+ */
 static VALUE
 argf_each_line(int argc, VALUE *argv, VALUE argf)
 {
@@ -8688,6 +9100,29 @@ argf_each_line(int argc, VALUE *argv, VALUE argf)
     }
 }
 
+/*
+ *  call-seq:
+ *     ARGF.bytes                => Enumerator
+ *     ARGF.bytes     {|byte| }  => Enumerator
+ *
+ *     ARGF.each_byte            => Enumerator
+ *     ARGF.each_byte {|byte| }  => Enumerator
+ *
+ *  Returns an enumerator which iterates over each byte of each file in
+ *  +ARGV+. If a block is supplied, each byte in turn will be yielded to the
+ *  block. A byte is returned as a +Fixnum+ in the range 0..255.
+ *
+ *  This method allows you to treat the files supplied on the command line as
+ *  a single file consisting of the concatenation of each named file. After
+ *  the last byte of the first file has been returned, the first byte of the
+ *  second file is returned. The +ARGF.filename+ method can be used to
+ *  determine the filename of the current byte.
+ *
+ * For example:
+ *
+ *     ARGF.bytes.to_a  #=> [35, 32, ... 95, 10]
+ *
+ */
 static VALUE
 argf_each_byte(VALUE argf)
 {
@@ -8699,6 +9134,25 @@ argf_each_byte(VALUE argf)
     }
 }
 
+/*
+ *  call-seq:
+ *     ARGF.chars                 => Enumerator
+ *     ARGF.chars      {|char| }  => Enumerator
+ *
+ *     ARGF.each_char             => Enumerator
+ *     ARGF.each_char  {|char| }  => Enumerator
+ *
+ *  Returns an enumerator which iterates over each character of each file in
+ *  +ARGV+. If a block is supplied, each character in turn will be yielded to
+ *  the block.
+ *
+ *  This method allows you to treat the files supplied on the command line as
+ *  a single file consisting of the concatenation of each named file. After
+ *  the last character of the first file has been returned, the first
+ *  character of the second file is returned. The +ARGF.filename+ method can
+ *  be used to determine the name of the file in which the current character
+ *  appears.
+ */
 static VALUE
 argf_each_char(VALUE argf)
 {
@@ -8710,6 +9164,28 @@ argf_each_char(VALUE argf)
     }
 }
 
+/*
+ *  call-seq:
+ *     ARGF.filename  => String
+ *     ARGF.path      => String
+ *
+ *  Returns the current filename. "-" is returned when the current file is
+ *  STDIN.
+ *
+ *  For example:
+ *
+ *     $ echo "foo" > foo
+ *     $ echo "bar" > bar
+ *     $ echo "glark" > glark
+ *
+ *     $ ruby argf.rb foo bar glark
+ *
+ *     ARGF.filename  #=> "foo"
+ *     ARGF.read(5)   #=> "foo\nb"
+ *     ARGF.filename  #=> "bar"
+ *     ARGF.skip
+ *     ARGF.filename  #=> "glark"
+ */
 static VALUE
 argf_filename(VALUE argf)
 {
@@ -8723,6 +9199,24 @@ argf_filename_getter(ID id, VALUE *var)
     return argf_filename(*var);
 }
 
+/*
+ *  call-seq:
+ *     ARGF.file  => IO or File object
+ *
+ *  Returns the current file as an +IO+ or +File+ object. #<IO:<STDIN>> is
+ *  returned when the current file is STDIN.
+ *
+ *  For example:
+ *
+ *     $ echo "foo" > foo
+ *     $ echo "bar" > bar
+ *
+ *     $ ruby argf.rb foo bar
+ *
+ *     ARGF.file      #=> #<File:foo>
+ *     ARGF.read(5)   #=> "foo\nb"
+ *     ARGF.file      #=> #<File:bar>
+ */
 static VALUE
 argf_file(VALUE argf)
 {
@@ -8730,6 +9224,17 @@ argf_file(VALUE argf)
     return ARGF.current_file;
 }
 
+/*
+ *  call-seq:
+ *     ARGF.binmode  => ARGF
+ *
+ *  Puts +ARGF+ into binary mode. Once a stream is in binary mode, it cannot
+ *  be reset to non-binary mode. This option has the following effects:
+ *
+ *  *  Newline conversion is disabled.
+ *  *  Encoding conversion is disabled.
+ *  *  Content is treated as ASCII-8BIT.
+ */
 static VALUE
 argf_binmode_m(VALUE argf)
 {
@@ -8737,16 +9242,42 @@ argf_binmode_m(VALUE argf)
     next_argv();
     ARGF_FORWARD(0, 0);
     rb_io_ascii8bit_binmode(ARGF.current_file);
-
     return argf;
 }
 
+/*
+ *  call-seq:
+ *     ARGF.binmode?  => true or false
+ *
+ *  Returns true if +ARGF+ is being read in binary mode; false otherwise. (To
+ *  enable binary mode use +ARGF.binmode+.
+ *
+ * For example:
+ *
+ *     ARGF.binmode?  #=> false
+ *     ARGF.binmode
+ *     ARGF.binmode?  #=> true
+ */
 static VALUE
 argf_binmode_p(VALUE argf)
 {
     return ARGF.binmode ? Qtrue : Qfalse;
 }
 
+/*
+ *  call-seq:
+ *     ARGF.skip  => ARGF
+ *
+ *  Sets the current file to the next file in ARGV. If there aren't any more
+ *  files it has no effect.
+ *
+ * For example:
+ *
+ *     $ ruby argf.rb foo bar
+ *     ARGF.filename  #=> "foo"
+ *     ARGF.skip
+ *     ARGF.filename  #=> "bar"
+ */
 static VALUE
 argf_skip(VALUE argf)
 {
@@ -8757,6 +9288,24 @@ argf_skip(VALUE argf)
     return argf;
 }
 
+/*
+ *  call-seq:
+ *     ARGF.close  => ARGF
+ *
+ *  Closes the current file and skips to the next in the stream. Trying to
+ *  close a file that has already been closed causes an +IOError+ to be
+ *  raised.
+ *
+ * For example:
+ *
+ *     $ ruby argf.rb foo bar
+ *
+ *     ARGF.filename  #=> "foo"
+ *     ARGF.close
+ *     ARGF.filename  #=> "bar"
+ *     ARGF.close
+ *     ARGF.close     #=> closed stream (IOError)
+ */
 static VALUE
 argf_close_m(VALUE argf)
 {
@@ -8769,6 +9318,13 @@ argf_close_m(VALUE argf)
     return argf;
 }
 
+/*
+ *  call-seq:
+ *     ARGF.closed?  => true or false
+ *
+ *  Returns _true_ if the current file has been closed; _false_ otherwise. Use
+ *  +ARGF.close+ to actually close the current file.
+ */
 static VALUE
 argf_closed(VALUE argf)
 {
@@ -8777,12 +9333,26 @@ argf_closed(VALUE argf)
     return rb_io_closed(ARGF.current_file);
 }
 
+/*
+ *  call-seq:
+ *     ARGF.to_s  => String
+ *
+ *  Returns "ARGF".
+ */
 static VALUE
 argf_to_s(VALUE argf)
 {
     return rb_str_new2("ARGF");
 }
 
+/*
+ *  call-seq:
+ *     ARGF.inplace_mode  => String
+ *
+ *  Returns the file extension appended to the names of modified files under
+ *  inplace-edit mode. This value can be set using +ARGF.inplace_mode=+ or
+ *  passing the +-i+ switch to the Ruby binary.
+ */
 static VALUE
 argf_inplace_mode_get(VALUE argf)
 {
@@ -8796,6 +9366,26 @@ opt_i_get(ID id, VALUE *var)
     return argf_inplace_mode_get(*var);
 }
 
+/*
+ *  call-seq:
+ *     ARGF.inplace_mode = ext  => ARGF
+ *
+ *  Sets the filename extension for inplace editing mode to the given String.
+ *  Each file being edited has this value appended to its filename. The
+ *  modifed file is saved under this new name.
+ *
+ *  For example:
+ *
+ *      $ ruby argf.rb file.txt
+ *
+ *      ARGF.inplace_mode = '.bak'
+ *      ARGF.lines do |line|
+ *        print line.sub("foo","bar")
+ *      end
+ *
+ * Each line of _file.txt_ has the first occurence of "foo" replaced with
+ * "bar", then the new line is written out to _file.txt.bak_.
+ */
 static VALUE
 argf_inplace_mode_set(VALUE argf, VALUE val)
 {
@@ -8832,6 +9422,20 @@ ruby_set_inplace_mode(const char *suffix)
     if (suffix) ARGF.inplace = strdup(suffix);
 }
 
+/*
+ *  call-seq:
+ *     ARGF.argv  => Array
+ *
+ *  Returns the +ARGV+ Array, which contains the arguments passed to your
+ *  script, one per element.
+ *
+ *  For example:
+ *
+ *      $ ruby argf.rb -v glark.txt
+ *
+ *      ARGF.argv   #=> ["-v", "glark.txt"]
+ *
+ */
 static VALUE
 argf_argv(VALUE argf)
 {
@@ -8849,6 +9453,47 @@ rb_get_argv(void)
 {
     return ARGF.argv;
 }
+
+/*
+ * Document-class:  ARGF
+ *
+ * +ARGF+ is a stream designed for use in scripts that process files given as
+ * command-line arguments, or passed in via STDIN.
+ *
+ * The arguments passed to your script are stored in the +ARGV+ Array, one
+ * argument per element. +ARGF+ assumes that any arguments that aren't
+ * filenames have been removed from +ARGV+. For example:
+ *
+ *     $ ruby argf.rb --verbose file1 file2
+ *
+ *     ARGV  #=> ["--verbose", "file1", "file2"]
+ *     option = ARGV.shift #=> "--verbose"
+ *     ARGV  #=> ["file1", "file2"]
+ *
+ * You can now use +ARGF+ to work with a concatenation of each of these named
+ * files. For instance, +ARGF.read+ will return the contents of _file1_
+ * followed by the contents of _file2_.
+ *
+ * After a file in +ARGV+ has been read, +ARGF+ removes it from the Array.
+ * Thus, after all files have been read +ARGV+ will be empty.
+ *
+ * You can manipulate +ARGV+ yourself to control what +ARGF+ operates on. If
+ * you remove a file from +ARGV+, it is ignored by +ARGF+; if you add files to
+ * +ARGV+, they are treated as if they were named on the command line. For
+ * example:
+ *
+ *     ARGV.replace ["file1"]
+ *     ARGF.readlines # Returns the contents of file1 as an Array
+ *     ARGV           #=> []
+ *     ARGV.replace ["file2", "file3"]
+ *     ARGF.read      # Returns the contents of file2 and file3
+ *
+ * If +ARGV+ is empty, +ARGF+ acts as if it contained STDIN, i.e. the data
+ * piped to your script. For example:
+ *
+ *     $ echo "glark" | ruby -e 'p ARGF.read'
+ *     "glark\n"
+ */
 
 /*
  *  Class <code>IO</code> is the basis for all input and output in Ruby.
@@ -9119,6 +9764,10 @@ Init_IO(void)
     rb_define_global_const("STDOUT", rb_stdout);
     rb_define_global_const("STDERR", rb_stderr);
 
+    /*
+     * Hack to get rdoc to regard ARGF as a class:
+     * rb_cARGF = rb_define_class("ARGF", rb_cObject);
+     */
     rb_cARGF = rb_class_new(rb_cObject);
     rb_set_class_path(rb_cARGF, rb_cObject, "ARGF.class");
     rb_define_alloc_func(rb_cARGF, argf_alloc);
@@ -9198,28 +9847,36 @@ Init_IO(void)
 
     rb_define_method(rb_cFile, "initialize",  rb_file_initialize, -1);
 
+    /* open for reading only */
     rb_file_const("RDONLY", INT2FIX(O_RDONLY));
+    /* open for writing only */
     rb_file_const("WRONLY", INT2FIX(O_WRONLY));
+    /* open for reading and writing */
     rb_file_const("RDWR", INT2FIX(O_RDWR));
+    /* append on each write */
     rb_file_const("APPEND", INT2FIX(O_APPEND));
+    /* create file if it does not exist */
     rb_file_const("CREAT", INT2FIX(O_CREAT));
+    /* error if CREAT and the file exists */
     rb_file_const("EXCL", INT2FIX(O_EXCL));
 #if defined(O_NDELAY) || defined(O_NONBLOCK)
-#   ifdef O_NONBLOCK
+# ifndef O_NONBLOCK
+#   define O_NONBLOCK O_NDELAY
+# endif
+    /* do not block on open or for data to become available */
     rb_file_const("NONBLOCK", INT2FIX(O_NONBLOCK));
-#   else
-    rb_file_const("NONBLOCK", INT2FIX(O_NDELAY));
-#   endif
 #endif
+    /* truncate size to 0 */
     rb_file_const("TRUNC", INT2FIX(O_TRUNC));
 #ifdef O_NOCTTY
+    /* not to make opened IO the controling terminal device */
     rb_file_const("NOCTTY", INT2FIX(O_NOCTTY));
 #endif
-#ifdef O_BINARY
-    rb_file_const("BINARY", INT2FIX(O_BINARY));
-#else
-    rb_file_const("BINARY", INT2FIX(0));
+#ifndef O_BINARY
+# define  O_BINARY 0
 #endif
+    /* disable line code conversion and make ASCII-8BIT */
+    rb_file_const("BINARY", INT2FIX(O_BINARY));
 #ifdef O_SYNC
     rb_file_const("SYNC", INT2FIX(O_SYNC));
 #endif
@@ -9230,9 +9887,11 @@ Init_IO(void)
     rb_file_const("RSYNC", INT2FIX(O_RSYNC));
 #endif
 #ifdef O_NOFOLLOW
+    /* do not follow symlinks */
     rb_file_const("NOFOLLOW", INT2FIX(O_NOFOLLOW)); /* FreeBSD, Linux */
 #endif
 #ifdef O_NOATIME
+    /* do not change atime */
     rb_file_const("NOATIME", INT2FIX(O_NOATIME)); /* Linux */
 #endif
 

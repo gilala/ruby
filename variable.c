@@ -292,7 +292,7 @@ rb_path_to_class(VALUE pathname)
 VALUE
 rb_path2class(const char *path)
 {
-    return rb_path_to_class(rb_usascii_str_new_cstr(path));
+    return rb_path_to_class(rb_str_new_cstr(path));
 }
 
 void
@@ -1023,13 +1023,13 @@ ivar_get(VALUE obj, ID id, int warn)
 VALUE
 rb_ivar_get(VALUE obj, ID id)
 {
-    return ivar_get(obj, id, Qtrue);
+    return ivar_get(obj, id, TRUE);
 }
 
 VALUE
 rb_attr_get(VALUE obj, ID id)
 {
-    return ivar_get(obj, id, Qfalse);
+    return ivar_get(obj, id, FALSE);
 }
 
 VALUE
@@ -1357,17 +1357,32 @@ rb_mod_const_missing(VALUE klass, VALUE name)
     return Qnil;		/* not reached */
 }
 
-static struct st_table *
-check_autoload_table(VALUE av)
+static void
+autoload_mark(void *ptr)
 {
-    Check_Type(av, T_DATA);
-    if (RDATA(av)->dmark != (RUBY_DATA_FUNC)rb_mark_tbl ||
-	RDATA(av)->dfree != (RUBY_DATA_FUNC)st_free_table) {
-	VALUE desc = rb_inspect(av);
-	rb_raise(rb_eTypeError, "wrong autoload table: %s", RSTRING_PTR(desc));
-    }
-    return (struct st_table *)DATA_PTR(av);
+    rb_mark_tbl((st_table *)ptr);
 }
+
+static void
+autoload_free(void *ptr)
+{
+    st_free_table((st_table *)ptr);
+}
+
+static size_t
+autoload_memsize(const void *ptr)
+{
+    const st_table *tbl = ptr;
+    return st_memsize(tbl);
+}
+
+static const rb_data_type_t autoload_data_type = {
+    "autoload",
+    autoload_mark, autoload_free, autoload_memsize,
+};
+
+#define check_autoload_table(av) \
+    (struct st_table *)rb_check_typeddata(av, &autoload_data_type)
 
 void
 rb_autoload(VALUE mod, ID id, const char *file)
@@ -1392,7 +1407,7 @@ rb_autoload(VALUE mod, ID id, const char *file)
 	tbl = check_autoload_table((VALUE)av);
     }
     else {
-	av = (st_data_t)Data_Wrap_Struct(0, rb_mark_tbl, st_free_table, 0);
+	av = (st_data_t)TypedData_Wrap_Struct(0, &autoload_data_type, 0);
 	st_add_direct(tbl, (st_data_t)autoload, av);
 	DATA_PTR(av) = tbl = st_init_numtable();
     }
@@ -1550,19 +1565,19 @@ rb_const_get_0(VALUE klass, ID id, int exclude, int recurse)
 VALUE
 rb_const_get_from(VALUE klass, ID id)
 {
-    return rb_const_get_0(klass, id, Qtrue, Qtrue);
+    return rb_const_get_0(klass, id, TRUE, TRUE);
 }
 
 VALUE
 rb_const_get(VALUE klass, ID id)
 {
-    return rb_const_get_0(klass, id, Qfalse, Qtrue);
+    return rb_const_get_0(klass, id, FALSE, TRUE);
 }
 
 VALUE
 rb_const_get_at(VALUE klass, ID id)
 {
-    return rb_const_get_0(klass, id, Qtrue, Qfalse);
+    return rb_const_get_0(klass, id, TRUE, FALSE);
 }
 
 /*
@@ -1581,8 +1596,6 @@ rb_mod_remove_const(VALUE mod, VALUE name)
     VALUE val;
     st_data_t v, n = id;
 
-    rb_vm_change_state();
-
     if (!rb_is_const_id(id)) {
 	rb_name_error(id, "`%s' is not allowed as a constant name", rb_id2name(id));
     }
@@ -1590,21 +1603,23 @@ rb_mod_remove_const(VALUE mod, VALUE name)
 	rb_raise(rb_eSecurityError, "Insecure: can't remove constant");
     if (OBJ_FROZEN(mod)) rb_error_frozen("class/module");
 
-    if (RCLASS_IV_TBL(mod) && st_delete(RCLASS_IV_TBL(mod), &n, &v)) {
-	val = (VALUE)v;
-	if (val == Qundef) {
-	    autoload_delete(mod, id);
-	    val = Qnil;
+    if (!RCLASS_IV_TBL(mod) || !st_delete(RCLASS_IV_TBL(mod), &n, &v)) {
+	if (rb_const_defined_at(mod, id)) {
+	    rb_name_error(id, "cannot remove %s::%s",
+			  rb_class2name(mod), rb_id2name(id));
 	}
-	return val;
+	rb_name_error(id, "constant %s::%s not defined",
+		      rb_class2name(mod), rb_id2name(id));
     }
-    if (rb_const_defined_at(mod, id)) {
-	rb_name_error(id, "cannot remove %s::%s",
-		 rb_class2name(mod), rb_id2name(id));
+
+    rb_vm_change_state();
+
+    val = (VALUE)v;
+    if (val == Qundef) {
+	autoload_delete(mod, id);
+	val = Qnil;
     }
-    rb_name_error(id, "constant %s::%s not defined",
-		  rb_class2name(mod), rb_id2name(id));
-    return Qnil;		/* not reached */
+    return val;
 }
 
 static int
@@ -1713,8 +1728,8 @@ rb_const_defined_0(VALUE klass, ID id, int exclude, int recurse)
     while (tmp) {
 	if (RCLASS_IV_TBL(tmp) && st_lookup(RCLASS_IV_TBL(tmp), (st_data_t)id, &value)) {
 	    if ((VALUE)value == Qundef && !autoload_node((VALUE)klass, id, 0))
-		return Qfalse;
-	    return Qtrue;
+		return (int)Qfalse;
+	    return (int)Qtrue;
 	}
 	if (!recurse && klass != rb_cObject) break;
 	tmp = RCLASS_SUPER(tmp);
@@ -1724,25 +1739,25 @@ rb_const_defined_0(VALUE klass, ID id, int exclude, int recurse)
 	tmp = rb_cObject;
 	goto retry;
     }
-    return Qfalse;
+    return (int)Qfalse;
 }
 
 int
 rb_const_defined_from(VALUE klass, ID id)
 {
-    return rb_const_defined_0(klass, id, Qtrue, Qtrue);
+    return rb_const_defined_0(klass, id, TRUE, TRUE);
 }
 
 int
 rb_const_defined(VALUE klass, ID id)
 {
-    return rb_const_defined_0(klass, id, Qfalse, Qtrue);
+    return rb_const_defined_0(klass, id, FALSE, TRUE);
 }
 
 int
 rb_const_defined_at(VALUE klass, ID id)
 {
-    return rb_const_defined_0(klass, id, Qtrue, Qfalse);
+    return rb_const_defined_0(klass, id, TRUE, FALSE);
 }
 
 static void
@@ -1787,7 +1802,7 @@ rb_const_set(VALUE klass, ID id, VALUE val)
 	rb_raise(rb_eTypeError, "no class/module to define constant %s",
 		 rb_id2name(id));
     }
-    mod_av_set(klass, id, val, Qtrue);
+    mod_av_set(klass, id, val, TRUE);
 }
 
 void
@@ -1869,7 +1884,7 @@ rb_cvar_set(VALUE klass, ID id, VALUE val)
     else {
 	target = tmp;
     }
-    mod_av_set(target, id, val, Qfalse);
+    mod_av_set(target, id, val, FALSE);
 }
 
 VALUE

@@ -253,7 +253,7 @@ GetCurrentThreadHandle(void)
 	    i = 0;							\
 	else {								\
 	    DWORD err = GetLastError();					\
-	    if (err == ERROR_LOCK_VIOLATION)				\
+	    if (err == ERROR_LOCK_VIOLATION || err == ERROR_IO_PENDING)	\
 		errno = EWOULDBLOCK;					\
 	    else if (err == ERROR_NOT_LOCKED)				\
 		i = 0;							\
@@ -501,7 +501,7 @@ init_func(void)
 
 static void init_stdhandle(void);
 
-#if _MSC_VER >= 1400
+#if RT_VER >= 80
 static void
 invalid_parameter(const wchar_t *expr, const wchar_t *func, const wchar_t *file, unsigned int line, uintptr_t dummy)
 {
@@ -575,7 +575,7 @@ StartSockets(void)
 void
 rb_w32_sysinit(int *argc, char ***argv)
 {
-#if _MSC_VER >= 1400
+#if RT_VER >= 80
     static void set_pioinfo_extra(void);
 
     _CrtSetReportMode(_CRT_ASSERT, 0);
@@ -1918,7 +1918,7 @@ typedef struct	{
     int lockinitflag;
     CRITICAL_SECTION lock;
 #endif
-#if _MSC_VER >= 1400
+#if RT_VER >= 80
     char textmode;
     char pipech2[2];
 #endif
@@ -1939,7 +1939,7 @@ EXTERN_C _CRTIMP ioinfo * __pioinfo[];
 #define _osfile(i)  (_pioinfo(i)->osfile)
 #define _pipech(i)  (_pioinfo(i)->pipech)
 
-#if _MSC_VER >= 1400
+#if RT_VER >= 80
 static size_t pioinfo_extra = 0;	/* workaround for VC++8 SP1 */
 
 static void
@@ -2101,9 +2101,6 @@ char *
 rb_w32_strerror(int e)
 {
     static char buffer[512];
-#if !defined __MINGW32__
-    extern int sys_nerr;
-#endif
     DWORD source = 0;
     char *p;
 
@@ -4128,6 +4125,20 @@ rb_w32_stati64(const char *path, struct stati64 *st)
     return ret;
 }
 
+int
+rb_w32_access(const char *path, int mode)
+{
+    struct stati64 stat;
+    if (rb_w32_stati64(path, &stat) != 0)
+	return -1;
+    mode <<= 6;
+    if ((stat.st_mode & mode) != mode) {
+	errno = EACCES;
+	return -1;
+    }
+    return 0;
+}
+
 static int
 rb_chsize(HANDLE h, off_t size)
 {
@@ -4486,13 +4497,12 @@ rb_w32_free_environ(char **env)
     free(env);
 }
 
-#undef getpid
 rb_pid_t
 rb_w32_getpid(void)
 {
     rb_pid_t pid;
 
-    pid = getpid();
+    pid = GetCurrentProcessId();
 
     (void)IfWin95(pid = -pid, 0);
 

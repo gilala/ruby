@@ -321,27 +321,49 @@ struct dir_data {
 };
 
 static void
-mark_dir(struct dir_data *dir)
+dir_mark(void *ptr)
 {
+    struct dir_data *dir = ptr;
     rb_gc_mark(dir->path);
 }
 
 static void
-free_dir(struct dir_data *dir)
+dir_free(void *ptr)
 {
+    struct dir_data *dir = ptr;
     if (dir) {
 	if (dir->dir) closedir(dir->dir);
     }
     xfree(dir);
 }
 
+static size_t
+dir_memsize(const void *ptr)
+{
+    return ptr ? sizeof(struct dir_data) : 0;
+}
+
+static const rb_data_type_t dir_data_type = {
+    "dir",
+    dir_mark, dir_free, dir_memsize
+};
+
 static VALUE dir_close(VALUE);
+
+#define GlobPathValue(str, safe) \
+    /* can contain null bytes as separators */	\
+    (!RB_TYPE_P(str, T_STRING) ?		\
+     FilePathValue(str) :			\
+     (check_safe_glob(str, safe),		\
+      check_glob_encoding(str), (str)))
+#define check_safe_glob(str, safe) ((safe) ? rb_check_safe_obj(str) : (void)0)
+#define check_glob_encoding(str) rb_enc_check((str), rb_enc_from_encoding(rb_usascii_encoding()))
 
 static VALUE
 dir_s_alloc(VALUE klass)
 {
     struct dir_data *dirp;
-    VALUE obj = Data_Make_Struct(klass, struct dir_data, mark_dir, free_dir, dirp);
+    VALUE obj = TypedData_Make_Struct(klass, struct dir_data, &dir_data_type, dirp);
 
     dirp->dir = NULL;
     dirp->path = Qnil;
@@ -383,9 +405,9 @@ dir_initialize(int argc, VALUE *argv, VALUE dir)
 	}
     }
 
-    FilePathValue(dirname);
+    GlobPathValue(dirname, FALSE);
 
-    Data_Get_Struct(dir, struct dir_data, dp);
+    TypedData_Get_Struct(dir, struct dir_data, &dir_data_type, dp);
     if (dp->dir) closedir(dp->dir);
     dp->dir = NULL;
     dp->path = Qnil;
@@ -420,7 +442,7 @@ static VALUE
 dir_s_open(int argc, VALUE *argv, VALUE klass)
 {
     struct dir_data *dp;
-    VALUE dir = Data_Make_Struct(klass, struct dir_data, mark_dir, free_dir, dp);
+    VALUE dir = TypedData_Make_Struct(klass, struct dir_data, &dir_data_type, dp);
 
     dir_initialize(argc, argv, dir);
     if (rb_block_given_p()) {
@@ -446,7 +468,7 @@ dir_check(VALUE dir)
 
 #define GetDIR(obj, dirp) do {\
     dir_check(dir);\
-    Data_Get_Struct(obj, struct dir_data, dirp);\
+    TypedData_Get_Struct(obj, struct dir_data, &dir_data_type, dirp);	\
     if (dirp->dir == NULL) dir_closed();\
 } while (0)
 
@@ -462,7 +484,7 @@ dir_inspect(VALUE dir)
 {
     struct dir_data *dirp;
 
-    Data_Get_Struct(dir, struct dir_data, dirp);
+    TypedData_Get_Struct(dir, struct dir_data, &dir_data_type, dirp);
     if (!NIL_P(dirp->path)) {
 	const char *c = rb_obj_classname(dir);
 	return rb_sprintf("#<%s:%s>", c, RSTRING_PTR(dirp->path));
@@ -484,7 +506,7 @@ dir_path(VALUE dir)
 {
     struct dir_data *dirp;
 
-    Data_Get_Struct(dir, struct dir_data, dirp);
+    TypedData_Get_Struct(dir, struct dir_data, &dir_data_type, dirp);
     if (NIL_P(dirp->path)) return Qnil;
     return rb_str_dup(dirp->path);
 }
@@ -1621,7 +1643,7 @@ push_glob(VALUE ary, VALUE str, int flags)
     args.value = ary;
     args.enc = enc;
 
-    return ruby_brace_glob0(StringValuePtr(str), flags | GLOB_VERBOSE,
+    return ruby_brace_glob0(RSTRING_PTR(str), flags | GLOB_VERBOSE,
 			    rb_glob_caller, (VALUE)&args, enc);
 }
 
@@ -1631,7 +1653,7 @@ rb_push_glob(VALUE str, int flags) /* '\0' is delimiter */
     long offset = 0;
     VALUE ary;
 
-    StringValue(str);
+    GlobPathValue(str, TRUE);
     ary = rb_ary_new();
 
     while (offset < RSTRING_LEN(str)) {
@@ -1661,7 +1683,7 @@ dir_globs(long argc, VALUE *argv, int flags)
     for (i = 0; i < argc; ++i) {
 	int status;
 	VALUE str = argv[i];
-	SafeStringValue(str);
+	GlobPathValue(str, TRUE);
 	status = push_glob(ary, str, flags);
 	if (status) GLOB_JUMP_TAG(status);
     }
@@ -1779,12 +1801,9 @@ static VALUE
 dir_open_dir(int argc, VALUE *argv)
 {
     VALUE dir = rb_funcall2(rb_cDir, rb_intern("open"), argc, argv);
+    struct dir_data *dirp;
 
-    if (TYPE(dir) != T_DATA ||
-	RDATA(dir)->dfree != (RUBY_DATA_FUNC)free_dir) {
-	rb_raise(rb_eTypeError, "wrong argument type %s (expected Dir)",
-		 rb_obj_classname(dir));
-    }
+    TypedData_Get_Struct(dir, struct dir_data, &dir_data_type, dirp);
     return dir;
 }
 
@@ -1989,6 +2008,7 @@ Init_Dir(void)
 
     rb_define_method(rb_cDir,"initialize", dir_initialize, -1);
     rb_define_method(rb_cDir,"path", dir_path, 0);
+    rb_define_method(rb_cDir,"to_path", dir_path, 0);
     rb_define_method(rb_cDir,"inspect", dir_inspect, 0);
     rb_define_method(rb_cDir,"read", dir_read, 0);
     rb_define_method(rb_cDir,"each", dir_each, 0);

@@ -72,11 +72,11 @@ rb_hash(VALUE obj)
     }
 }
 
-static int
+static st_index_t
 rb_any_hash(VALUE a)
 {
     VALUE hval;
-    VALUE hnum;
+    st_index_t hnum;
 
     switch (TYPE(a)) {
       case T_FIXNUM:
@@ -96,7 +96,7 @@ rb_any_hash(VALUE a)
 	hnum = FIX2LONG(hval);
     }
     hnum <<= 1;
-    return (int)RSHIFT(hnum, 1);
+    return (st_index_t)RSHIFT(hnum, 1);
 }
 
 static const struct st_hash_type objhash = {
@@ -466,7 +466,7 @@ rb_hash_rehash(VALUE hash)
  *     hsh[key]    =>  value
  *
  *  Element Reference---Retrieves the <i>value</i> object corresponding
- *  to the <i>key</i> object. If not found, returns the a default value (see
+ *  to the <i>key</i> object. If not found, returns the default value (see
  *  <code>Hash::new</code> for details).
  *
  *     h = { "a" => 100, "b" => 200 }
@@ -600,7 +600,7 @@ rb_hash_default(int argc, VALUE *argv, VALUE hash)
  *     hsh.default = obj     => obj
  *
  *  Sets the default value, the value returned for a key that does not
- *  exist in the hash. It is not possible to set the a default to a
+ *  exist in the hash. It is not possible to set the default to a
  *  <code>Proc</code> that will be executed on each key lookup.
  *
  *     h = { "a" => 100, "b" => 200 }
@@ -947,7 +947,7 @@ select_i(VALUE key, VALUE value, VALUE result)
  *  call-seq:
  *     hsh.select {|key, value| block}   => a_hash
  *
- *  Returns a new hash consisting of entries which the block returns true.
+ *  Returns a new hash consisting of entries for which the block returns true.
  *
  *     h = { "a" => 100, "b" => 200, "c" => 300 }
  *     h.select {|k,v| k > "a"}  #=> {"b" => 200, "c" => 300}
@@ -1544,7 +1544,7 @@ rb_hash_eql(VALUE hash1, VALUE hash2)
 static int
 hash_i(VALUE key, VALUE val, VALUE arg)
 {
-    VALUE *hval = (VALUE *)arg;
+    st_index_t *hval = (st_index_t *)arg;
 
     if (key == Qundef) return ST_CONTINUE;
     *hval ^= rb_hash_end(rb_hash_uint(rb_hash_start(rb_hash(key)), rb_hash(val)));
@@ -1554,15 +1554,15 @@ hash_i(VALUE key, VALUE val, VALUE arg)
 static VALUE
 recursive_hash(VALUE hash, VALUE dummy, int recur)
 {
-    VALUE hval;
+    st_index_t hval;
 
-    if (recur) {
-	rb_raise(rb_eArgError, "recursive key for hash");
-    }
     if (!RHASH(hash)->ntbl)
         return LONG2FIX(0);
     hval = RHASH(hash)->ntbl->num_entries;
-    rb_hash_foreach(hash, hash_i, (VALUE)&hval);
+    if (recur)
+	hval = rb_hash_end(rb_hash_uint(rb_hash_start(rb_hash(rb_cHash)), hval));
+    else
+	rb_hash_foreach(hash, hash_i, (VALUE)&hval);
     return INT2FIX(hval);
 }
 
@@ -1577,7 +1577,7 @@ recursive_hash(VALUE hash, VALUE dummy, int recur)
 static VALUE
 rb_hash_hash(VALUE hash)
 {
-    return rb_exec_recursive(recursive_hash, hash, 0);
+    return rb_exec_recursive_outer(recursive_hash, hash, 0);
 }
 
 static int
@@ -1743,7 +1743,7 @@ rassoc_i(VALUE key, VALUE val, VALUE arg)
  *     hash.rassoc(key) -> an_array or nil
  *
  *  Searches through the hash comparing _obj_ with the value using <code>==</code>.
- *  Returns the first key-value pair (two elements array) that matches. See
+ *  Returns the first key-value pair (two-element array) that matches. See
  *  also <code>Array#rassoc</code>.
  *
  *     a = {1=> "one", 2 => "two", 3 => "three", "ii" => "two"}
@@ -1770,7 +1770,7 @@ rb_hash_rassoc(VALUE hash, VALUE obj)
  *  Returns a new array that is a one-dimensional flattening of this
  *  hash. That is, for every key or value that is an array, extract
  *  its elements into the new array.  Unlike Array#flatten, this
- *  method does not flatten recursively by default.  If the optional
+ *  method does not flatten recursively by default.  The optional
  *  <i>level</i> argument determines the level of recursion to flatten.
  *
  *     a =  {1=> "one", 2 => [2,"two"], 3 => "three"}
@@ -1797,7 +1797,7 @@ rb_hash_flatten(int argc, VALUE *argv, VALUE hash)
  *  call-seq:
  *     hsh.compare_by_identity => hsh
  *
- *  Makes <i>hsh</i> to compare its keys by their identity, i.e. it
+ *  Makes <i>hsh</i> compare its keys by their identity, i.e. it
  *  will consider exact same objects as same keys.
  *
  *     h1 = { "a" => 100, "b" => 200, :c => "c" }
@@ -1915,6 +1915,8 @@ env_delete_m(VALUE obj, VALUE name)
     return val;
 }
 
+static int env_path_tainted(const char *);
+
 static VALUE
 rb_f_getenv(VALUE obj, VALUE name)
 {
@@ -1928,8 +1930,8 @@ rb_f_getenv(VALUE obj, VALUE name)
     }
     env = getenv(nam);
     if (env) {
-	if (ENVMATCH(nam, PATH_ENV) && !rb_env_path_tainted()) {
-	    VALUE str = rb_str_new2(env);
+	if (ENVMATCH(nam, PATH_ENV) && !env_path_tainted(env)) {
+	    VALUE str = rb_filesystem_str_new_cstr(env);
 
 	    rb_obj_freeze(str);
 	    return str;
@@ -1965,15 +1967,24 @@ env_fetch(int argc, VALUE *argv)
 	}
 	return if_none;
     }
-    if (ENVMATCH(nam, PATH_ENV) && !rb_env_path_tainted())
-	return rb_str_new2(env);
+    if (ENVMATCH(nam, PATH_ENV) && !env_path_tainted(env))
+	return rb_filesystem_str_new_cstr(env);
     return env_str_new2(env);
 }
 
 static void
-path_tainted_p(char *path)
+path_tainted_p(const char *path)
 {
     path_tainted = rb_path_check(path)?0:1;
+}
+
+static int
+env_path_tainted(const char *path)
+{
+    if (path_tainted < 0) {
+	path_tainted_p(path);
+    }
+    return path_tainted;
 }
 
 int
@@ -2604,9 +2615,8 @@ env_update(VALUE env, VALUE hash)
 /*
  *  A <code>Hash</code> is a collection of key-value pairs. It is
  *  similar to an <code>Array</code>, except that indexing is done via
- *  arbitrary keys of any object type, not an integer index. The order
- *  in which you traverse a hash by either key or value may seem
- *  arbitrary, and will generally not be in the insertion order.
+ *  arbitrary keys of any object type, not an integer index. Hashes enumerate
+ *  their values in the order that the corresponding keys were inserted.
  *
  *  Hashes have a <em>default value</em> that is returned when accessing
  *  keys that do not exist in the hash. By default, that value is

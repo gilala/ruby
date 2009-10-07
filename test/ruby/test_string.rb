@@ -1139,8 +1139,11 @@ class TestString < Test::Unit::TestCase
   def test_strip
     assert_equal(S("x"), S("      x        ").strip)
     assert_equal(S("x"), S(" \n\r\t     x  \t\r\n\n      ").strip)
-    assert_equal(S(""), S("\xa0".force_encoding("iso-8859-1")).strip)
-    assert_equal(S("a"), S("a\xa0".force_encoding("iso-8859-1")).strip)
+
+    assert_equal("0b0 ".force_encoding("UTF-16BE"),
+                 "\x00 0b0 ".force_encoding("UTF-16BE").strip)
+    assert_equal("0\x000b0 ".force_encoding("UTF-16BE"),
+                 "0\x000b0 ".force_encoding("UTF-16BE").strip)
   end
 
   def test_strip!
@@ -1572,6 +1575,19 @@ class TestString < Test::Unit::TestCase
                    count += 1
                    })
     assert_equal(676, count)
+  end
+
+  def test_upto_numeric
+    a     = S("00")
+    start = S("00")
+    count = 0
+    assert_equal(S("00"), a.upto(S("23")) {|s|
+                   assert_equal(start, s, "[ruby-dev:39361]")
+                   assert_equal(Encoding::US_ASCII, s.encoding)
+                   start.succ!
+                   count += 1
+                   })
+    assert_equal(24, count, "[ruby-dev:39361]")
   end
 
   def test_mod_check

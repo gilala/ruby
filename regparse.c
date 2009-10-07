@@ -310,16 +310,19 @@ strcat_capa_from_static(UChar* dest, UChar* dest_end,
 #include "ruby/st.h"
 
 typedef struct {
-  UChar* s;
-  UChar* end;
+  const UChar* s;
+  const UChar* end;
 } st_str_end_key;
 
 static int
-str_end_cmp(st_str_end_key* x, st_str_end_key* y)
+str_end_cmp(st_data_t xp, st_data_t yp)
 {
-  UChar *p, *q;
+  const st_str_end_key *x, *y;
+  const UChar *p, *q;
   int c;
 
+  x = (const st_str_end_key *)xp;
+  y = (const st_str_end_key *)yp;
   if ((x->end - x->s) != (y->end - y->s))
     return 1;
 
@@ -335,11 +338,12 @@ str_end_cmp(st_str_end_key* x, st_str_end_key* y)
   return 0;
 }
 
-static int
-str_end_hash(st_str_end_key* x)
+static st_index_t
+str_end_hash(st_data_t xp)
 {
-  UChar *p;
-  int val = 0;
+  const st_str_end_key *x = (const st_str_end_key *)xp;
+  const UChar *p;
+  st_index_t val = 0;
 
   p = x->s;
   while (p < x->end) {
@@ -350,7 +354,7 @@ str_end_hash(st_str_end_key* x)
 }
 
 extern hash_table_type*
-onig_st_init_strend_table_with_size(int size)
+onig_st_init_strend_table_with_size(st_index_t size)
 {
   static const struct st_hash_type hashType = {
     str_end_cmp,
@@ -1430,7 +1434,7 @@ onig_node_str_cat(Node* node, const UChar* s, const UChar* end)
 
     if (NSTR(node)->capa > 0 || (len + addlen > NODE_STR_BUF_SIZE - 1)) {
       UChar* p;
-      int capa = len + addlen + NODE_STR_MARGIN;
+      ptrdiff_t capa = len + addlen + NODE_STR_MARGIN;
 
       if (capa <= NSTR(node)->capa) {
 	onig_strcpy(NSTR(node)->s + len, s, end);
@@ -2115,6 +2119,8 @@ or_cclass(CClassNode* dest, CClassNode* cc, ScanEnv* env)
     return 0;
 }
 
+static void UNKNOWN_ESC_WARN(ScanEnv *env, int c);
+
 static int
 conv_backslash_value(int c, ScanEnv* env)
 {
@@ -2133,6 +2139,8 @@ conv_backslash_value(int c, ScanEnv* env)
       break;
 
     default:
+      if (('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z'))
+	  UNKNOWN_ESC_WARN(env, c);
       break;
     }
   }
@@ -2877,8 +2885,28 @@ CC_DUP_WARN(ScanEnv *env)
     onig_snprintf_with_pattern(buf, WARN_BUFSIZE, env->enc,
 	    env->pattern, env->pattern_end,
 	    (UChar* )"character class has duplicated range");
-    (*onig_warn)((char* )buf);
+
+    if (env->sourcefile == NULL)
+	(*onig_warn)((char* )buf);
+    else
+	rb_compile_warn(env->sourcefile, env->sourceline, (char* )buf);
   }
+}
+
+static void
+UNKNOWN_ESC_WARN(ScanEnv *env, int c)
+{
+  UChar buf[WARN_BUFSIZE];
+  if (onig_warn == onig_null_warn || !RTEST(ruby_verbose)) return ;
+
+  onig_snprintf_with_pattern(buf, WARN_BUFSIZE, env->enc,
+	  env->pattern, env->pattern_end,
+	  (UChar* )"Unknown escape \\%c is ignored", c);
+
+  if (env->sourcefile == NULL)
+      (*onig_warn)((char* )buf);
+  else
+      rb_compile_warn(env->sourcefile, env->sourceline, (char* )buf);
 }
 
 static UChar*
@@ -4933,7 +4961,7 @@ static int type_cclass_cmp(type_cclass_key* x, type_cclass_key* y)
   return 0;
 }
 
-static int type_cclass_hash(type_cclass_key* key)
+static st_index_t type_cclass_hash(type_cclass_key* key)
 {
   int i, val;
   UChar *p;

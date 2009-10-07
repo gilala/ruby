@@ -1,8 +1,13 @@
 #!./miniruby
 
-load "./rbconfig.rb"
-include RbConfig
-$".unshift File.expand_path("./rbconfig.rb")
+begin
+  load "./rbconfig.rb"
+rescue LoadError
+  CONFIG = Hash.new {""}
+else
+  include RbConfig
+  $".unshift File.expand_path("./rbconfig.rb")
+end
 
 srcdir = File.expand_path('../..', __FILE__)
 unless defined?(CROSS_COMPILING) and CROSS_COMPILING
@@ -35,7 +40,7 @@ def parse_args(argv = ARGV)
   $cmdtype = ('bat' if File::ALT_SEPARATOR == '\\')
   mflags = []
   opt = OptionParser.new
-  opt.on('-n') {$dryrun = true}
+  opt.on('-n', '--dry-run') {$dryrun = true}
   opt.on('--dest-dir=DIR') {|dir| $destdir = dir}
   opt.on('--extout=DIR') {|dir| $extout = (dir unless dir.empty?)}
   opt.on('--make=COMMAND') {|make| $make = make}
@@ -46,8 +51,7 @@ def parse_args(argv = ARGV)
     end
     $mflags.concat(v)
   end
-  opt.on('-i', '--install=TYPE',
-         [:local, :bin, :"bin-arch", :"bin-comm", :lib, :man, :ext, :"ext-arch", :"ext-comm", :rdoc, :capi]) do |ins|
+  opt.on('-i', '--install=TYPE', $install_procs.keys) do |ins|
     $install << ins
   end
   opt.on('--data-mode=OCTAL-MODE', OptionParser::OctalInteger) do |mode|
@@ -78,7 +82,12 @@ def parse_args(argv = ARGV)
     else
       raise OptionParser::InvalidArgument, v
     end
-  end rescue abort [$!.message, opt].join("\n")
+  end rescue abort "#{$!.message}\n#{opt.help}"
+
+  unless defined?(RbConfig)
+    puts opt.help
+    exit
+  end
 
   $make, *rest = Shellwords.shellwords($make)
   $mflags.unshift(*rest) unless rest.empty?
@@ -117,13 +126,6 @@ def parse_args(argv = ARGV)
   $dir_mode ||= $prog_mode | 0700
   $script_mode ||= $prog_mode
 end
-
-parse_args()
-
-include FileUtils
-include FileUtils::NoWrite if $dryrun
-@fileutils_output = STDOUT
-@fileutils_label = ''
 
 $install_procs = Hash.new {[]}
 def install?(*types, &block)
@@ -282,7 +284,6 @@ ruby_install_name = CONFIG["ruby_install_name"]
 rubyw_install_name = CONFIG["rubyw_install_name"]
 goruby_install_name = "go" + ruby_install_name
 
-version = CONFIG["ruby_version"]
 bindir = CONFIG["bindir"]
 libdir = CONFIG["libdir"]
 archhdrdir = rubyhdrdir = CONFIG["rubyhdrdir"]
@@ -336,30 +337,27 @@ install?(:local, :arch, :lib) do
   end
 end
 
-if $extout
-  extout = "#$extout"
-  install?(:ext, :arch, :'ext-arch') do
-    prepare "extension objects", archlibdir
-    noinst = %w[-*] | (CONFIG["no_install_files"] || "").split
-    install_recursive("#{extout}/#{CONFIG['arch']}", archlibdir, :no_install => noinst, :mode => $prog_mode, :strip => $strip)
-    prepare "extension objects", sitearchlibdir
-    prepare "extension objects", vendorarchlibdir
-  end
-  install?(:ext, :arch, :'ext-arch') do
-    prepare "extension headers", archhdrdir
-    install_recursive("#{extout}/include/#{CONFIG['arch']}", archhdrdir, :glob => "*.h", :mode => $data_mode)
-  end
-  install?(:ext, :comm, :'ext-comm') do
-    prepare "extension scripts", rubylibdir
-    install_recursive("#{extout}/common", rubylibdir, :mode => $data_mode)
-    prepare "extension scripts", sitelibdir
-    prepare "extension scripts", vendorlibdir
-  end
-  install?(:ext, :comm, :'ext-comm') do
-    hdrdir = rubyhdrdir + "/ruby"
-    prepare "extension headers", hdrdir
-    install_recursive("#{extout}/include/ruby", hdrdir, :glob => "*.h", :mode => $data_mode)
-  end
+install?(:ext, :arch, :'ext-arch') do
+  prepare "extension objects", archlibdir
+  noinst = %w[-*] | (CONFIG["no_install_files"] || "").split
+  install_recursive("#{$extout}/#{CONFIG['arch']}", archlibdir, :no_install => noinst, :mode => $prog_mode, :strip => $strip)
+  prepare "extension objects", sitearchlibdir
+  prepare "extension objects", vendorarchlibdir
+end
+install?(:ext, :arch, :'ext-arch') do
+  prepare "extension headers", archhdrdir
+  install_recursive("#{$extout}/include/#{CONFIG['arch']}", archhdrdir, :glob => "*.h", :mode => $data_mode)
+end
+install?(:ext, :comm, :'ext-comm') do
+  prepare "extension scripts", rubylibdir
+  install_recursive("#{$extout}/common", rubylibdir, :mode => $data_mode)
+  prepare "extension scripts", sitelibdir
+  prepare "extension scripts", vendorlibdir
+end
+install?(:ext, :comm, :'ext-comm') do
+  hdrdir = rubyhdrdir + "/ruby"
+  prepare "extension headers", hdrdir
+  install_recursive("#{$extout}/include/ruby", hdrdir, :glob => "*.h", :mode => $data_mode)
 end
 
 install?(:doc, :rdoc) do
@@ -384,7 +382,7 @@ install?(:local, :comm, :bin, :'bin-comm') do
   if trans = CONFIG["program_transform_name"]
     exp = []
     trans.gsub!(/\$\$/, '$')
-    trans.scan(%r[\G[\s;]*(/(?:\\.|[^/])*/)?([sy])(\W)((?:\\.|(?!\3).)*)\3((?:\\.|(?!\3).)*)\3([gi]*)]) do
+    trans.scan(%r[\G[\s;]*(/(?:\\.|[^/])*/)?([sy])(\\?\W)((?:(?!\3)(?:\\.|.))*)\3((?:(?!\3)(?:\\.|.))*)\3([gi]*)]) do
       |addr, cmd, sep, pat, rep, opt|
       addr &&= Regexp.new(addr[/\A\/(.*)\/\z/, 1])
       case cmd
@@ -532,6 +530,13 @@ end
     end
   end
 end
+
+parse_args()
+
+include FileUtils
+include FileUtils::NoWrite if $dryrun
+@fileutils_output = STDOUT
+@fileutils_label = ''
 
 $install << :local << :ext if $install.empty?
 $install.each do |inst|

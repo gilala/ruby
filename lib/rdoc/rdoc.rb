@@ -203,14 +203,11 @@ module RDoc
       file_list.each do |filename|
         @stats.add_file filename
 
-        content = if RUBY_VERSION >= '1.9' then
-                    File.open(filename, "r:ascii-8bit") { |f| f.read }
-                  else
-                    File.read filename
-                  end
+        content = File.open(filename, "rb") { |f| f.read }
+        content.gsub!(/\r$/, '')
 
-        if defined? Encoding then
-          if /coding:\s*(\S+)/ =~ content[/\A(?:.*\n){0,2}/]
+        if defined?(::Encoding) then
+          if /coding[=:]\s*([^\s;]+)/ =~ content[/\A(?:!.*\n)?(.*\n)/, 1]
             if enc = ::Encoding.find($1)
               content.force_encoding(enc)
             end

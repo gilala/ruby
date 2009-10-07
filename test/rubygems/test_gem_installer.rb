@@ -4,8 +4,7 @@
 # See LICENSE.txt for permissions.
 #++
 
-require File.join(File.expand_path(File.dirname(__FILE__)),
-                  'gem_installer_test_case')
+require_relative 'gem_installer_test_case'
 
 class TestGemInstaller < GemInstallerTestCase
 
@@ -70,7 +69,7 @@ load Gem.bin_path('a', 'my_exec', version)
 #{Gem.ruby}: No such file or directory -- extconf.rb (LoadError)
     EOF
 
-    assert_match %r%#{Regexp.escape Gem.ruby} extconf.rb%,
+    assert_match %r%#{Regexp.escape Gem.ruby} extconf\.rb%,
                  File.read(gem_make_out)
     assert_match %r%#{Regexp.escape Gem.ruby}: No such file%,
                  File.read(gem_make_out)

@@ -143,16 +143,32 @@ void rb_thread_debug(const char *fmt, ...);
 # if THREAD_DEBUG < 0
 static int rb_thread_debug_enabled;
 
+/*
+ *  call-seq:
+ *     Thread.DEBUG     => num
+ *
+ *  Returns the thread debug level.  Available only if compiled with
+ *  THREAD_DEBUG=-1.
+ */
+
 static VALUE
 rb_thread_s_debug(void)
 {
     return INT2NUM(rb_thread_debug_enabled);
 }
 
+/*
+ *  call-seq:
+ *     Thread.DEBUG = num
+ *
+ *  Sets the thread debug level.  Available only if compiled with
+ *  THREAD_DEBUG=-1.
+ */
+
 static VALUE
 rb_thread_s_debug_set(VALUE self, VALUE val)
 {
-    rb_thread_debug_enabled = RTEST(val);
+    rb_thread_debug_enabled = RTEST(val) ? NUM2INT(val) : 0;
     return val;
 }
 # else
@@ -503,6 +519,7 @@ thread_create_core(VALUE thval, VALUE args, VALUE (*fn)(ANYARGS))
     return thval;
 }
 
+/* :nodoc: */
 static VALUE
 thread_s_new(int argc, VALUE *argv, VALUE klass)
 {
@@ -533,6 +550,7 @@ thread_start(VALUE klass, VALUE args)
     return thread_create_core(rb_thread_alloc(klass), args, 0);
 }
 
+/* :nodoc: */
 static VALUE
 thread_initialize(VALUE thread, VALUE args)
 {
@@ -931,8 +949,10 @@ rb_thread_sleep(int sec)
     rb_thread_wait_for(rb_time_timeval(INT2FIX(sec)));
 }
 
-void
-rb_thread_schedule(void)
+static void rb_threadptr_execute_interrupts_rec(rb_thread_t *, int);
+
+static void
+rb_thread_schedule_rec(int sched_depth)
 {
     thread_debug("rb_thread_schedule\n");
     if (!rb_thread_alone()) {
@@ -950,8 +970,16 @@ rb_thread_schedule(void)
 	rb_thread_set_current(th);
 	thread_debug("rb_thread_schedule/switch done\n");
 
-	RUBY_VM_CHECK_INTS();
+        if (!sched_depth && UNLIKELY(GET_THREAD()->interrupt_flag)) {
+            rb_threadptr_execute_interrupts_rec(GET_THREAD(), sched_depth+1);
+        }
     }
+}
+
+void
+rb_thread_schedule(void)
+{
+    rb_thread_schedule_rec(0);
 }
 
 /* blocking region */
@@ -1183,8 +1211,8 @@ thread_s_pass(VALUE klass)
  *
  */
 
-void
-rb_threadptr_execute_interrupts(rb_thread_t *th)
+static void
+rb_threadptr_execute_interrupts_rec(rb_thread_t *th, int sched_depth)
 {
     if (GET_VM()->main_thread == th) {
 	while (rb_signal_buff_size() && !th->exec_signal) native_thread_yield();
@@ -1227,7 +1255,8 @@ rb_threadptr_execute_interrupts(rb_thread_t *th)
 	    rb_gc_finalize_deferred();
 	}
 
-	if (timer_interrupt) {
+	if (!sched_depth && timer_interrupt) {
+            sched_depth++;
 	    EXEC_EVENT_HOOK(th, RUBY_EVENT_SWITCH, th->cfp->self, 0, 0);
 
 	    if (th->slice > 0) {
@@ -1235,7 +1264,7 @@ rb_threadptr_execute_interrupts(rb_thread_t *th)
 	    }
 	    else {
 	      reschedule:
-		rb_thread_schedule();
+		rb_thread_schedule_rec(sched_depth+1);
 		if (th->slice < 0) {
 		    th->slice++;
 		    goto reschedule;
@@ -1248,6 +1277,11 @@ rb_threadptr_execute_interrupts(rb_thread_t *th)
     }
 }
 
+void
+rb_threadptr_execute_interrupts(rb_thread_t *th)
+{
+    rb_threadptr_execute_interrupts_rec(th, 0);
+}
 
 void
 rb_gc_mark_threads(void)
@@ -1617,6 +1651,13 @@ rb_thread_main(void)
 {
     return GET_THREAD()->vm->main_thread->self;
 }
+
+/*
+ *  call-seq:
+ *     Thread.main   => thread
+ *
+ *  Returns the main thread.
+ */
 
 static VALUE
 rb_thread_s_main(VALUE klass)
@@ -2340,6 +2381,11 @@ do_select(int n, fd_set *read, fd_set *write, fd_set *except,
 {
     int result, lerrno;
     fd_set orig_read, orig_write, orig_except;
+#if defined __GNUC__ && defined __x86_64__
+#define FAKE_FD_ZERO(f) (*(int *)&(f)=0) /* suppress lots of warnings */
+#else
+#define FAKE_FD_ZERO(f) ((void)0)
+#endif
 
 #ifndef linux
     double limit = 0;
@@ -2361,9 +2407,11 @@ do_select(int n, fd_set *read, fd_set *write, fd_set *except,
     }
 #endif
 
-    if (read) orig_read = *read;
-    if (write) orig_write = *write;
-    if (except) orig_except = *except;
+    if (read) orig_read = *read; else FAKE_FD_ZERO(orig_read);
+    if (write) orig_write = *write; else FAKE_FD_ZERO(orig_write);
+    if (except) orig_except = *except; else FAKE_FD_ZERO(orig_except);
+
+#undef FAKE_FD_ZERO
 
   retry:
     lerrno = 0;
@@ -2480,7 +2528,7 @@ int
 rb_thread_fd_writable(int fd)
 {
     rb_thread_wait_fd_rw(fd, 0);
-    return Qtrue;
+    return TRUE;
 }
 
 int
@@ -2701,6 +2749,17 @@ struct thgroup {
     VALUE group;
 };
 
+static size_t
+thgroup_memsize(const void *ptr)
+{
+    return ptr ? sizeof(struct thgroup) : 0;
+}
+
+static const rb_data_type_t thgroup_data_type = {
+    "thgroup",
+    NULL, RUBY_TYPED_DEFAULT_FREE, thgroup_memsize,
+};
+
 /*
  * Document-class: ThreadGroup
  *
@@ -2713,14 +2772,13 @@ struct thgroup {
  *  were created.
  */
 
-static VALUE thgroup_s_alloc(VALUE);
 static VALUE
 thgroup_s_alloc(VALUE klass)
 {
     VALUE group;
     struct thgroup *data;
 
-    group = Data_Make_Struct(klass, struct thgroup, 0, -1, data);
+    group = TypedData_Make_Struct(klass, struct thgroup, &thgroup_data_type, data);
     data->enclosed = 0;
     data->group = group;
 
@@ -2793,7 +2851,7 @@ thgroup_enclose(VALUE group)
 {
     struct thgroup *data;
 
-    Data_Get_Struct(group, struct thgroup, data);
+    TypedData_Get_Struct(group, struct thgroup, &thgroup_data_type, data);
     data->enclosed = 1;
 
     return group;
@@ -2813,7 +2871,7 @@ thgroup_enclosed_p(VALUE group)
 {
     struct thgroup *data;
 
-    Data_Get_Struct(group, struct thgroup, data);
+    TypedData_Get_Struct(group, struct thgroup, &thgroup_data_type, data);
     if (data->enclosed)
 	return Qtrue;
     return Qfalse;
@@ -2858,7 +2916,7 @@ thgroup_add(VALUE group, VALUE thread)
     if (OBJ_FROZEN(group)) {
 	rb_raise(rb_eThreadError, "can't move to the frozen thread group");
     }
-    Data_Get_Struct(group, struct thgroup, data);
+    TypedData_Get_Struct(group, struct thgroup, &thgroup_data_type, data);
     if (data->enclosed) {
 	rb_raise(rb_eThreadError, "can't move to the enclosed thread group");
     }
@@ -2870,7 +2928,7 @@ thgroup_add(VALUE group, VALUE thread)
     if (OBJ_FROZEN(th->thgroup)) {
 	rb_raise(rb_eThreadError, "can't move from the frozen thread group");
     }
-    Data_Get_Struct(th->thgroup, struct thgroup, data);
+    TypedData_Get_Struct(th->thgroup, struct thgroup, &thgroup_data_type, data);
     if (data->enclosed) {
 	rb_raise(rb_eThreadError,
 		 "can't move from the enclosed thread group");
@@ -2907,9 +2965,11 @@ thgroup_add(VALUE group, VALUE thread)
  */
 
 #define GetMutexPtr(obj, tobj) \
-  Data_Get_Struct(obj, mutex_t, tobj)
+    TypedData_Get_Struct(obj, mutex_t, &mutex_data_type, tobj)
 
 static const char *mutex_unlock(mutex_t *mutex, rb_thread_t volatile *th);
+
+#define mutex_mark NULL
 
 static void
 mutex_free(void *ptr)
@@ -2927,13 +2987,24 @@ mutex_free(void *ptr)
     ruby_xfree(ptr);
 }
 
+static size_t
+mutex_memsize(const void *ptr)
+{
+    return ptr ? sizeof(mutex_t) : 0;
+}
+
+static const rb_data_type_t mutex_data_type = {
+    "mutex",
+    mutex_mark, mutex_free, mutex_memsize,
+};
+
 static VALUE
 mutex_alloc(VALUE klass)
 {
     VALUE volatile obj;
     mutex_t *mutex;
 
-    obj = Data_Make_Struct(klass, mutex_t, NULL, mutex_free, mutex);
+    obj = TypedData_Make_Struct(klass, mutex_t, &mutex_data_type, mutex);
     native_mutex_initialize(&mutex->lock);
     native_cond_initialize(&mutex->cond);
     return obj;
@@ -3274,11 +3345,24 @@ rb_mutex_synchronize(VALUE mutex, VALUE (*func)(VALUE arg), VALUE arg)
 /*
  * Document-class: Barrier
  */
+static void
+barrier_mark(void *ptr)
+{
+    rb_gc_mark((VALUE)ptr);
+}
+
+static const rb_data_type_t barrier_data_type = {
+    "barrier",
+    barrier_mark, 0, 0,
+};
+
 static VALUE
 barrier_alloc(VALUE klass)
 {
-    return Data_Wrap_Struct(klass, rb_gc_mark, 0, (void *)mutex_alloc(0));
+    return TypedData_Wrap_Struct(klass, &barrier_data_type, (void *)mutex_alloc(0));
 }
+
+#define GetBarrierPtr(obj) (VALUE)rb_check_typeddata(obj, &barrier_data_type)
 
 VALUE
 rb_barrier_new(void)
@@ -3291,7 +3375,7 @@ rb_barrier_new(void)
 VALUE
 rb_barrier_wait(VALUE self)
 {
-    VALUE mutex = (VALUE)DATA_PTR(self);
+    VALUE mutex = GetBarrierPtr(self);
     mutex_t *m;
 
     if (!mutex) return Qfalse;
@@ -3306,13 +3390,13 @@ rb_barrier_wait(VALUE self)
 VALUE
 rb_barrier_release(VALUE self)
 {
-    return rb_mutex_unlock((VALUE)DATA_PTR(self));
+    return rb_mutex_unlock(GetBarrierPtr(self));
 }
 
 VALUE
 rb_barrier_destroy(VALUE self)
 {
-    VALUE mutex = (VALUE)DATA_PTR(self);
+    VALUE mutex = GetBarrierPtr(self);
     DATA_PTR(self) = 0;
     return rb_mutex_unlock(mutex);
 }
@@ -3320,42 +3404,18 @@ rb_barrier_destroy(VALUE self)
 /* variables for recursive traversals */
 static ID recursive_key;
 
-static VALUE
-recursive_check(VALUE hash, VALUE obj, VALUE paired_obj)
-{
-    if (NIL_P(hash) || TYPE(hash) != T_HASH) {
-	return Qfalse;
-    }
-    else {
-	VALUE sym = ID2SYM(rb_frame_this_func());
-	VALUE list = rb_hash_aref(hash, sym);
-	VALUE pair_list;
-
-	if (NIL_P(list) || TYPE(list) != T_HASH)
-	    return Qfalse;
-	pair_list = rb_hash_lookup2(list, obj, Qundef);
-	if (pair_list == Qundef)
-	    return Qfalse;
-	if (paired_obj) {
-	    if (TYPE(pair_list) != T_HASH) {
-		if (pair_list != paired_obj)
-		    return Qfalse;
-	    }
-	    else {
-		if (NIL_P(rb_hash_lookup(pair_list, paired_obj)))
-		    return Qfalse;
-	    }
-	}
-	return Qtrue;
-    }
-}
+/*
+ * Returns the current "recursive list" used to detect recursion.
+ * This list is a hash table, unique for the current thread and for
+ * the current __callee__.
+ */
 
 static VALUE
-recursive_push(VALUE hash, VALUE obj, VALUE paired_obj)
+recursive_list_access(void)
 {
-    VALUE list, sym, pair_list;
-
-    sym = ID2SYM(rb_frame_this_func());
+    volatile VALUE hash = rb_thread_local_aref(rb_thread_current(), recursive_key);
+    VALUE sym = ID2SYM(rb_frame_this_func());
+    VALUE list;
     if (NIL_P(hash) || TYPE(hash) != T_HASH) {
 	hash = rb_hash_new();
 	OBJ_UNTRUST(hash);
@@ -3370,6 +3430,48 @@ recursive_push(VALUE hash, VALUE obj, VALUE paired_obj)
 	OBJ_UNTRUST(list);
 	rb_hash_aset(hash, sym, list);
     }
+    return list;
+}
+
+/*
+ * Returns Qtrue iff obj_id (or the pair <obj, paired_obj>) is already
+ * in the recursion list.
+ * Assumes the recursion list is valid.
+ */
+
+static VALUE
+recursive_check(VALUE list, VALUE obj_id, VALUE paired_obj_id)
+{
+    VALUE pair_list = rb_hash_lookup2(list, obj_id, Qundef);
+    if (pair_list == Qundef)
+	return Qfalse;
+    if (paired_obj_id) {
+	if (TYPE(pair_list) != T_HASH) {
+	if (pair_list != paired_obj_id)
+	    return Qfalse;
+	}
+	else {
+	if (NIL_P(rb_hash_lookup(pair_list, paired_obj_id)))
+	    return Qfalse;
+	}
+    }
+    return Qtrue;
+}
+
+/*
+ * Pushes obj_id (or the pair <obj_id, paired_obj_id>) in the recursion list.
+ * For a single obj_id, it sets list[obj_id] to Qtrue.
+ * For a pair, it sets list[obj_id] to paired_obj_id if possible,
+ * otherwise list[obj_id] becomes a hash like:
+ *   {paired_obj_id_1 => true, paired_obj_id_2 => true, ... }
+ * Assumes the recursion list is valid.
+ */
+
+static void
+recursive_push(VALUE list, VALUE obj, VALUE paired_obj)
+{
+    VALUE pair_list;
+
     if (!paired_obj) {
 	rb_hash_aset(list, obj, Qtrue);
     }
@@ -3386,33 +3488,24 @@ recursive_push(VALUE hash, VALUE obj, VALUE paired_obj)
 	}
 	rb_hash_aset(pair_list, paired_obj, Qtrue);
     }
-    return hash;
 }
 
-static void
-recursive_pop(VALUE hash, VALUE obj, VALUE paired_obj)
-{
-    VALUE list, sym, pair_list, symname, thrname;
+/*
+ * Pops obj_id (or the pair <obj_id, paired_obj_id>) from the recursion list.
+ * For a pair, if list[obj_id] is a hash, then paired_obj_id is
+ * removed from the hash and no attempt is made to simplify
+ * list[obj_id] from {only_one_paired_id => true} to only_one_paired_id
+ * Assumes the recursion list is valid.
+ */
 
-    sym = ID2SYM(rb_frame_this_func());
-    if (NIL_P(hash) || TYPE(hash) != T_HASH) {
-	symname = rb_inspect(sym);
-	thrname = rb_inspect(rb_thread_current());
-	rb_raise(rb_eTypeError, "invalid inspect_tbl hash for %s in %s",
-		 StringValuePtr(symname), StringValuePtr(thrname));
-    }
-    list = rb_hash_aref(hash, sym);
-    if (NIL_P(list) || TYPE(list) != T_HASH) {
-	symname = rb_inspect(sym);
-	thrname = rb_inspect(rb_thread_current());
-	rb_raise(rb_eTypeError, "invalid inspect_tbl list for %s in %s",
-		 StringValuePtr(symname), StringValuePtr(thrname));
-    }
+static void
+recursive_pop(VALUE list, VALUE obj, VALUE paired_obj)
+{
     if (paired_obj) {
-	pair_list = rb_hash_lookup2(list, obj, Qundef);
+	VALUE pair_list = rb_hash_lookup2(list, obj, Qundef);
 	if (pair_list == Qundef) {
-	    symname = rb_inspect(sym);
-	    thrname = rb_inspect(rb_thread_current());
+	    VALUE symname = rb_inspect(ID2SYM(rb_frame_this_func()));
+	    VALUE thrname = rb_inspect(rb_thread_current());
 	    rb_raise(rb_eTypeError, "invalid inspect_tbl pair_list for %s in %s",
 		     StringValuePtr(symname), StringValuePtr(thrname));
 	}
@@ -3426,42 +3519,113 @@ recursive_pop(VALUE hash, VALUE obj, VALUE paired_obj)
     rb_hash_delete(list, obj);
 }
 
-static VALUE
-exec_recursive(VALUE (*func) (VALUE, VALUE, int), VALUE obj, VALUE pairid, VALUE arg)
-{
-    volatile VALUE hash = rb_thread_local_aref(rb_thread_current(), recursive_key);
-    VALUE objid = rb_obj_id(obj);
+struct exec_recursive_params {
+    VALUE (*func) (VALUE, VALUE, int);
+    VALUE list;
+    VALUE obj;
+    VALUE objid;
+    VALUE pairid;
+    VALUE arg;
+};
 
-    if (recursive_check(hash, objid, pairid)) {
-	return (*func) (obj, arg, Qtrue);
+static VALUE
+exec_recursive_i(VALUE tag, struct exec_recursive_params *p)
+{
+    VALUE result = Qundef;
+    int state;
+
+    recursive_push(p->list, p->objid, p->pairid);
+    PUSH_TAG();
+    if ((state = EXEC_TAG()) == 0) {
+	result = (*p->func)(p->obj, p->arg, FALSE);
+    }
+    POP_TAG();
+    recursive_pop(p->list, p->objid, p->pairid);
+    if (state)
+	JUMP_TAG(state);
+    return result;
+}
+
+/*
+ * Calls func(obj, arg, recursive), where recursive is non-zero if the
+ * current method is called recursively on obj, or on the pair <obj, pairid>
+ * If outer is 0, then the innermost func will be called with recursive set
+ * to Qtrue, otherwise the outermost func will be called. In the latter case,
+ * all inner func are short-circuited by throw.
+ * Implementation details: the value thrown is the recursive list which is
+ * proper to the current method and unlikely to be catched anywhere else.
+ * list[recursive_key] is used as a flag for the outermost call.
+ */
+
+static VALUE
+exec_recursive(VALUE (*func) (VALUE, VALUE, int), VALUE obj, VALUE pairid, VALUE arg, int outer)
+{
+    struct exec_recursive_params p;
+    int outermost;
+    p.list = recursive_list_access();
+    p.objid = rb_obj_id(obj);
+    outermost = outer && !recursive_check(p.list, ID2SYM(recursive_key), 0);
+
+    if (recursive_check(p.list, p.objid, pairid)) {
+	if (outer && !outermost) {
+	    rb_throw_obj(p.list, p.list);
+	}
+	return (*func)(obj, arg, TRUE);
     }
     else {
 	VALUE result = Qundef;
-	int state;
+	p.func = func;
+	p.obj = obj;
+	p.pairid = pairid;
+	p.arg = arg;
 
-	hash = recursive_push(hash, objid, pairid);
-	PUSH_TAG();
-	if ((state = EXEC_TAG()) == 0) {
-	    result = (*func) (obj, arg, Qfalse);
+	if (outermost) {
+	    recursive_push(p.list, ID2SYM(recursive_key), 0);
+	    result = rb_catch_obj(p.list, exec_recursive_i, (VALUE)&p);
+	    recursive_pop(p.list, ID2SYM(recursive_key), 0);
+	    if (result == p.list) {
+		result = (*func)(obj, arg, TRUE);
+	    }
 	}
-	POP_TAG();
-	recursive_pop(hash, objid, pairid);
-	if (state)
-	    JUMP_TAG(state);
+	else {
+	    result = exec_recursive_i(0, &p);
+	}
 	return result;
     }
 }
 
+/*
+ * Calls func(obj, arg, recursive), where recursive is non-zero if the
+ * current method is called recursively on obj
+ */
+
 VALUE
 rb_exec_recursive(VALUE (*func) (VALUE, VALUE, int), VALUE obj, VALUE arg)
 {
-    return exec_recursive(func, obj, 0, arg);
+    return exec_recursive(func, obj, 0, arg, 0);
 }
+
+/*
+ * Calls func(obj, arg, recursive), where recursive is non-zero if the
+ * current method is called recursively on the ordered pair <obj, paired_obj>
+ */
 
 VALUE
 rb_exec_recursive_paired(VALUE (*func) (VALUE, VALUE, int), VALUE obj, VALUE paired_obj, VALUE arg)
 {
-    return exec_recursive(func, obj, rb_obj_id(paired_obj), arg);
+    return exec_recursive(func, obj, rb_obj_id(paired_obj), arg, 0);
+}
+
+/*
+ * If recursion is detected on the current method and obj, the outermost
+ * func will be called with (obj, arg, Qtrue). All inner func will be
+ * short-circuited using throw.
+ */
+
+VALUE
+rb_exec_recursive_outer(VALUE (*func) (VALUE, VALUE, int), VALUE obj, VALUE arg)
+{
+    return exec_recursive(func, obj, 0, arg, 1);
 }
 
 /* tracer */
@@ -3713,6 +3877,14 @@ thread_add_trace_func(rb_thread_t *th, VALUE trace)
     rb_threadptr_add_event_hook(th, call_trace_func, RUBY_EVENT_ALL, trace);
 }
 
+/*
+ *  call-seq:
+ *     thr.add_trace_func(proc)    => proc
+ *
+ *  Adds _proc_ as a handler for tracing.
+ *  See <code>Thread#set_trace_func</code> and +set_trace_func+.
+ */
+
 static VALUE
 thread_add_trace_func_m(VALUE obj, VALUE trace)
 {
@@ -3721,6 +3893,16 @@ thread_add_trace_func_m(VALUE obj, VALUE trace)
     thread_add_trace_func(th, trace);
     return trace;
 }
+
+/*
+ *  call-seq:
+ *     thr.set_trace_func(proc)    => proc
+ *     thr.set_trace_func(nil)     => nil
+ *
+ *  Establishes _proc_ on _thr_ as the handler for tracing, or
+ *  disables tracing if the parameter is +nil+.
+ *  See +set_trace_func+.
+ */
 
 static VALUE
 thread_set_trace_func_m(VALUE obj, VALUE trace)
@@ -3822,14 +4004,15 @@ call_trace_func(rb_event_flag_t event, VALUE proc, VALUE self, ID id, VALUE klas
     args.self = self;
     args.id = id;
     args.klass = klass;
-    ruby_suppress_tracing(call_trace_proc, (VALUE)&args, Qfalse);
+    ruby_suppress_tracing(call_trace_proc, (VALUE)&args, FALSE);
 }
 
 VALUE
 ruby_suppress_tracing(VALUE (*func)(VALUE, int), VALUE arg, int always)
 {
     rb_thread_t *th = GET_THREAD();
-    int state, raised, tracing;
+    int state, tracing;
+    volatile int raised;
     VALUE result = Qnil;
 
     if ((tracing = th->tracing) != 0 && !always) {
@@ -3860,6 +4043,13 @@ ruby_suppress_tracing(VALUE (*func)(VALUE, int), VALUE arg, int always)
 }
 
 VALUE rb_thread_backtrace(VALUE thval);
+
+/*
+ *  call-seq:
+ *     thr.backtrace    => array
+ *
+ *  Returns the current back trace of the _thr_.
+ */
 
 static VALUE
 rb_thread_backtrace_m(VALUE thval)
@@ -3981,7 +4171,7 @@ ruby_native_thread_p(void)
 {
     rb_thread_t *th = ruby_thread_from_native();
 
-    return th ? Qtrue : Qfalse;
+    return th != 0;
 }
 
 static int
@@ -4049,6 +4239,7 @@ rb_check_deadlock(rb_vm_t *vm)
 	printf("%d %d %p %p\n", vm->living_threads->num_entries, vm->sleeper, GET_THREAD(), vm->main_thread);
 	st_foreach(vm->living_threads, debug_i, (st_data_t)0);
 #endif
+	vm->sleeper--;
 	rb_threadptr_raise(vm->main_thread, 2, argv);
     }
 }

@@ -366,6 +366,8 @@ int *ruby_initial_gc_stress_ptr = &rb_objspace.gc_stress;
 
 #define need_call_final 	(finalizer_table && finalizer_table->num_entries)
 
+static void rb_objspace_call_finalizer(rb_objspace_t *objspace);
+
 #if defined(ENABLE_VM_OBJSPACE) && ENABLE_VM_OBJSPACE
 rb_objspace_t *
 rb_objspace_alloc(void)
@@ -376,6 +378,33 @@ rb_objspace_alloc(void)
     ruby_gc_stress = ruby_initial_gc_stress;
 
     return objspace;
+}
+
+void
+rb_objspace_free(rb_objspace_t *objspace)
+{
+    rb_objspace_call_finalizer(objspace);
+    if (objspace->profile.record) {
+	free(objspace->profile.record);
+	objspace->profile.record = 0;
+    }
+    if (global_List) {
+	struct gc_list *list, *next;
+	for (list = global_List; list; list = next) {
+	    next = list->next;
+	    free(list);
+	}
+    }
+    if (heaps) {
+	size_t i;
+	for (i = 0; i < heaps_used; ++i) {
+	    free(heaps[i].membase);
+	}
+	free(heaps);
+	heaps_used = 0;
+	heaps = 0;
+    }
+    free(objspace);
 }
 #endif
 
@@ -604,6 +633,8 @@ garbage_collect_with_gvl(rb_objspace_t *objspace)
     }
 }
 
+static void vm_xfree(rb_objspace_t *objspace, void *ptr);
+
 static void *
 vm_xmalloc(rb_objspace_t *objspace, size_t size)
 {
@@ -652,7 +683,10 @@ vm_xrealloc(rb_objspace_t *objspace, void *ptr, size_t size)
 	negative_size_allocation_error("negative re-allocation size");
     }
     if (!ptr) return ruby_xmalloc(size);
-    if (size == 0) size = 1;
+    if (size == 0) {
+	vm_xfree(objspace, ptr);
+	return 0;
+    }
     if (ruby_gc_stress && !ruby_disable_gc_stress)
 	garbage_collect_with_gvl(objspace);
 
@@ -1377,13 +1411,16 @@ rb_mark_hash(st_table *tbl)
 static void
 mark_method_entry(rb_objspace_t *objspace, const rb_method_entry_t *me, int lev)
 {
+    const rb_method_definition_t *def = me->def;
+
     gc_mark(objspace, me->klass, lev);
-    switch (me->type) {
+    if (!def) return;
+    switch (def->type) {
       case VM_METHOD_TYPE_ISEQ:
-	gc_mark(objspace, me->body.iseq->self, lev);
+	gc_mark(objspace, def->body.iseq->self, lev);
 	break;
       case VM_METHOD_TYPE_BMETHOD:
-	gc_mark(objspace, me->body.proc, lev);
+	gc_mark(objspace, def->body.proc, lev);
 	break;
       default:
 	break; /* ignore */
@@ -1405,7 +1442,8 @@ mark_method_entry_i(ID key, const rb_method_entry_t *me, st_data_t data)
 }
 
 static void
-mark_m_tbl(rb_objspace_t *objspace, st_table *tbl, int lev) {
+mark_m_tbl(rb_objspace_t *objspace, st_table *tbl, int lev)
+{
     struct mark_tbl_arg arg;
     if (!tbl) return;
     arg.objspace = objspace;
@@ -1416,7 +1454,7 @@ mark_m_tbl(rb_objspace_t *objspace, st_table *tbl, int lev) {
 static int
 free_method_entry_i(ID key, rb_method_entry_t *me, st_data_t data)
 {
-    xfree(me);
+    rb_free_method_entry(me);
     return ST_CONTINUE;
 }
 
@@ -1424,6 +1462,7 @@ static void
 free_m_table(st_table *tbl)
 {
     st_foreach(tbl, free_method_entry_i, 0);
+    st_free_table(tbl);
 }
 
 void
@@ -2603,7 +2642,12 @@ chain_finalized_object(st_data_t key, st_data_t val, st_data_t arg)
 void
 rb_gc_call_finalizer_at_exit(void)
 {
-    rb_objspace_t *objspace = &rb_objspace;
+    rb_objspace_call_finalizer(&rb_objspace);
+}
+
+void
+rb_objspace_call_finalizer(rb_objspace_t *objspace)
+{
     RVALUE *p, *pend;
     RVALUE *final_list = 0;
     size_t i;

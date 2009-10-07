@@ -105,6 +105,20 @@ range_exclude_end_p(VALUE range)
     return EXCL(range) ? Qtrue : Qfalse;
 }
 
+static VALUE
+recursive_equal(VALUE range, VALUE obj, int recur)
+{
+    if (recur) return Qtrue; /* Subtle! */
+    if (!rb_equal(RANGE_BEG(range), RANGE_BEG(obj)))
+	return Qfalse;
+    if (!rb_equal(RANGE_END(range), RANGE_END(obj)))
+	return Qfalse;
+
+    if (EXCL(range) != EXCL(obj))
+	return Qfalse;
+    return Qtrue;
+}
+
 
 /*
  *  call-seq:
@@ -128,15 +142,7 @@ range_eq(VALUE range, VALUE obj)
     if (!rb_obj_is_kind_of(obj, rb_cRange))
 	return Qfalse;
 
-    if (!rb_equal(RANGE_BEG(range), RANGE_BEG(obj)))
-	return Qfalse;
-    if (!rb_equal(RANGE_END(range), RANGE_END(obj)))
-	return Qfalse;
-
-    if (EXCL(range) != EXCL(obj))
-	return Qfalse;
-
-    return Qtrue;
+    return rb_exec_recursive_paired(recursive_equal, range, obj, obj);
 }
 
 static int
@@ -145,10 +151,10 @@ r_lt(VALUE a, VALUE b)
     VALUE r = rb_funcall(a, id_cmp, 1, b);
 
     if (NIL_P(r))
-	return Qfalse;
+	return (int)Qfalse;
     if (rb_cmpint(r, a, b) < 0)
-	return Qtrue;
-    return Qfalse;
+	return (int)Qtrue;
+    return (int)Qfalse;
 }
 
 static int
@@ -158,15 +164,29 @@ r_le(VALUE a, VALUE b)
     VALUE r = rb_funcall(a, id_cmp, 1, b);
 
     if (NIL_P(r))
-	return Qfalse;
+	return (int)Qfalse;
     c = rb_cmpint(r, a, b);
     if (c == 0)
 	return (int)INT2FIX(0);
     if (c < 0)
-	return Qtrue;
-    return Qfalse;
+	return (int)Qtrue;
+    return (int)Qfalse;
 }
 
+
+static VALUE
+recursive_eql(VALUE range, VALUE obj, int recur)
+{
+    if (recur) return Qtrue; /* Subtle! */
+    if (!rb_eql(RANGE_BEG(range), RANGE_BEG(obj)))
+	return Qfalse;
+    if (!rb_eql(RANGE_END(range), RANGE_END(obj)))
+	return Qfalse;
+
+    if (EXCL(range) != EXCL(obj))
+	return Qfalse;
+    return Qtrue;
+}
 
 /*
  *  call-seq:
@@ -189,32 +209,22 @@ range_eql(VALUE range, VALUE obj)
 	return Qtrue;
     if (!rb_obj_is_kind_of(obj, rb_cRange))
 	return Qfalse;
-
-    if (!rb_eql(RANGE_BEG(range), RANGE_BEG(obj)))
-	return Qfalse;
-    if (!rb_eql(RANGE_END(range), RANGE_END(obj)))
-	return Qfalse;
-
-    if (EXCL(range) != EXCL(obj))
-	return Qfalse;
-
-    return Qtrue;
+    return rb_exec_recursive_paired(recursive_eql, range, obj, obj);
 }
 
 static VALUE
 recursive_hash(VALUE range, VALUE dummy, int recur)
 {
-    unsigned long hash = EXCL(range);
+    st_index_t hash = EXCL(range);
     VALUE v;
 
-    if (recur) {
-        rb_raise(rb_eArgError, "recursive key for hash");
-    }
     hash = rb_hash_start(hash);
-    v = rb_hash(RANGE_BEG(range));
-    hash = rb_hash_uint(hash, NUM2LONG(v));
-    v = rb_hash(RANGE_END(range));
-    hash = rb_hash_uint(hash, NUM2LONG(v));
+    if (!recur) {
+	v = rb_hash(RANGE_BEG(range));
+	hash = rb_hash_uint(hash, NUM2LONG(v));
+	v = rb_hash(RANGE_END(range));
+	hash = rb_hash_uint(hash, NUM2LONG(v));
+    }
     hash = rb_hash_uint(hash, EXCL(range) << 24);
     hash = rb_hash_end(hash);
 
@@ -233,7 +243,7 @@ recursive_hash(VALUE range, VALUE dummy, int recur)
 static VALUE
 range_hash(VALUE range)
 {
-    return rb_exec_recursive(recursive_hash, range, 0);
+    return rb_exec_recursive_outer(recursive_hash, range, 0);
 }
 
 static void
@@ -297,6 +307,14 @@ step_i(VALUE i, void *arg)
 }
 
 extern int ruby_float_step(VALUE from, VALUE to, VALUE step, int excl);
+
+static int
+discrete_object_p(VALUE obj)
+{
+    if (rb_obj_is_kind_of(obj, rb_cTime)) return FALSE; /* until Time#succ removed */
+    return rb_respond_to(obj, id_succ);
+}
+
 
 /*
  *  call-seq:
@@ -406,7 +424,7 @@ range_step(int argc, VALUE *argv, VALUE range)
 	else {
 	    VALUE args[2];
 
-	    if (!rb_respond_to(b, id_succ)) {
+	    if (!discrete_object_p(b)) {
 		rb_raise(rb_eTypeError, "can't iterate from %s",
 			 rb_obj_classname(b));
 	    }
@@ -488,7 +506,7 @@ range_each(VALUE range)
 	    rb_block_call(tmp, rb_intern("upto"), 2, args, rb_yield, 0);
 	}
 	else {
-	    if (!rb_respond_to(beg, id_succ)) {
+	    if (!discrete_object_p(beg)) {
 		rb_raise(rb_eTypeError, "can't iterate from %s",
 			 rb_obj_classname(beg));
 	    }
@@ -667,8 +685,8 @@ rb_range_values(VALUE range, VALUE *begp, VALUE *endp, int *exclp)
 	excl = EXCL(range);
     }
     else {
-	if (!rb_respond_to(range, id_beg)) return Qfalse;
-	if (!rb_respond_to(range, id_end)) return Qfalse;
+	if (!rb_respond_to(range, id_beg)) return (int)Qfalse;
+	if (!rb_respond_to(range, id_end)) return (int)Qfalse;
 	b = rb_funcall(range, id_beg, 0);
 	e = rb_funcall(range, id_end, 0);
 	excl = RTEST(rb_funcall(range, rb_intern("exclude_end?"), 0));
@@ -676,7 +694,7 @@ rb_range_values(VALUE range, VALUE *begp, VALUE *endp, int *exclp)
     *begp = b;
     *endp = e;
     *exclp = excl;
-    return Qtrue;
+    return (int)Qtrue;
 }
 
 VALUE

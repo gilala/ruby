@@ -1,3 +1,4 @@
+# -*- indent-tabs-mode: t -*-
 # module to create Makefile for extension modules
 # invoke like: ruby -r mkmf extconf.rb
 
@@ -194,11 +195,13 @@ class Array
 end
 
 def rm_f(*files)
-  FileUtils.rm_f(Dir[*files])
+  opt = (Hash === files.last ? [files.pop] : [])
+  FileUtils.rm_f(Dir[*files.flatten], *opt)
 end
 
 def rm_rf(*files)
-  FileUtils.rm_rf(Dir[*files])
+  opt = (Hash === files.last ? [files.pop] : [])
+  FileUtils.rm_rf(Dir[*files.flatten], *opt)
 end
 
 # Returns time stamp of the +target+ file if it exists and is newer
@@ -1269,7 +1272,7 @@ def create_header(header = "extconf.h")
   hdr << "#endif\n"
   hdr = hdr.join
   unless (IO.read(header) == hdr rescue false)
-    open(header, "w") do |hfile|
+    open(header, "wb") do |hfile|
       hfile.write(hdr)
     end
   end
@@ -1757,8 +1760,8 @@ static: $(STATIC_LIB)#{$extout ? " install-rb" : ""}
       mfile.print "\t@-$(RM) #{fseprepl[dest]}\n"
       mfile.print "\t@-$(RMDIRS) #{fseprepl[dir]}\n"
     else
-      mfile.print "#{dest}: #{dir} #{f}\n"
-      mfile.print "\t$(INSTALL_PROG) #{fseprepl[f]} #{fseprepl[dir]}\n"
+      mfile.print "#{dest}: #{f}\n\t@-$(MAKEDIRS) $(@D#{sep})\n"
+      mfile.print "\t$(INSTALL_PROG) #{fseprepl[f]} $(@D#{sep})\n"
       if defined?($installed_list)
 	mfile.print "\t@echo #{dir}/#{File.basename(f)}>>$(INSTALLED_LIST)\n"
       end
@@ -1780,8 +1783,8 @@ static: $(STATIC_LIB)#{$extout ? " install-rb" : ""}
       for f in files
 	dest = "#{dir}/#{File.basename(f)}"
 	mfile.print("install-rb#{sfx}: #{dest}\n")
-	mfile.print("#{dest}: #{f} #{dir}\n\t$(#{$extout ? 'COPY' : 'INSTALL_DATA'}) ")
-	mfile.print("#{f} $(@D)\n")
+	mfile.print("#{dest}: #{f}\n\t@-$(MAKEDIRS) $(@D#{sep})\n")
+	mfile.print("\t$(#{$extout ? 'COPY' : 'INSTALL_DATA'}) #{f} $(@D#{sep})\n")
 	if defined?($installed_list) and !$extout
 	  mfile.print("\t@echo #{dest}>>$(INSTALLED_LIST)\n")
 	end

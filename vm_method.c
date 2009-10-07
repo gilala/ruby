@@ -8,9 +8,9 @@
 
 static void rb_vm_check_redefinition_opt_method(const rb_method_entry_t *me);
 
-static ID object_id;
+static ID object_id, respond_to_missing;
 static ID removed, singleton_removed, undefined, singleton_undefined;
-static ID added, singleton_added;
+static ID added, singleton_added, attached;
 
 struct cache_entry {		/* method hash table. */
     ID mid;			/* method's id */
@@ -100,12 +100,14 @@ rb_clear_cache_by_class(VALUE klass)
     }
 }
 
-VALUE rb_f_notimplement(int argc, VALUE *argv, VALUE obj)
+VALUE
+rb_f_notimplement(int argc, VALUE *argv, VALUE obj)
 {
     rb_notimplement();
 }
 
-static void rb_define_notimplement_method_id(VALUE mod, ID id, rb_method_flag_t noex)
+static void
+rb_define_notimplement_method_id(VALUE mod, ID id, rb_method_flag_t noex)
 {
     rb_add_method(mod, id, VM_METHOD_TYPE_NOTIMPLEMENTED, 0, noex);
 }
@@ -124,8 +126,25 @@ rb_add_method_cfunc(VALUE klass, ID mid, VALUE (*func)(ANYARGS), int argc, rb_me
     }
 }
 
-rb_method_entry_t *
-rb_add_method(VALUE klass, ID mid, rb_method_type_t type, void *opts, rb_method_flag_t noex)
+void
+rb_free_method_entry(rb_method_entry_t *me)
+{
+    rb_method_definition_t *def = me->def;
+
+    if (def) {
+	if (def->alias_count == 0)
+	    xfree(def);
+	else if (def->alias_count > 0)
+	    def->alias_count--;
+	me->def = 0;
+    }
+    xfree(me);
+}
+
+static int rb_method_definition_eq(const rb_method_definition_t *d1, const rb_method_definition_t *d2);
+
+static rb_method_entry_t *
+rb_add_method_def(VALUE klass, ID mid, rb_method_type_t type, rb_method_definition_t *def, rb_method_flag_t noex)
 {
     rb_method_entry_t *me;
     st_table *mtbl;
@@ -148,47 +167,11 @@ rb_add_method(VALUE klass, ID mid, rb_method_type_t type, void *opts, rb_method_
 	     type == VM_METHOD_TYPE_CFUNC &&
 	     mid == rb_intern("allocate")) {
 	rb_warn("defining %s.allocate is deprecated; use rb_define_alloc_func()",
-		rb_class2name(rb_iv_get(klass, "__attached__")));
+		rb_class2name(rb_ivar_get(klass, attached)));
 	mid = ID_ALLOCATOR;
     }
     if (OBJ_FROZEN(klass)) {
 	rb_error_frozen("class/module");
-    }
-    rb_clear_cache_by_id(mid);
-
-    me = ALLOC(rb_method_entry_t);
-    me->type = type;
-    me->original_id = me->called_id = mid;
-    me->klass = klass;
-    me->flag = NOEX_WITH_SAFE(noex);
-    me->alias_count = 0;
-
-    switch (type) {
-      case VM_METHOD_TYPE_ISEQ:
-	me->body.iseq = (rb_iseq_t *)opts;
-	break;
-      case VM_METHOD_TYPE_CFUNC:
-	me->body.cfunc = *(rb_method_cfunc_t *)opts;
-	break;
-      case VM_METHOD_TYPE_ATTRSET:
-      case VM_METHOD_TYPE_IVAR:
-	me->body.attr_id = (ID)opts;
-	break;
-      case VM_METHOD_TYPE_BMETHOD:
-	me->body.proc = (VALUE)opts;
-	break;
-      case VM_METHOD_TYPE_NOTIMPLEMENTED:
-	me->body.cfunc.func = rb_f_notimplement;
-	me->body.cfunc.argc = -1;
-	break;
-      case VM_METHOD_TYPE_OPTIMIZED:
-	me->body.optimize_type = (enum method_optimized_type)opts;
-	break;
-      case VM_METHOD_TYPE_ZSUPER:
-      case VM_METHOD_TYPE_UNDEF:
-	break;
-      default:
-	rb_bug("rb_add_method: unsupported method type (%d)\n", type);
     }
 
     mtbl = RCLASS_M_TBL(klass);
@@ -196,17 +179,48 @@ rb_add_method(VALUE klass, ID mid, rb_method_type_t type, void *opts, rb_method_
     /* check re-definition */
     if (st_lookup(mtbl, mid, &data)) {
 	rb_method_entry_t *old_me = (rb_method_entry_t *)data;
+	rb_method_definition_t *old_def = old_me->def;
+
+	if (rb_method_definition_eq(old_def, def)) return old_me;
 	rb_vm_check_redefinition_opt_method(old_me);
 
 	if (RTEST(ruby_verbose) &&
-	    old_me->alias_count == 0 &&
-	    old_me->type != VM_METHOD_TYPE_UNDEF) {
+	    type != VM_METHOD_TYPE_UNDEF &&
+	    old_def->alias_count == 0 &&
+	    old_def->type != VM_METHOD_TYPE_UNDEF &&
+	    old_def->type != VM_METHOD_TYPE_ZSUPER) {
+	    extern rb_iseq_t *rb_proc_get_iseq(VALUE proc, int *is_proc);
+	    rb_iseq_t *iseq = 0;
+
 	    rb_warning("method redefined; discarding old %s", rb_id2name(mid));
+	    switch (old_def->type) {
+	      case VM_METHOD_TYPE_ISEQ:
+		iseq = old_def->body.iseq;
+		break;
+	      case VM_METHOD_TYPE_BMETHOD:
+		iseq = rb_proc_get_iseq(old_def->body.proc, 0);
+		break;
+	      default:
+		break;
+	    }
+	    if (iseq && !NIL_P(iseq->filename)) {
+		int line = iseq->insn_info_table ? rb_iseq_first_lineno(iseq) : 0;
+		rb_compile_warning(RSTRING_PTR(iseq->filename), line,
+				   "previous definition of %s was here",
+				   rb_id2name(old_def->original_id));
+	    }
 	}
-#if defined(__cplusplus) || (__STDC_VERSION__ >= 199901L)
-	// TODO: free old_me
-#endif
+	rb_free_method_entry(old_me);
     }
+
+    rb_clear_cache_by_id(mid);
+
+    me = ALLOC(rb_method_entry_t);
+    me->flag = NOEX_WITH_SAFE(noex);
+    me->called_id = mid;
+    me->klass = klass;
+    me->def = def;
+    if (def) def->alias_count++;
 
     /* check mid */
     if (klass == rb_cObject && mid == idInitialize) {
@@ -221,16 +235,75 @@ rb_add_method(VALUE klass, ID mid, rb_method_type_t type, void *opts, rb_method_
 
     st_insert(mtbl, mid, (st_data_t) me);
 
-    if (mid != ID_ALLOCATOR && ruby_running) {
-	if (FL_TEST(klass, FL_SINGLETON)) {
-	    rb_funcall(rb_iv_get(klass, "__attached__"), singleton_added, 1, ID2SYM(mid));
-	}
-	else {
-	    rb_funcall(klass, added, 1, ID2SYM(mid));
-	}
-    }
-
     return me;
+}
+
+#define CALL_METHOD_HOOK(klass, hook, mid) do {		\
+	const VALUE arg = ID2SYM(mid);			\
+	VALUE recv_class = klass;			\
+	ID hook_id = hook;				\
+	if (FL_TEST(klass, FL_SINGLETON)) {		\
+	    recv_class = rb_ivar_get(klass, attached);	\
+	    hook_id = singleton_##hook;			\
+	}						\
+	rb_funcall2(recv_class, hook_id, 1, &arg);	\
+    } while (0)
+
+static void
+method_added(VALUE klass, ID mid)
+{
+    if (mid != ID_ALLOCATOR && ruby_running) {
+	CALL_METHOD_HOOK(klass, added, mid);
+    }
+}
+
+rb_method_entry_t *
+rb_add_method(VALUE klass, ID mid, rb_method_type_t type, void *opts, rb_method_flag_t noex)
+{
+    rb_method_entry_t *me = rb_add_method_def(klass, mid, type, 0, noex);
+    rb_method_definition_t *def = ALLOC(rb_method_definition_t);
+    me->def = def;
+    def->type = type;
+    def->original_id = mid;
+    def->alias_count = 0;
+    switch (type) {
+      case VM_METHOD_TYPE_ISEQ:
+	def->body.iseq = (rb_iseq_t *)opts;
+	break;
+      case VM_METHOD_TYPE_CFUNC:
+	def->body.cfunc = *(rb_method_cfunc_t *)opts;
+	break;
+      case VM_METHOD_TYPE_ATTRSET:
+      case VM_METHOD_TYPE_IVAR:
+	def->body.attr_id = (ID)opts;
+	break;
+      case VM_METHOD_TYPE_BMETHOD:
+	def->body.proc = (VALUE)opts;
+	break;
+      case VM_METHOD_TYPE_NOTIMPLEMENTED:
+	def->body.cfunc.func = rb_f_notimplement;
+	def->body.cfunc.argc = -1;
+	break;
+      case VM_METHOD_TYPE_OPTIMIZED:
+	def->body.optimize_type = (enum method_optimized_type)opts;
+	break;
+      case VM_METHOD_TYPE_ZSUPER:
+      case VM_METHOD_TYPE_UNDEF:
+	break;
+      default:
+	rb_bug("rb_add_method: unsupported method type (%d)\n", type);
+    }
+    method_added(klass, mid);
+    return me;
+}
+
+rb_method_entry_t *
+rb_add_method_me(VALUE klass, ID mid, const rb_method_entry_t *me, rb_method_flag_t noex)
+{
+    rb_method_type_t type = me->def ? me->def->type : VM_METHOD_TYPE_UNDEF;
+    rb_method_entry_t *newme = rb_add_method_def(klass, mid, type, me->def, noex);
+    method_added(klass, mid);
+    return newme;
 }
 
 void
@@ -255,8 +328,8 @@ rb_get_alloc_func(VALUE klass)
     Check_Type(klass, T_CLASS);
     me = rb_method_entry(CLASS_OF(klass), ID_ALLOCATOR);
 
-    if (me && me->type == VM_METHOD_TYPE_CFUNC) {
-	return (rb_alloc_func_t)me->body.cfunc.func;
+    if (me && me->def && me->def->type == VM_METHOD_TYPE_CFUNC) {
+	return (rb_alloc_func_t)me->def->body.cfunc.func;
     }
     else {
 	return 0;
@@ -297,7 +370,7 @@ rb_get_method_entry(VALUE klass, ID id)
 	ent = cache + EXPR1(klass, id);
 	ent->klass = klass;
 
-	if (!me || me->type == VM_METHOD_TYPE_UNDEF) {
+	if (UNDEFINED_METHOD_ENTRY_P(me)) {
 	    ent->mid = id;
 	    ent->me = 0;
 	    me = 0;
@@ -342,29 +415,25 @@ remove_method(VALUE klass, ID mid)
 	rb_warn("removing `%s' may cause serious problems", rb_id2name(mid));
     }
 
-    if (st_lookup(RCLASS_M_TBL(klass), mid, &data)) {
-	me = (rb_method_entry_t *)data;
-	if (!me || me->type == VM_METHOD_TYPE_UNDEF) {
-	    me = 0;
-	}
-	else {
-	    st_delete(RCLASS_M_TBL(klass), &mid, &data);
-	}
-    }
-    if (!me) {
+    if (!st_lookup(RCLASS_M_TBL(klass), mid, &data) ||
+	!(me = (rb_method_entry_t *)data) ||
+	(!me->def || me->def->type == VM_METHOD_TYPE_UNDEF)) {
 	rb_name_error(mid, "method `%s' not defined in %s",
 		      rb_id2name(mid), rb_class2name(klass));
     }
+    st_delete(RCLASS_M_TBL(klass), &mid, &data);
 
     rb_vm_check_redefinition_opt_method(me);
     rb_clear_cache_for_undef(klass, mid);
+    rb_free_method_entry(me);
 
-    if (FL_TEST(klass, FL_SINGLETON)) {
-	rb_funcall(rb_iv_get(klass, "__attached__"), singleton_removed, 1, ID2SYM(mid));
-    }
-    else {
-	rb_funcall(klass, removed, 1, ID2SYM(mid));
-    }
+    CALL_METHOD_HOOK(klass, removed, mid);
+}
+
+void
+rb_remove_method_id(VALUE klass, ID mid)
+{
+    remove_method(klass, mid);
 }
 
 void
@@ -408,7 +477,7 @@ rb_enable_super(VALUE klass, const char *name)
 }
 
 static void
-rb_export_method(VALUE klass, ID name, ID noex)
+rb_export_method(VALUE klass, ID name, rb_method_flag_t noex)
 {
     rb_method_entry_t *me;
 
@@ -421,7 +490,7 @@ rb_export_method(VALUE klass, ID name, ID noex)
 	me = search_method(rb_cObject, name);
     }
 
-    if (!me || me->type == VM_METHOD_TYPE_UNDEF) {
+    if (UNDEFINED_METHOD_ENTRY_P(me)) {
 	rb_print_undef(klass, name, 0);
     }
 
@@ -444,14 +513,16 @@ rb_method_boundp(VALUE klass, ID id, int ex)
 
     if (me != 0) {
 	if (ex && (me->flag & NOEX_PRIVATE)) {
-	    return Qfalse;
+	    return FALSE;
 	}
-	if (me->type == VM_METHOD_TYPE_NOTIMPLEMENTED) {
-	    return Qfalse;
+	if (!me->def) return 0;
+	if (me->def->type == VM_METHOD_TYPE_NOTIMPLEMENTED) {
+	    if (ex & NOEX_RESPONDS) return 2;
+	    return 0;
 	}
-	return Qtrue;
+	return 1;
     }
-    return Qfalse;
+    return 0;
 }
 
 void
@@ -516,12 +587,12 @@ rb_undef(VALUE klass, ID id)
 
     me = search_method(klass, id);
 
-    if (!me || me->type == VM_METHOD_TYPE_UNDEF) {
+    if (UNDEFINED_METHOD_ENTRY_P(me)) {
 	const char *s0 = " class";
 	VALUE c = klass;
 
 	if (FL_TEST(c, FL_SINGLETON)) {
-	    VALUE obj = rb_iv_get(klass, "__attached__");
+	    VALUE obj = rb_ivar_get(klass, attached);
 
 	    switch (TYPE(obj)) {
 	      case T_MODULE:
@@ -539,12 +610,7 @@ rb_undef(VALUE klass, ID id)
 
     rb_add_method(klass, id, VM_METHOD_TYPE_UNDEF, 0, NOEX_PUBLIC);
 
-    if (FL_TEST(klass, FL_SINGLETON)) {
-	rb_funcall(rb_iv_get(klass, "__attached__"), singleton_undefined, 1, ID2SYM(id));
-    }
-    else {
-	rb_funcall(klass, undefined, 1, ID2SYM(id));
-    }
+    CALL_METHOD_HOOK(klass, undefined, id);
 }
 
 /*
@@ -629,13 +695,17 @@ rb_mod_undef_method(int argc, VALUE *argv, VALUE mod)
 static VALUE
 rb_mod_method_defined(VALUE mod, VALUE mid)
 {
-    return rb_method_boundp(mod, rb_to_id(mid), 1);
+    if (!rb_method_boundp(mod, rb_to_id(mid), 1)) {
+	return Qfalse;
+    }
+    return Qtrue;
+    
 }
 
 #define VISI_CHECK(x,f) (((x)&NOEX_MASK) == (f))
 
 static VALUE
-check_definition(VALUE mod, VALUE mid, rb_method_flag_t noex)
+check_definition(VALUE mod, ID mid, rb_method_flag_t noex)
 {
     const rb_method_entry_t *me;
     me = rb_method_entry(mod, mid);
@@ -742,63 +812,42 @@ rb_mod_protected_method_defined(VALUE mod, VALUE mid)
     return check_definition(mod, rb_to_id(mid), NOEX_PROTECTED);
 }
 
-static void *
-me_opts(const rb_method_entry_t *me)
-{
-    switch (me->type) {
-      case VM_METHOD_TYPE_ISEQ:
-	return me->body.iseq;
-      case VM_METHOD_TYPE_CFUNC:
-	return (void *)&me->body.cfunc;
-      case VM_METHOD_TYPE_ATTRSET:
-      case VM_METHOD_TYPE_IVAR:
-	return (void *)me->body.attr_id;
-      case VM_METHOD_TYPE_BMETHOD:
-	return (void *)me->body.proc;
-      case VM_METHOD_TYPE_ZSUPER:
-      case VM_METHOD_TYPE_NOTIMPLEMENTED:
-      case VM_METHOD_TYPE_UNDEF:
-	return 0;
-      case VM_METHOD_TYPE_OPTIMIZED:
-	return (void *)me->body.optimize_type;
-      default:
-	rb_bug("rb_add_method: unsupported method type (%d)\n", me->type);
-	return 0;
-    }
-}
-
-void
-rb_add_method_me(VALUE klass, ID mid, const rb_method_entry_t *me, rb_method_flag_t noex)
-{
-    rb_add_method(klass, mid, me->type, me_opts(me), noex);
-}
-
 int
 rb_method_entry_eq(const rb_method_entry_t *m1, const rb_method_entry_t *m2)
 {
-    if (m1->type != m2->type) {
+    return rb_method_definition_eq(m1->def, m2->def);
+}
+
+static int
+rb_method_definition_eq(const rb_method_definition_t *d1, const rb_method_definition_t *d2)
+{
+    if (d1 == d2) return 1;
+    if (!d1 || !d2) return 0;
+    if (d1->type != d2->type) {
 	return 0;
     }
-    switch (m1->type) {
+    switch (d1->type) {
       case VM_METHOD_TYPE_ISEQ:
-	return m1->body.iseq == m2->body.iseq;
+	return d1->body.iseq == d2->body.iseq;
       case VM_METHOD_TYPE_CFUNC:
 	return
-	  m1->body.cfunc.func == m2->body.cfunc.func &&
-	  m1->body.cfunc.argc == m2->body.cfunc.argc;
+	  d1->body.cfunc.func == d2->body.cfunc.func &&
+	  d1->body.cfunc.argc == d2->body.cfunc.argc;
       case VM_METHOD_TYPE_ATTRSET:
       case VM_METHOD_TYPE_IVAR:
-	return m1->body.attr_id == m2->body.attr_id;
+	return d1->body.attr_id == d2->body.attr_id;
       case VM_METHOD_TYPE_BMETHOD:
-	return m1->body.proc == m2->body.proc;
+	return RTEST(rb_equal(d1->body.proc, d2->body.proc));
+      case VM_METHOD_TYPE_MISSING:
+	return d1->original_id == d2->original_id;
       case VM_METHOD_TYPE_ZSUPER:
       case VM_METHOD_TYPE_NOTIMPLEMENTED:
       case VM_METHOD_TYPE_UNDEF:
 	return 1;
       case VM_METHOD_TYPE_OPTIMIZED:
-	return m1->body.optimize_type == m2->body.optimize_type;
+	return d1->body.optimize_type == d2->body.optimize_type;
       default:
-	rb_bug("rb_add_method: unsupported method type (%d)\n", m1->type);
+	rb_bug("rb_method_entry_eq: unsupported method type (%d)\n", d1->type);
 	return 0;
     }
 }
@@ -806,8 +855,7 @@ rb_method_entry_eq(const rb_method_entry_t *m1, const rb_method_entry_t *m2)
 void
 rb_alias(VALUE klass, ID name, ID def)
 {
-    rb_method_entry_t *orig_me, *me;
-    VALUE singleton = 0;
+    rb_method_entry_t *orig_me;
 
     rb_frozen_class_p(klass);
     if (klass == rb_cObject) {
@@ -816,32 +864,14 @@ rb_alias(VALUE klass, ID name, ID def)
 
     orig_me = search_method(klass, def);
 
-    if (!orig_me || orig_me->type == VM_METHOD_TYPE_UNDEF) {
-	if (TYPE(klass) == T_MODULE) {
-	    orig_me = search_method(rb_cObject, def);
-	}
-	if (!orig_me || !orig_me->type == VM_METHOD_TYPE_UNDEF) {
+    if (UNDEFINED_METHOD_ENTRY_P(orig_me)) {
+	if ((TYPE(klass) != T_MODULE) ||
+	    (orig_me = search_method(rb_cObject, def), UNDEFINED_METHOD_ENTRY_P(orig_me))) {
 	    rb_print_undef(klass, def, 0);
 	}
     }
-    if (FL_TEST(klass, FL_SINGLETON)) {
-	singleton = rb_iv_get(klass, "__attached__");
-    }
 
-    orig_me->alias_count++;
-    me = rb_add_method(klass, name, orig_me->type, me_opts(orig_me), orig_me->flag);
-    me->original_id = def;
-
-    if (!ruby_running) return;
-
-    rb_clear_cache_by_id(name);
-
-    if (singleton) {
-	rb_funcall(singleton, singleton_added, 1, ID2SYM(name));
-    }
-    else {
-	rb_funcall(klass, added, 1, ID2SYM(name));
-    }
+    rb_add_method_me(klass, name, orig_me, orig_me->flag);
 }
 
 /*
@@ -883,7 +913,7 @@ secure_visibility(VALUE self)
 }
 
 static void
-set_method_visibility(VALUE self, int argc, VALUE *argv, ID ex)
+set_method_visibility(VALUE self, int argc, VALUE *argv, rb_method_flag_t ex)
 {
     int i;
     secure_visibility(self);
@@ -1094,10 +1124,10 @@ rb_mod_modfunc(int argc, VALUE *argv, VALUE module)
 	    if (me == 0) {
 		me = search_method(rb_cObject, id);
 	    }
-	    if (me == 0 || me->type == VM_METHOD_TYPE_UNDEF) {
+	    if (UNDEFINED_METHOD_ENTRY_P(me)) {
 		rb_print_undef(module, id, 0);
 	    }
-	    if (me->type != VM_METHOD_TYPE_ZSUPER) {
+	    if (me->def->type != VM_METHOD_TYPE_ZSUPER) {
 		break; /* normal case: need not to follow 'super' link */
 	    }
 	    m = RCLASS_SUPER(m);
@@ -1118,29 +1148,40 @@ rb_method_basic_definition_p(VALUE klass, ID id)
     return 0;
 }
 
+static inline int
+basic_obj_respond_to(VALUE obj, ID id, int pub)
+{
+    VALUE klass = CLASS_OF(obj);
+
+    switch (rb_method_boundp(klass, id, pub|NOEX_RESPONDS)) {
+      case 2:
+	return FALSE;
+      case 0:
+	return RTEST(rb_funcall(obj, respond_to_missing, pub ? 1 : 2, ID2SYM(id), Qtrue));
+      default:
+	return TRUE;
+    }
+}
+
 int
 rb_obj_respond_to(VALUE obj, ID id, int priv)
 {
     VALUE klass = CLASS_OF(obj);
 
     if (rb_method_basic_definition_p(klass, idRespond_to)) {
-	return rb_method_boundp(klass, id, !priv);
+	return basic_obj_respond_to(obj, id, !RTEST(priv));
     }
     else {
-	VALUE args[2];
-	int n = 0;
-	args[n++] = ID2SYM(id);
-	if (priv)
-	    args[n++] = Qtrue;
-	return RTEST(rb_funcall2(obj, idRespond_to, n, args));
+	return RTEST(rb_funcall(obj, idRespond_to, priv ? 2 : 1, ID2SYM(id), Qtrue));
     }
 }
 
 int
 rb_respond_to(VALUE obj, ID id)
 {
-    return rb_obj_respond_to(obj, id, Qfalse);
+    return rb_obj_respond_to(obj, id, FALSE);
 }
+
 
 /*
  *  call-seq:
@@ -1153,6 +1194,9 @@ rb_respond_to(VALUE obj, ID id)
  *  If the method is not implemented,
  *  as Process.fork on Windows, File.lchmod on GNU/Linux, etc.,
  *  false is returned.
+ *
+ *  If the method is not defined, <code>respond_to_missing?</code>
+ *  method is called and the result is returned.
  */
 
 static VALUE
@@ -1163,9 +1207,23 @@ obj_respond_to(int argc, VALUE *argv, VALUE obj)
 
     rb_scan_args(argc, argv, "11", &mid, &priv);
     id = rb_to_id(mid);
-    if (rb_method_boundp(CLASS_OF(obj), id, !RTEST(priv))) {
+    if (basic_obj_respond_to(obj, id, !RTEST(priv)))
 	return Qtrue;
-    }
+    return Qfalse;
+}
+
+/*
+ *  call-seq:
+ *     obj.respond_to_missing?(symbol, include_private=false) => true or false
+ *
+ *  Hook method to return whether the _obj_ can respond to _id_ method
+ *  or not.
+ *
+ *  See #respond_to?.
+ */
+static VALUE
+obj_respond_to_missing(int argc, VALUE *argv, VALUE obj)
+{
     return Qfalse;
 }
 
@@ -1176,6 +1234,7 @@ Init_eval_method(void)
 #define rb_intern(str) rb_intern_const(str)
 
     rb_define_method(rb_mKernel, "respond_to?", obj_respond_to, -1);
+    rb_define_method(rb_mKernel, "respond_to_missing?", obj_respond_to_missing, -1);
 
     rb_define_private_method(rb_cModule, "remove_method", rb_mod_remove_method, -1);
     rb_define_private_method(rb_cModule, "undef_method", rb_mod_undef_method, -1);
@@ -1202,5 +1261,7 @@ Init_eval_method(void)
     singleton_removed = rb_intern("singleton_method_removed");
     undefined = rb_intern("method_undefined");
     singleton_undefined = rb_intern("singleton_method_undefined");
+    attached = rb_intern("__attached__");
+    respond_to_missing = rb_intern("respond_to_missing?");
 }
 

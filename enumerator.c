@@ -26,17 +26,18 @@
  * - Enumerator.new
  *
  * Also, most iteration methods without a block returns an enumerator.
- * For example, Array#map returns an enumerator if no block given.
- * The enumerator has with_index.
+ * For example, Array#map returns an enumerator if a block is not given.
+ * The enumerator has the with_index method.
  * So ary.map.with_index works as follows.
  *
- *   p [1,2,3].map.with_index {|o, i| o+i } #=> [1, 3, 5]
+ *   p %w[foo bar baz].map.with_index {|w,i| "#{i}:#{w}" }
+ *   #=> ["0:foo", "1:bar", "2:baz"]
  *
  * An enumerator object can be used as an external iterator.
  * I.e.  Enumerator#next returns the next value of the iterator.
  * Enumerator#next raises StopIteration at end.
  *
- *   e = [1,2,3].each   # enumerator object.
+ *   e = [1,2,3].each   # returns an enumerator object.
  *   p e.next   #=> 1
  *   p e.next   #=> 2
  *   p e.next   #=> 3
@@ -51,7 +52,7 @@
  *       rescue StopIteration
  *         return $!.result
  *       end
- *       y = yield *vs
+ *       y = yield(*vs)
  *       e.feed y
  *     end
  *   end
@@ -59,16 +60,16 @@
  *   o = Object.new
  *   def o.each
  *     p yield
- *     p yield 1
+ *     p yield(1)
  *     p yield(1, 2)
- *   3
+ *     3
  *   end
  *
  *   # use o.each as an internal iterator directly.
  *   p o.each {|*x| p x; [:b, *x] }
  *   #=> [], [:b], [1], [:b, 1], [1, 2], [:b, 1, 2], 3
  *
- *   # convert o.each to an external external iterator for
+ *   # convert o.each to an external iterator for
  *   # implementing an internal iterator.
  *   p ext_each(o.to_enum) {|*x| p x; [:b, *x] }
  *   #=> [], [:b], [1], [:b, 1], [1, 2], [:b, 1, 2], 3 
@@ -120,17 +121,27 @@ enumerator_mark(void *p)
     rb_gc_mark(ptr->stop_exc);
 }
 
+#define enumerator_free RUBY_TYPED_DEFAULT_FREE
+
+static size_t
+enumerator_memsize(const void *p)
+{
+    return p ? sizeof(struct enumerator) : 0;
+}
+
+static const rb_data_type_t enumerator_data_type = {
+    "enumerator",
+    enumerator_mark,
+    enumerator_free,
+    enumerator_memsize,
+};
+
 static struct enumerator *
 enumerator_ptr(VALUE obj)
 {
     struct enumerator *ptr;
 
-    Data_Get_Struct(obj, struct enumerator, ptr);
-    if (RDATA(obj)->dmark != enumerator_mark) {
-	rb_raise(rb_eTypeError,
-		 "wrong argument type %s (expected %s)",
-		 rb_obj_classname(obj), rb_class2name(rb_cEnumerator));
-    }
+    TypedData_Get_Struct(obj, struct enumerator, &enumerator_data_type, ptr);
     if (!ptr || ptr->obj == Qundef) {
 	rb_raise(rb_eArgError, "uninitialized enumerator");
     }
@@ -312,7 +323,7 @@ enumerator_allocate(VALUE klass)
     struct enumerator *ptr;
     VALUE enum_obj;
 
-    enum_obj = Data_Make_Struct(klass, struct enumerator, enumerator_mark, -1, ptr);
+    enum_obj = TypedData_Make_Struct(klass, struct enumerator, &enumerator_data_type, ptr);
     ptr->obj = Qundef;
 
     return enum_obj;
@@ -329,7 +340,7 @@ enumerator_init(VALUE enum_obj, VALUE obj, VALUE meth, int argc, VALUE *argv)
 {
     struct enumerator *ptr;
 
-    Data_Get_Struct(enum_obj, struct enumerator, ptr);
+    TypedData_Get_Struct(enum_obj, struct enumerator, &enumerator_data_type, ptr);
 
     if (!ptr) {
 	rb_raise(rb_eArgError, "unallocated enumerator");
@@ -389,7 +400,8 @@ enumerator_initialize(int argc, VALUE *argv, VALUE obj)
 	    rb_raise(rb_eArgError, "wrong number of argument (0 for 1+)");
 
 	recv = generator_init(generator_allocate(rb_cGenerator), rb_block_proc());
-    } else {
+    }
+    else {
 	recv = *argv++;
 	if (--argc) {
 	    meth = *argv++;
@@ -412,7 +424,7 @@ enumerator_init_copy(VALUE obj, VALUE orig)
 	rb_raise(rb_eTypeError, "can't copy execution context");
     }
 
-    Data_Get_Struct(obj, struct enumerator, ptr1);
+    TypedData_Get_Struct(obj, struct enumerator, &enumerator_data_type, ptr1);
 
     if (!ptr1) {
 	rb_raise(rb_eArgError, "unallocated enumerator");
@@ -434,6 +446,21 @@ rb_enumeratorize(VALUE obj, VALUE meth, int argc, VALUE *argv)
     return enumerator_init(enumerator_allocate(rb_cEnumerator), obj, meth, argc, argv);
 }
 
+static VALUE
+enumerator_block_call(VALUE obj, rb_block_call_func *func, VALUE arg)
+{
+    int argc = 0;
+    VALUE *argv = 0;
+    const struct enumerator *e = enumerator_ptr(obj);
+    ID meth = e->meth;
+
+    if (e->args) {
+	argc = RARRAY_LENINT(e->args);
+	argv = RARRAY_PTR(e->args);
+    }
+    return rb_block_call(e->obj, meth, argc, argv, func, arg);
+}
+
 /*
  *  call-seq:
  *    enum.each {...}
@@ -445,24 +472,15 @@ rb_enumeratorize(VALUE obj, VALUE meth, int argc, VALUE *argv)
 static VALUE
 enumerator_each(VALUE obj)
 {
-    struct enumerator *e;
-    int argc = 0;
-    VALUE *argv = 0;
-
     if (!rb_block_given_p()) return obj;
-    e = enumerator_ptr(obj);
-    if (e->args) {
-	argc = RARRAY_LENINT(e->args);
-	argv = RARRAY_PTR(e->args);
-    }
-    return rb_block_call(e->obj, e->meth, argc, argv,
-			 enumerator_each_i, (VALUE)e);
+    return enumerator_block_call(obj, enumerator_each_i, obj);
 }
 
 static VALUE
-enumerator_with_index_i(VALUE val, VALUE *memo, int argc, VALUE *argv)
+enumerator_with_index_i(VALUE val, VALUE m, int argc, VALUE *argv)
 {
     VALUE idx;
+    VALUE *memo = (VALUE *)m;
 
     idx = INT2FIX(*memo);
     ++*memo;
@@ -485,23 +503,12 @@ enumerator_with_index_i(VALUE val, VALUE *memo, int argc, VALUE *argv)
 static VALUE
 enumerator_with_index(int argc, VALUE *argv, VALUE obj)
 {
-    struct enumerator *e;
     VALUE memo;
 
     rb_scan_args(argc, argv, "01", &memo);
     RETURN_ENUMERATOR(obj, argc, argv);
     memo = NIL_P(memo) ? 0 : (VALUE)NUM2LONG(memo);
-    e = enumerator_ptr(obj);
-    if (e->args) {
-	argc = RARRAY_LENINT(e->args);
-	argv = RARRAY_PTR(e->args);
-    }
-    else {
-	argc = 0;
-	argv = NULL;
-    }
-    return rb_block_call(e->obj, e->meth, argc, argv,
-			 enumerator_with_index_i, (VALUE)&memo);
+    return enumerator_block_call(obj, enumerator_with_index_i, (VALUE)&memo);
 }
 
 /*
@@ -542,18 +549,8 @@ enumerator_with_object_i(VALUE val, VALUE memo, int argc, VALUE *argv)
 static VALUE
 enumerator_with_object(VALUE obj, VALUE memo)
 {
-    struct enumerator *e;
-    int argc = 0;
-    VALUE *argv = 0;
-
     RETURN_ENUMERATOR(obj, 1, &memo);
-    e = enumerator_ptr(obj);
-    if (e->args) {
-	argc = RARRAY_LENINT(e->args);
-	argv = RARRAY_PTR(e->args);
-    }
-    rb_block_call(e->obj, e->meth, argc, argv,
-		  enumerator_with_object_i, memo);
+    enumerator_block_call(obj, enumerator_with_object_i, memo);
 
     return memo;
 }
@@ -580,7 +577,7 @@ next_i(VALUE curr, VALUE obj)
     VALUE result;
 
     result = rb_block_call(obj, id_each, 0, 0, next_ii, obj);
-    e->stop_exc = rb_exc_new2(rb_eStopIteration, "iteration reached at end");
+    e->stop_exc = rb_exc_new2(rb_eStopIteration, "iteration reached an end");
     rb_ivar_set(e->stop_exc, rb_intern("result"), result);
     return rb_fiber_yield(1, &nil);
 }
@@ -592,6 +589,31 @@ next_init(VALUE obj, struct enumerator *e)
     e->dst = curr;
     e->fib = rb_fiber_new(next_i, obj);
     e->lookahead = Qundef;
+}
+
+static VALUE
+get_next_values(VALUE obj, struct enumerator *e)
+{
+    VALUE curr, vs;
+
+    if (e->stop_exc)
+	rb_exc_raise(e->stop_exc);
+
+    curr = rb_fiber_current();
+
+    if (!e->fib || !rb_fiber_alive_p(e->fib)) {
+	next_init(obj, e);
+    }
+
+    vs = rb_fiber_resume(e->fib, 1, &curr);
+    if (e->stop_exc) {
+	e->fib = 0;
+	e->dst = Qnil;
+	e->lookahead = Qundef;
+	e->feedvalue = Qundef;
+	rb_exc_raise(e->stop_exc);
+    }
+    return vs;
 }
 
 /*
@@ -642,36 +664,19 @@ static VALUE
 enumerator_next_values(VALUE obj)
 {
     struct enumerator *e = enumerator_ptr(obj);
-    VALUE curr, v;
+    VALUE vs;
 
     if (e->lookahead != Qundef) {
-        v = e->lookahead;
+        vs = e->lookahead;
         e->lookahead = Qundef;
-        return v;
+        return vs;
     }
 
-    if (e->stop_exc)
-	rb_exc_raise(e->stop_exc);
-
-    curr = rb_fiber_current();
-
-    if (!e->fib || !rb_fiber_alive_p(e->fib)) {
-	next_init(obj, e);
-    }
-
-    v = rb_fiber_resume(e->fib, 1, &curr);
-    if (e->stop_exc) {
-	e->fib = 0;
-	e->dst = Qnil;
-	e->lookahead = Qundef;
-	e->feedvalue = Qundef;
-	rb_exc_raise(e->stop_exc);
-    }
-    return v;
+    return get_next_values(obj, e);
 }
 
 static VALUE
-ary2sv(VALUE args)
+ary2sv(VALUE args, int dup)
 {
     if (TYPE(args) != T_ARRAY)
         return args;
@@ -684,6 +689,8 @@ ary2sv(VALUE args)
         return RARRAY_PTR(args)[0];
 
       default:
+        if (dup)
+            return rb_ary_dup(args);
         return args;
     }
 }
@@ -696,6 +703,13 @@ ary2sv(VALUE args)
  * position forward.  When the position reached at the end, StopIteration
  * is raised.
  *
+ *   a = [1,2,3]
+ *   e = a.to_enum
+ *   p e.next   #=> 1
+ *   p e.next   #=> 2
+ *   p e.next   #=> 3
+ *   p e.next   #raises StopIteration
+ *
  * Note that enumeration sequence by next method does not affect other
  * non-external enumeration methods, unless underlying iteration
  * methods itself has side-effect, e.g. IO#each_line.
@@ -706,7 +720,18 @@ static VALUE
 enumerator_next(VALUE obj)
 {
     VALUE vs = enumerator_next_values(obj);
-    return ary2sv(vs);
+    return ary2sv(vs, 0);
+}
+
+static VALUE
+enumerator_peek_values(VALUE obj)
+{
+    struct enumerator *e = enumerator_ptr(obj);
+
+    if (e->lookahead == Qundef) {
+        e->lookahead = get_next_values(obj, e);
+    }
+    return e->lookahead;
 }
 
 /*
@@ -727,6 +752,7 @@ enumerator_next(VALUE obj)
  *   p e.peek_values    #=> []
  *   e.next  
  *   p e.peek_values    #=> [1]
+ *   p e.peek_values    #=> [1]
  *   e.next  
  *   p e.peek_values    #=> [1, 2]
  *   e.next  
@@ -735,19 +761,9 @@ enumerator_next(VALUE obj)
  */
 
 static VALUE
-enumerator_peek_values(VALUE obj)
+enumerator_peek_values_m(VALUE obj)
 {
-    struct enumerator *e = enumerator_ptr(obj);
-    VALUE v;
-
-    if (e->lookahead != Qundef) {
-        v = e->lookahead;
-        return v;
-    }
-
-    v = enumerator_next_values(obj);
-    e->lookahead = v;
-    return v;
+    return rb_ary_dup(enumerator_peek_values(obj));
 }
 
 /*
@@ -758,13 +774,23 @@ enumerator_peek_values(VALUE obj)
  * position forward.  When the position reached at the end, StopIteration
  * is raised.
  *
+ *   a = [1,2,3]
+ *   e = a.to_enum
+ *   p e.next   #=> 1
+ *   p e.peek   #=> 2
+ *   p e.peek   #=> 2
+ *   p e.peek   #=> 2
+ *   p e.next   #=> 2
+ *   p e.next   #=> 3
+ *   p e.next   #raises StopIteration
+ *
  */
 
 static VALUE
 enumerator_peek(VALUE obj)
 {
     VALUE vs = enumerator_peek_values(obj);
-    return ary2sv(vs);
+    return ary2sv(vs, 1);
 }
 
 /*
@@ -773,21 +799,33 @@ enumerator_peek(VALUE obj)
  *
  * Set the value for the next yield in the enumerator returns.
  *
- * If the value is not set, yield returns nil.
+ * If the value is not set, the yield returns nil.
  *
  * This value is cleared after used.
  *
  *   o = Object.new
  *   def o.each
- *     p yield          #=> 1
- *     p yield          #=> nil
- *     p yield
+ *     # (2)
+ *     x = yield               
+ *     p x          #=> "foo"
+ *     # (5)
+ *     x = yield                 
+ *     p x          #=> nil
+ *     # (7)
+ *     x = yield
+ *     # not reached
+ *     p x
  *   end
  *   e = o.to_enum
+ *   # (1)
  *   e.next
- *   e.feed 1
+ *   # (3)
+ *   e.feed "foo"
+ *   # (4)
  *   e.next
+ *   # (6)
  *   e.next
+ *   # (8)
  *
  */
 
@@ -901,17 +939,27 @@ yielder_mark(void *p)
     rb_gc_mark(ptr->proc);
 }
 
+#define yielder_free RUBY_TYPED_DEFAULT_FREE
+
+static size_t
+yielder_memsize(const void *p)
+{
+    return p ? sizeof(struct yielder) : 0;
+}
+
+static const rb_data_type_t yielder_data_type = {
+    "yielder",
+    yielder_mark,
+    yielder_free,
+    yielder_memsize,
+};
+
 static struct yielder *
 yielder_ptr(VALUE obj)
 {
     struct yielder *ptr;
 
-    Data_Get_Struct(obj, struct yielder, ptr);
-    if (RDATA(obj)->dmark != yielder_mark) {
-	rb_raise(rb_eTypeError,
-		 "wrong argument type %s (expected %s)",
-		 rb_obj_classname(obj), rb_class2name(rb_cYielder));
-    }
+    TypedData_Get_Struct(obj, struct yielder, &yielder_data_type, ptr);
     if (!ptr || ptr->proc == Qundef) {
 	rb_raise(rb_eArgError, "uninitialized yielder");
     }
@@ -925,7 +973,7 @@ yielder_allocate(VALUE klass)
     struct yielder *ptr;
     VALUE obj;
 
-    obj = Data_Make_Struct(klass, struct yielder, yielder_mark, -1, ptr);
+    obj = TypedData_Make_Struct(klass, struct yielder, &yielder_data_type, ptr);
     ptr->proc = Qundef;
 
     return obj;
@@ -936,7 +984,7 @@ yielder_init(VALUE obj, VALUE proc)
 {
     struct yielder *ptr;
 
-    Data_Get_Struct(obj, struct yielder, ptr);
+    TypedData_Get_Struct(obj, struct yielder, &yielder_data_type, ptr);
 
     if (!ptr) {
 	rb_raise(rb_eArgError, "unallocated yielder");
@@ -987,17 +1035,27 @@ generator_mark(void *p)
     rb_gc_mark(ptr->proc);
 }
 
+#define generator_free RUBY_TYPED_DEFAULT_FREE
+
+static size_t
+generator_memsize(const void *p)
+{
+    return p ? sizeof(struct generator) : 0;
+}
+
+static const rb_data_type_t generator_data_type = {
+    "generator",
+    generator_mark,
+    generator_free,
+    generator_memsize,
+};
+
 static struct generator *
 generator_ptr(VALUE obj)
 {
     struct generator *ptr;
 
-    Data_Get_Struct(obj, struct generator, ptr);
-    if (RDATA(obj)->dmark != generator_mark) {
-	rb_raise(rb_eTypeError,
-		 "wrong argument type %s (expected %s)",
-		 rb_obj_classname(obj), rb_class2name(rb_cGenerator));
-    }
+    TypedData_Get_Struct(obj, struct generator, &generator_data_type, ptr);
     if (!ptr || ptr->proc == Qundef) {
 	rb_raise(rb_eArgError, "uninitialized generator");
     }
@@ -1011,7 +1069,7 @@ generator_allocate(VALUE klass)
     struct generator *ptr;
     VALUE obj;
 
-    obj = Data_Make_Struct(klass, struct generator, generator_mark, -1, ptr);
+    obj = TypedData_Make_Struct(klass, struct generator, &generator_data_type, ptr);
     ptr->proc = Qundef;
 
     return obj;
@@ -1022,7 +1080,7 @@ generator_init(VALUE obj, VALUE proc)
 {
     struct generator *ptr;
 
-    Data_Get_Struct(obj, struct generator, ptr);
+    TypedData_Get_Struct(obj, struct generator, &generator_data_type, ptr);
 
     if (!ptr) {
 	rb_raise(rb_eArgError, "unallocated generator");
@@ -1069,7 +1127,7 @@ generator_init_copy(VALUE obj, VALUE orig)
 
     ptr0 = generator_ptr(orig);
 
-    Data_Get_Struct(obj, struct generator, ptr1);
+    TypedData_Get_Struct(obj, struct generator, &generator_data_type, ptr1);
 
     if (!ptr1) {
 	rb_raise(rb_eArgError, "unallocated generator");
@@ -1101,7 +1159,6 @@ generator_each(VALUE obj)
  *   stopiteration.result       => value
  *
  * Returns the return value of the iterator.
- *
  *
  *   o = Object.new
  *   def o.each
@@ -1149,7 +1206,7 @@ Init_Enumerator(void)
     rb_define_method(rb_cEnumerator, "with_index", enumerator_with_index, -1);
     rb_define_method(rb_cEnumerator, "with_object", enumerator_with_object, 1);
     rb_define_method(rb_cEnumerator, "next_values", enumerator_next_values, 0);
-    rb_define_method(rb_cEnumerator, "peek_values", enumerator_peek_values, 0);
+    rb_define_method(rb_cEnumerator, "peek_values", enumerator_peek_values_m, 0);
     rb_define_method(rb_cEnumerator, "next", enumerator_next, 0);
     rb_define_method(rb_cEnumerator, "peek", enumerator_peek, 0);
     rb_define_method(rb_cEnumerator, "feed", enumerator_feed, 1);

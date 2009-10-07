@@ -150,6 +150,7 @@ rb_get_path_check(VALUE obj, int level)
     if (obj != tmp && insecure_obj_p(tmp, level)) {
 	rb_insecure_operation();
     }
+    rb_enc_check(tmp, rb_enc_from_encoding(rb_usascii_encoding()));
     return rb_str_new4(tmp);
 }
 
@@ -247,6 +248,17 @@ rb_file_path(VALUE obj)
     return rb_obj_taint(rb_str_dup(fptr->pathv));
 }
 
+static size_t
+stat_memsize(const void *p)
+{
+    return p ? sizeof(struct stat) : 0;
+}
+
+static const rb_data_type_t stat_data_type = {
+    "stat",
+    NULL, RUBY_TYPED_DEFAULT_FREE, stat_memsize,
+};
+
 static VALUE
 stat_new_0(VALUE klass, struct stat *st)
 {
@@ -256,7 +268,7 @@ stat_new_0(VALUE klass, struct stat *st)
 	nst = ALLOC(struct stat);
 	*nst = *st;
     }
-    return Data_Wrap_Struct(klass, NULL, -1, nst);
+    return TypedData_Wrap_Struct(klass, &stat_data_type, nst);
 }
 
 static VALUE
@@ -269,7 +281,7 @@ static struct stat*
 get_stat(VALUE self)
 {
     struct stat* st;
-    Data_Get_Struct(self, struct stat, st);
+    TypedData_Get_Struct(self, struct stat, &stat_data_type, st);
     if (!st) rb_raise(rb_eTypeError, "uninitialized File::Stat");
     return st;
 }
@@ -746,7 +758,7 @@ rb_stat_inspect(VALUE self)
     };
 
     struct stat* st;
-    Data_Get_Struct(self, struct stat, st);
+    TypedData_Get_Struct(self, struct stat, &stat_data_type, st);
     if (!st) {
         return rb_sprintf("#<%s: uninitialized>", rb_obj_classname(self));
     }
@@ -1027,9 +1039,6 @@ eaccess(const char *path, int mode)
 
     return -1;
 #else
-# if defined(_MSC_VER) || defined(__MINGW32__)
-    mode &= ~1;
-# endif
     return ACCESS(path, mode);
 #endif
 }
@@ -2500,27 +2509,28 @@ static VALUE
 rb_file_s_rename(VALUE klass, VALUE from, VALUE to)
 {
     const char *src, *dst;
+    VALUE f, t;
 
     rb_secure(2);
     FilePathValue(from);
     FilePathValue(to);
-    from = rb_str_conv_for_path(from);
-    to = rb_str_conv_for_path(to);
-    src = RSTRING_PTR(from);
-    dst = RSTRING_PTR(to);
+    f = rb_str_conv_for_path(from);
+    t = rb_str_conv_for_path(to);
+    src = RSTRING_PTR(f);
+    dst = RSTRING_PTR(t);
 #if defined __CYGWIN__
     errno = 0;
 #endif
     if (RENAME(src, dst) < 0) {
-#if defined DOSISH && !defined _WIN32
+#if defined DOSISH
 	switch (errno) {
 	  case EEXIST:
 #if defined (__EMX__)
 	  case EACCES:
 #endif
-	    if (chmod(dst, 0666) == 0 &&
-		unlink(dst) == 0 &&
-		rename(src, dst) == 0)
+	    if (CHMOD(dst, 0666) == 0 &&
+		UNLINK(dst) == 0 &&
+		RENAME(src, dst) == 0)
 		return INT2FIX(0);
 	}
 #endif

@@ -165,11 +165,11 @@ getinstancevariable
  */
 DEFINE_INSN
 setinstancevariable
-(ID id)
+(ID id, IC ic)
 (VALUE val)
 ()
 {
-    rb_ivar_set(GET_SELF(), id, val);
+    vm_setivar(GET_SELF(), id, val, ic);
 }
 
 /**
@@ -583,7 +583,7 @@ newhash
 (...)
 (VALUE val) // inc += 1 - num;
 {
-    int i;
+    rb_num_t i;
     val = rb_hash_new();
 
     for (i = num; i > 0; i -= 2) {
@@ -982,8 +982,8 @@ send
     const rb_method_entry_t *me;
     VALUE recv, klass;
     rb_block_t *blockptr = 0;
-    rb_num_t num = caller_setup_args(th, GET_CFP(), op_flag, (int)op_argc,
-				     (rb_iseq_t *)blockiseq, &blockptr);
+    int num = caller_setup_args(th, GET_CFP(), op_flag, (int)op_argc,
+				(rb_iseq_t *)blockiseq, &blockptr);
     rb_num_t flag = op_flag;
     ID id = op_id;
 
@@ -1008,8 +1008,8 @@ invokesuper
 (VALUE val) // inc += - (int)(op_argc + ((op_flag & VM_CALL_ARGS_BLOCKARG_BIT) ? 1 : 0));
 {
     rb_block_t *blockptr = !(op_flag & VM_CALL_ARGS_BLOCKARG_BIT) ? GET_BLOCK_PTR() : 0;
-    rb_num_t num = caller_setup_args(th, GET_CFP(), op_flag,
-				     (int)op_argc, blockiseq, &blockptr);
+    int num = caller_setup_args(th, GET_CFP(), op_flag,
+				(int)op_argc, blockiseq, &blockptr);
     VALUE recv, klass;
     ID id;
     VALUE flag = VM_CALL_SUPER_BIT | VM_CALL_FCALL_BIT;
@@ -1174,7 +1174,7 @@ getinlinecache
 (VALUE val)
 {
     if (ic->ic_vmstat == GET_VM_STATE_VERSION()) {
-	val = ic->ic_value;
+	val = ic->ic_value.value;
 	JUMP(dst);
     }
     else {
@@ -1195,11 +1195,12 @@ onceinlinecache
 (VALUE val)
 {
     if (ic->ic_vmstat) {
-	val = ic->ic_value;
+	val = ic->ic_value.value;
 	JUMP(dst);
     }
     else {
 	/* none */
+	ic->ic_value.value = Qundef;
 	val = Qnil;
     }
 }
@@ -1217,7 +1218,10 @@ setinlinecache
 {
     IC ic = GET_CONST_INLINE_CACHE(dst);
 
-    ic->ic_value = val;
+    if (ic->ic_value.value == Qundef) {
+	rb_ary_push(GET_ISEQ()->mark_ary, val);
+    }
+    ic->ic_value.value = val;
     ic->ic_vmstat = GET_VM_STATE_VERSION() - ruby_vm_const_missing_count;
     ruby_vm_const_missing_count = 0;
 }
@@ -1287,7 +1291,7 @@ opt_checkenv
  */
 DEFINE_INSN
 opt_plus
-()
+(IC ic)
 (VALUE recv, VALUE obj)
 (VALUE val)
 {
@@ -1363,7 +1367,7 @@ opt_plus
  */
 DEFINE_INSN
 opt_minus
-()
+(IC ic)
 (VALUE recv, VALUE obj)
 (VALUE val)
 {
@@ -1412,7 +1416,7 @@ opt_minus
  */
 DEFINE_INSN
 opt_mult
-()
+(IC ic)
 (VALUE recv, VALUE obj)
 (VALUE val)
 {
@@ -1465,7 +1469,7 @@ opt_mult
  */
 DEFINE_INSN
 opt_div
-()
+(IC ic)
 (VALUE recv, VALUE obj)
 (VALUE val)
 {
@@ -1529,7 +1533,7 @@ opt_div
  */
 DEFINE_INSN
 opt_mod
-()
+(IC ic)
 (VALUE recv, VALUE obj)
 (VALUE val)
 {
@@ -1629,16 +1633,16 @@ opt_eq
  */
 DEFINE_INSN
 opt_neq
-(IC ic1, IC ic2)
+(IC ic, IC ic_eq)
 (VALUE recv, VALUE obj)
 (VALUE val)
 {
     extern VALUE rb_obj_not_equal(VALUE obj1, VALUE obj2);
-    const rb_method_entry_t *me = vm_method_search(idNeq, CLASS_OF(recv), ic1);
+    const rb_method_entry_t *me = vm_method_search(idNeq, CLASS_OF(recv), ic);
     val = Qundef;
 
     if (check_cfunc(me, rb_obj_not_equal)) {
-	val = opt_eq_func(recv, obj, ic2);
+	val = opt_eq_func(recv, obj, ic_eq);
 
 	if (val != Qundef) {
 	    val = RTEST(val) ? Qfalse : Qtrue;
@@ -1660,7 +1664,7 @@ opt_neq
  */
 DEFINE_INSN
 opt_lt
-()
+(IC ic)
 (VALUE recv, VALUE obj)
 (VALUE val)
 {
@@ -1710,7 +1714,7 @@ opt_lt
  */
 DEFINE_INSN
 opt_le
-()
+(IC ic)
 (VALUE recv, VALUE obj)
 (VALUE val)
 {
@@ -1740,7 +1744,7 @@ opt_le
  */
 DEFINE_INSN
 opt_gt
-()
+(IC ic)
 (VALUE recv, VALUE obj)
 (VALUE val)
 {
@@ -1790,7 +1794,7 @@ opt_gt
  */
 DEFINE_INSN
 opt_ge
-()
+(IC ic)
 (VALUE recv, VALUE obj)
 (VALUE val)
 {
@@ -1819,7 +1823,7 @@ opt_ge
  */
 DEFINE_INSN
 opt_ltlt
-()
+(IC ic)
 (VALUE recv, VALUE obj)
 (VALUE val)
 {
@@ -1853,7 +1857,7 @@ opt_ltlt
  */
 DEFINE_INSN
 opt_aref
-()
+(IC ic)
 (VALUE recv, VALUE obj)
 (VALUE val)
 {
@@ -1883,7 +1887,7 @@ opt_aref
  */
 DEFINE_INSN
 opt_aset
-()
+(IC ic)
 (VALUE recv, VALUE obj, VALUE set)
 (VALUE val)
 {
@@ -1917,12 +1921,12 @@ opt_aset
  */
 DEFINE_INSN
 opt_length
-()
+(IC ic)
 (VALUE recv)
 (VALUE val)
 {
-    if (!SPECIAL_CONST_P(recv) &&
-	BASIC_OP_UNREDEFINED_P(BOP_LENGTH)) {
+    if (LIKELY(!SPECIAL_CONST_P(recv) &&
+	       BASIC_OP_UNREDEFINED_P(BOP_LENGTH))) {
 	if (HEAP_CLASS_OF(recv) == rb_cString) {
 	    val = rb_str_length(recv);
 	}
@@ -1945,12 +1949,45 @@ opt_length
 
 /**
   @c optimize
+  @e optimized size
+  @j 最適化された recv.size()。
+ */
+DEFINE_INSN
+opt_size
+(IC ic)
+(VALUE recv)
+(VALUE val)
+{
+    if (LIKELY(BASIC_OP_UNREDEFINED_P(BOP_SIZE) &&
+	       !SPECIAL_CONST_P(recv))) {
+	if (HEAP_CLASS_OF(recv) == rb_cString) {
+	    val = rb_str_length(recv);
+	}
+	else if (HEAP_CLASS_OF(recv) == rb_cArray) {
+	    val = LONG2NUM(RARRAY_LEN(recv));
+	}
+	else if (HEAP_CLASS_OF(recv) == rb_cHash) {
+	    val = INT2FIX(RHASH_SIZE(recv));
+	}
+	else {
+	    goto INSN_LABEL(normal_dispatch);
+	}
+    }
+    else {
+      INSN_LABEL(normal_dispatch):
+	PUSH(recv);
+	CALL_SIMPLE_METHOD(0, idSize, recv);
+    }
+}
+
+/**
+  @c optimize
   @e optimized succ
   @j 最適化された recv.succ()。
  */
 DEFINE_INSN
 opt_succ
-()
+(IC ic)
 (VALUE recv)
 (VALUE val)
 {

@@ -304,6 +304,55 @@ class TestObject < Test::Unit::TestCase
     end
   end
 
+  def test_respond_to_missing
+    c = Class.new do
+      def respond_to_missing?(id)
+        if id == :foobar
+          true
+        else
+          false
+        end
+      end
+      def method_missing(id,*args)
+        if id == :foobar
+          return [:foo, *args]
+        else
+          super
+        end
+      end
+    end
+
+    foo = c.new
+    assert_equal([:foo], foo.foobar);
+    assert_equal([:foo, 1], foo.foobar(1));
+    assert_equal([:foo, 1, 2, 3, 4, 5], foo.foobar(1, 2, 3, 4, 5));
+    assert(foo.respond_to?(:foobar))
+    assert_equal(false, foo.respond_to?(:foobarbaz))
+    assert_raise(NoMethodError) do
+      foo.foobarbaz
+    end
+
+    foobar = foo.method(:foobar)
+    assert_equal(-1, foobar.arity);
+    assert_equal([:foo], foobar.call);
+    assert_equal([:foo, 1], foobar.call(1));
+    assert_equal([:foo, 1, 2, 3, 4, 5], foobar.call(1, 2, 3, 4, 5));
+    assert_equal(foobar, foo.method(:foobar))
+    assert_not_equal(foobar, c.new.method(:foobar))
+
+    c = Class.new(c)
+    assert_equal(false, c.method_defined?(:foobar))
+    assert_raise(NameError, '[ruby-core:25748]') do
+      c.instance_method(:foobar)
+    end
+
+    m = Module.new
+    assert_equal(false, m.method_defined?(:foobar))
+    assert_raise(NameError, '[ruby-core:25748]') do
+      m.instance_method(:foobar)
+    end
+  end
+
   def test_send_with_no_arguments
     assert_raise(ArgumentError) { 1.send }
   end

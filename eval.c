@@ -14,6 +14,7 @@
 #include "eval_intern.h"
 #include "iseq.h"
 #include "gc.h"
+#include "ruby/vm.h"
 
 #define numberof(array) (int)(sizeof(array) / sizeof((array)[0]))
 
@@ -32,13 +33,6 @@ VALUE rb_eSysStackError;
 
 /* initialize ruby */
 
-#if defined(__APPLE__)
-#define environ (*_NSGetEnviron())
-#elif !defined(_WIN32)
-extern char **environ;
-#endif
-char **rb_origenviron;
-
 void rb_clear_trace_func(void);
 void rb_thread_stop_timer_thread(void);
 
@@ -55,8 +49,6 @@ ruby_init(void)
     if (initialized)
 	return;
     initialized = 1;
-
-    rb_origenviron = environ;
 
     ruby_init_stack((void *)&state);
     Init_BareVM();
@@ -159,6 +151,7 @@ ruby_cleanup(volatile int ex)
     POP_TAG();
     rb_thread_stop_timer_thread();
 
+    state = 0;
     for (nerr = 0; nerr < numberof(errs); ++nerr) {
 	VALUE err = errs[nerr];
 
@@ -172,12 +165,15 @@ ruby_cleanup(volatile int ex)
 	}
 	else if (rb_obj_is_kind_of(err, rb_eSignal)) {
 	    VALUE sig = rb_iv_get(err, "signo");
-	    ruby_default_signal(NUM2INT(sig));
+	    state = NUM2INT(sig);
+	    break;
 	}
 	else if (ex == 0) {
 	    ex = 1;
 	}
     }
+    ruby_vm_destruct(GET_VM());
+    if (state) ruby_default_signal(state);
 
 #if EXIT_SUCCESS != 0 || EXIT_FAILURE != 1
     switch (ex) {
@@ -693,7 +689,7 @@ frame_func_id(rb_control_frame_t *cfp)
 {
     rb_iseq_t *iseq = cfp->iseq;
     if (!iseq) {
-	return cfp->me->original_id;
+	return cfp->me->def->original_id;
     }
     while (iseq) {
 	if (RUBY_VM_IFUNC_P(iseq)) {

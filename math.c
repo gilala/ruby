@@ -13,6 +13,8 @@
 #include <math.h>
 #include <errno.h>
 
+#define numberof(array) (int)(sizeof(array) / sizeof((array)[0]))
+
 VALUE rb_mMath;
 
 extern VALUE rb_to_float(VALUE val);
@@ -25,21 +27,18 @@ extern VALUE rb_to_float(VALUE val);
 static void
 domain_check(double x, double y, const char *msg)
 {
-    while(1) {
-	if (errno) {
-	    rb_sys_fail(msg);
-	}
-	if (isnan(y)) {
-	    if (isnan(x)) break;
+    if (!isnan(y)) return;
+    else if (isnan(x)) return;
+    else {
+	if (!errno) {
 #if defined(EDOM)
 	    errno = EDOM;
-#elif defined(ERANGE)
+#else
 	    errno = ERANGE;
 #endif
-	    continue;
 	}
-	break;
     }
+    rb_sys_fail(msg);
 }
 
 static void
@@ -637,7 +636,7 @@ math_erfc(VALUE obj, VALUE x)
 static VALUE
 math_gamma(VALUE obj, VALUE x)
 {
-    static double fact_table[] = {
+    static const double fact_table[] = {
         /* fact(0) */ 1.0,
         /* fact(1) */ 1.0,
         /* fact(2) */ 2.0,
@@ -662,17 +661,19 @@ math_gamma(VALUE obj, VALUE x)
         /* fact(21) */ 51090942171709440000.0,
         /* fact(22) */ 1124000727777607680000.0,
         /* fact(23)=25852016738884976640000 needs 56bit mantissa which is
-         * impossible to represent exactly in IEEE 754 double. */
+         * impossible to represent exactly in IEEE 754 double which have
+         * 53bit mantissa. */
     };
     double d0, d;
     double intpart, fracpart;
+    int n;
     Need_Float(x);
     d0 = RFLOAT_VALUE(x);
     fracpart = modf(d0, &intpart);
     if (fracpart == 0.0 &&
-            0 < intpart &&
-            (size_t)intpart <= sizeof(fact_table)/sizeof(*fact_table)) {
-        return DBL2NUM(fact_table[(int)intpart - 1]);
+	0 < intpart &&
+	(n = (int)intpart - 1) < numberof(fact_table)) {
+        return DBL2NUM(fact_table[n]);
     }
     errno = 0;
     d = tgamma(d0);

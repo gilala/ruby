@@ -263,6 +263,7 @@ NORETURN(void rb_exc_fatal(VALUE));
 VALUE rb_f_exit(int,VALUE*);
 VALUE rb_f_abort(int,VALUE*);
 void rb_remove_method(VALUE, const char*);
+void rb_remove_method_id(VALUE, ID);
 #define rb_disable_super(klass, name) ((void)0)
 #define rb_enable_super(klass, name) ((void)0)
 #define HAVE_RB_DEFINE_ALLOC_FUNC 1
@@ -342,6 +343,7 @@ void rb_thread_atfork(void);
 void rb_thread_atfork_before_exec(void);
 VALUE rb_exec_recursive(VALUE(*)(VALUE, VALUE, int),VALUE,VALUE);
 VALUE rb_exec_recursive_paired(VALUE(*)(VALUE, VALUE, int),VALUE,VALUE,VALUE);
+VALUE rb_exec_recursive_outer(VALUE(*)(VALUE, VALUE, int),VALUE,VALUE);
 /* file.c */
 VALUE rb_file_s_expand_path(int, VALUE *);
 VALUE rb_file_expand_path(VALUE, VALUE);
@@ -467,6 +469,7 @@ VALUE rb_class_inherited_p(VALUE, VALUE);
 VALUE rb_convert_type(VALUE,int,const char*,const char*);
 VALUE rb_check_convert_type(VALUE,int,const char*,const char*);
 VALUE rb_check_to_integer(VALUE, const char *);
+VALUE rb_check_to_float(VALUE);
 VALUE rb_to_int(VALUE);
 VALUE rb_Integer(VALUE);
 VALUE rb_to_float(VALUE);
@@ -599,6 +602,8 @@ VALUE rb_external_str_new(const char*, long);
 VALUE rb_external_str_new_cstr(const char*);
 VALUE rb_locale_str_new(const char*, long);
 VALUE rb_locale_str_new_cstr(const char*);
+VALUE rb_filesystem_str_new(const char*, long);
+VALUE rb_filesystem_str_new_cstr(const char*);
 VALUE rb_str_buf_new(long);
 VALUE rb_str_buf_new_cstr(const char*);
 VALUE rb_str_buf_new2(const char*);
@@ -632,12 +637,15 @@ VALUE rb_str_cat(VALUE, const char*, long);
 VALUE rb_str_cat2(VALUE, const char*);
 VALUE rb_str_append(VALUE, VALUE);
 VALUE rb_str_concat(VALUE, VALUE);
-int rb_memhash(const void *ptr, long len);
-VALUE rb_hash_start(VALUE);
-VALUE rb_hash_uint32(VALUE, unsigned int);
-VALUE rb_hash_uint(VALUE, VALUE);
-VALUE rb_hash_end(VALUE);
-int rb_str_hash(VALUE);
+st_index_t rb_memhash(const void *ptr, long len);
+st_index_t rb_hash_start(st_index_t);
+st_index_t rb_hash_uint32(st_index_t, uint32_t);
+st_index_t rb_hash_uint(st_index_t, st_index_t);
+st_index_t rb_hash_end(st_index_t);
+#define rb_hash_uint32(h, i) st_hash_uint32(h, i)
+#define rb_hash_uint(h, i) st_hash_uint(h, i)
+#define rb_hash_end(h) st_hash_end(h)
+st_index_t rb_str_hash(VALUE);
 int rb_str_hash_cmp(VALUE,VALUE);
 int rb_str_comparable(VALUE, VALUE);
 int rb_str_cmp(VALUE, VALUE);
@@ -728,7 +736,7 @@ VALUE rb_struct_initialize(VALUE, VALUE);
 VALUE rb_struct_aref(VALUE, VALUE);
 VALUE rb_struct_aset(VALUE, VALUE, VALUE);
 VALUE rb_struct_getmember(VALUE, ID);
-VALUE rb_struct_iv_get(VALUE, const char*);
+DEPRECATED(VALUE rb_struct_iv_get(VALUE, const char*));
 VALUE rb_struct_s_members(VALUE);
 VALUE rb_struct_members(VALUE);
 VALUE rb_struct_alloc_noinit(VALUE);

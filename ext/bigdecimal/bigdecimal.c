@@ -203,10 +203,22 @@ static int   VpLimitRound(Real *c,U_LONG ixDigit);
  */
 
 static void
-BigDecimal_delete(Real *pv)
+BigDecimal_delete(void *pv)
 {
     VpFree(pv);
 }
+
+static size_t
+BigDecimal_memsize(const void *ptr)
+{
+    const Real *pv = ptr;
+    return pv ? (sizeof(*pv) + pv->MaxPrec * sizeof(U_LONG)) : 0;
+}
+
+static const rb_data_type_t BigDecimal_data_type = {
+    "BigDecimal",
+    0, BigDecimal_delete, BigDecimal_memsize,
+};
 
 static VALUE
 ToValue(Real *p)
@@ -227,12 +239,27 @@ GetVpValue(VALUE v, int must)
     Real *pv;
     VALUE bg;
     char szD[128];
+    VALUE orig = Qundef;
+    int util_loaded = 0;
 
+again:
     switch(TYPE(v))
     {
+    case T_RATIONAL:
+        if(orig == Qundef ? (orig = v, 1) : orig != v) {
+            if(!util_loaded) {
+                rb_require("bigdecimal/util");
+                util_loaded = 1;
+            }
+            v = rb_funcall2(v, rb_intern("to_d"), 0, 0);
+            goto again;
+        }
+        v = orig;
+        goto SomeOneMayDoIt;
+
     case T_DATA:
-        if(RDATA(v)->dfree ==(void *) BigDecimal_delete) {
-            Data_Get_Struct(v, Real, pv);
+        if(rb_typeddata_is_kind_of(v, &BigDecimal_data_type)) {
+            pv = DATA_PTR(v);
             return pv;
         } else {
             goto SomeOneMayDoIt;
@@ -503,7 +530,7 @@ VP_EXPORT Real *
 VpNewRbClass(U_LONG mx, char *str, VALUE klass)
 {
     Real *pv = VpAlloc(mx,str);
-    pv->obj = (VALUE)Data_Wrap_Struct(klass, 0, BigDecimal_delete, pv);
+    pv->obj = TypedData_Wrap_Struct(klass, &BigDecimal_data_type, pv);
     return pv;
 }
 
@@ -511,7 +538,7 @@ VP_EXPORT Real *
 VpCreateRbObject(U_LONG mx, const char *str)
 {
     Real *pv = VpAlloc(mx,str);
-    pv->obj = (VALUE)Data_Wrap_Struct(rb_cBigDecimal, 0, BigDecimal_delete, pv);
+    pv->obj = TypedData_Wrap_Struct(rb_cBigDecimal, &BigDecimal_data_type, pv);
     return pv;
 }
 
@@ -1136,10 +1163,7 @@ BigDecimal_divremain(VALUE self, VALUE r, Real **dv, Real **rv)
 
 /* Returns the remainder from dividing by the value.
  *
- * If the values divided are of the same sign, the remainder is the same as
- * the modulus (see divmod).
- *
- * Otherwise, the remainder is the modulus minus the value divided by.
+ * x.remainder(y) means x-y*(x/y).truncate
  */
 static VALUE
 BigDecimal_remainder(VALUE self, VALUE r) /* remainder */

@@ -34,7 +34,7 @@ end
 
 require 'rdoc/rdoc'
 
-require File.join(File.expand_path(File.dirname(__FILE__)), 'mockgemui')
+require_relative 'mockgemui'
 
 module Gem
   def self.searcher=(searcher)
@@ -76,6 +76,11 @@ class RubyGemTestCase < MiniTest::Unit::TestCase
     @userhome = File.join @tempdir, 'userhome'
 
     Gem.ensure_gem_subdirectories @gemhome
+
+    if ruby = ENV['RUBY']
+      Gem.class_eval {ruby, @ruby = @ruby, ruby}
+      @orig_ruby = ruby
+    end
 
     @orig_ENV_HOME = ENV['HOME']
     ENV['HOME'] = @userhome
@@ -152,6 +157,10 @@ class RubyGemTestCase < MiniTest::Unit::TestCase
     ENV.delete 'GEM_PATH'
 
     Gem.clear_paths
+
+    if ruby = @orig_ruby
+      Gem.class_eval {@ruby = @ruby}
+    end
 
     if @orig_ENV_HOME then
       ENV['HOME'] = @orig_ENV_HOME

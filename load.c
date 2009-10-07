@@ -233,7 +233,7 @@ rb_feature_provided(const char *feature, const char **loading)
 	    return FALSE;
 	}
     }
-    if (rb_feature_p(feature, feature + strlen(feature), TRUE, FALSE, loading))
+    if (rb_feature_p(feature, 0, TRUE, FALSE, loading))
 	return TRUE;
     return FALSE;
 }
@@ -473,7 +473,7 @@ search_required(VALUE fname, volatile VALUE *path, int safe_level)
 	    OBJ_FREEZE(tmp);
 	    if (rb_find_file_ext_safe(&tmp, loadable_ext + 1, safe_level)) {
 		ext = strrchr(ftptr = RSTRING_PTR(tmp), '.');
-		if (!rb_feature_p(ftptr, ext, Qfalse, Qtrue, &loading) || loading)
+		if (!rb_feature_p(ftptr, ext, FALSE, TRUE, &loading) || loading)
 		    *path = tmp;
 		return 's';
 	    }
@@ -662,7 +662,16 @@ rb_mod_autoload(VALUE mod, VALUE sym, VALUE file)
 }
 
 /*
- * MISSING: documentation
+ *  call-seq:
+ *     mod.autoload?(name)   => String or nil
+ *
+ *  Returns _filename_ to be loaded if _name_ is registered as
+ *  +autoload+ in the namespace of _mod_.
+ *
+ *     module A
+ *     end
+ *     A.autoload(:B, "b")
+ *     A.autoload?(:B)            # => "b"
  */
 
 static VALUE
@@ -693,7 +702,14 @@ rb_f_autoload(VALUE obj, VALUE sym, VALUE file)
 }
 
 /*
- * MISSING: documentation
+ *  call-seq:
+ *     autoload?(name)   => String or nil
+ *
+ *  Returns _filename_ to be loaded if _name_ is registered as
+ *  +autoload+.
+ *
+ *     autoload(:B, "b")
+ *     autoload?(:B)            # => "b"
  */
 
 static VALUE

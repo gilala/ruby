@@ -201,10 +201,10 @@ class TestM17N < Test::Unit::TestCase
     assert_equal('"\xFC\x80\x80\x80\x80 "', u("\xfc\x80\x80\x80\x80 ").inspect)
 
 
-    assert_equal(e("\"\\xA1\x8f\xA1\xA1\""), e("\xa1\x8f\xa1\xa1").inspect)
+    assert_equal("\"\\xA1\\x{8FA1A1}\"", e("\xa1\x8f\xa1\xa1").inspect)
 
     assert_equal('"\x81."', s("\x81.").inspect)
-    assert_equal(s("\"\x81@\""), s("\x81@").inspect)
+    assert_equal(s('"\x{8140}"'), s("\x81@").inspect)
 
     assert_equal('"\xFC"', u("\xfc").inspect)
   end
@@ -756,30 +756,16 @@ class TestM17N < Test::Unit::TestCase
   end
 
   def test_sprintf_p
-    assert_strenc('""', 'ASCII-8BIT', a("%p") % a(""))
-    assert_strenc('""', 'EUC-JP', e("%p") % e(""))
-    assert_strenc('""', 'Windows-31J', s("%p") % s(""))
-    assert_strenc('""', 'UTF-8', u("%p") % u(""))
-
-    assert_strenc('"a"', 'ASCII-8BIT', a("%p") % a("a"))
-    assert_strenc('"a"', 'EUC-JP', e("%p") % e("a"))
-    assert_strenc('"a"', 'Windows-31J', s("%p") % s("a"))
-    assert_strenc('"a"', 'UTF-8', u("%p") % u("a"))
-
-    assert_strenc('"\xC2\xA1"', 'ASCII-8BIT', a("%p") % a("\xc2\xa1"))
-    assert_strenc("\"\xC2\xA1\"", 'EUC-JP', e("%p") % e("\xc2\xa1"))
-    #assert_strenc("\"\xC2\xA1\"", 'Windows-31J', s("%p") % s("\xc2\xa1"))
-    assert_strenc("\"\xC2\xA1\"", 'UTF-8', u("%p") % u("\xc2\xa1"))
-
-    assert_strenc('"\xC2\xA1"', 'ASCII-8BIT', "%10p" % a("\xc2\xa1"))
-    assert_strenc("       \"\xC2\xA1\"", 'EUC-JP', "%10p" % e("\xc2\xa1"))
-    #assert_strenc("       \"\xC2\xA1\"", 'Windows-31J', "%10p" % s("\xc2\xa1"))
-    assert_strenc("       \"\xC2\xA1\"", 'UTF-8', "%10p" % u("\xc2\xa1"))
-
-    assert_strenc('"\x00"', 'ASCII-8BIT', a("%p") % a("\x00"))
-    assert_strenc('"\x00"', 'EUC-JP', e("%p") % e("\x00"))
-    assert_strenc('"\x00"', 'Windows-31J', s("%p") % s("\x00"))
-    assert_strenc('"\x00"', 'UTF-8', u("%p") % u("\x00"))
+    enc = "".inspect.encoding
+    Encoding.list.each do |e|
+      format = "%p".force_encoding(e)
+      ['', 'a', "\xC2\xA1", "\x00"].each do |s|
+        s.force_encoding(e)
+        assert_strenc(s.inspect, enc, format % s)
+      end
+      s = "\xC2\xA1".force_encoding(e)
+      assert_strenc('%10s' % s.inspect, enc, "%10p" % s)
+    end
   end
 
   def test_sprintf_s
@@ -1176,8 +1162,8 @@ class TestM17N < Test::Unit::TestCase
     assert_equal(Encoding::US_ASCII, [].to_s.encoding)
     assert_equal(Encoding::US_ASCII, [nil].to_s.encoding)
     assert_equal(Encoding::US_ASCII, [1].to_s.encoding)
-    assert_equal(Encoding::US_ASCII, [""].to_s.encoding)
-    assert_equal(Encoding::US_ASCII, ["a"].to_s.encoding)
+    assert_equal("".inspect.encoding, [""].to_s.encoding)
+    assert_equal("a".inspect.encoding, ["a"].to_s.encoding)
     assert_equal(Encoding::US_ASCII, [nil,1,"","a","\x20",[]].to_s.encoding)
   end
 

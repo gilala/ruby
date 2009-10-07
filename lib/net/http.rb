@@ -1124,6 +1124,10 @@ module Net   #:nodoc:
       }
       end_transport req, res
       res
+    rescue => exception
+      D "Conn close because of error #{exception}"
+      @socket.close unless @socket.closed?
+      raise exception
     end
 
     def begin_transport(req)
@@ -1292,15 +1296,17 @@ module Net   #:nodoc:
     end
 
     # Returns the header field corresponding to the case-insensitive key.
-    # Returns the default value +args+, or the result of the block, or nil,
-    # if there's no header field named key.  See Hash#fetch
+    # Returns the default value +args+, or the result of the block, or
+    # raises an IndexErrror if there's no header field named +key+
+    # See Hash#fetch
     def fetch(key, *args, &block)   #:yield: +key+
       a = @header.fetch(key.downcase, *args, &block)
-      a.join(', ')
+      a.kind_of?(Array) ? a.join(', ') : a
     end
 
     # Iterates for each header names and values.
     def each_header   #:yield: +key+, +value+
+      block_given? or return enum_for(__method__)
       @header.each do |k,va|
         yield k, va.join(', ')
       end
@@ -1310,13 +1316,15 @@ module Net   #:nodoc:
 
     # Iterates for each header names.
     def each_name(&block)   #:yield: +key+
+      block_given? or return enum_for(__method__)
       @header.each_key(&block)
     end
 
     alias each_key each_name
 
     # Iterates for each capitalized header names.
-    def each_capitalized_name(&block)   #:yield: +key+
+    def each_capitalized_name  #:yield: +key+
+      block_given? or return enum_for(__method__)
       @header.each_key do |k|
         yield capitalize(k)
       end
@@ -1324,6 +1332,7 @@ module Net   #:nodoc:
 
     # Iterates for each header values.
     def each_value   #:yield: +value+
+      block_given? or return enum_for(__method__)
       @header.each_value do |va|
         yield va.join(', ')
       end
@@ -1346,6 +1355,7 @@ module Net   #:nodoc:
 
     # As for #each_header, except the keys are provided in capitalized form.
     def each_capitalized
+      block_given? or return enum_for(__method__)
       @header.each do |k,v|
         yield capitalize(k), v.join(', ')
       end
@@ -1524,7 +1534,7 @@ module Net   #:nodoc:
     alias form_data= set_form_data
 
     def encode_kvpair(k, vs)
-      Array(vs).map {|v| "#{urlencode(k)}=#{urlencode(v.to_s)}" }
+      Array(vs).map {|v| "#{urlencode(k.to_s)}=#{urlencode(v.to_s)}" }
     end
     private :encode_kvpair
 

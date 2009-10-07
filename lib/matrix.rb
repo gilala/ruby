@@ -50,7 +50,6 @@ end
 # * <tt> Matrix.columns(columns)        </tt>
 # * <tt> Matrix.diagonal(*values)       </tt>
 # * <tt> Matrix.scalar(n, value)        </tt>
-# * <tt> Matrix.scalar(n, value)        </tt>
 # * <tt> Matrix.identity(n)             </tt>
 # * <tt> Matrix.unit(n)                 </tt>
 # * <tt> Matrix.I(n)                    </tt>
@@ -122,11 +121,12 @@ class Matrix
 
   #
   # Creates a matrix where +rows+ is an array of arrays, each of which is a row
-  # to the matrix.  If the optional argument +copy+ is false, use the given
+  # of the matrix.  If the optional argument +copy+ is false, use the given
   # arrays as the internal structure of the matrix without copying.
   #   Matrix.rows([[25, 93], [-1, 66]])
   #      =>  25 93
   #          -1 66
+  #
   def Matrix.rows(rows, copy = true)
     new(:init_rows, rows, copy)
   end
@@ -137,10 +137,9 @@ class Matrix
   #      =>  25 -1
   #          93 66
   #
-  #
   def Matrix.columns(columns)
-    rows = (0 .. columns[0].size - 1).collect {|i|
-      (0 .. columns.size - 1).collect {|j|
+    rows = (0 ... columns[0].size).collect {|i|
+      (0 ... columns.size).collect {|j|
         columns[j][i]
       }
     }
@@ -156,7 +155,7 @@ class Matrix
   #
   def Matrix.diagonal(*values)
     size = values.size
-    rows = (0 .. size  - 1).collect {|j|
+    rows = (0 ... size).collect {|j|
       row = Array.new(size).fill(0, 0, size)
       row[j] = values[j]
       row
@@ -290,11 +289,9 @@ class Matrix
   # Returns row vector number +i+ of the matrix as a Vector (starting at 0 like
   # an array).  When a block is given, the elements of that vector are iterated.
   #
-  def row(i) # :yield: e
+  def row(i, &block) # :yield: e
     if block_given?
-      for e in @rows[i]
-        yield e
-      end
+      @rows[i].each(&block)
     else
       Vector.elements(@rows[i])
     end
@@ -307,11 +304,11 @@ class Matrix
   #
   def column(j) # :yield: e
     if block_given?
-      0.upto(row_size - 1) do |i|
+      row_size.times do |i|
         yield @rows[i][j]
       end
     else
-      col = (0 .. row_size - 1).collect {|i|
+      col = (0 ... row_size).collect {|i|
         @rows[i][j]
       }
       Vector.elements(col, false)
@@ -325,8 +322,8 @@ class Matrix
   #     => 1  4
   #        9 16
   #
-  def collect # :yield: e
-    rows = @rows.collect{|row| row.collect{|e| yield e}}
+  def collect(&block) # :yield: e
+    rows = @rows.collect{|row| row.collect(&block)}
     Matrix.rows(rows, false)
   end
   alias map collect
@@ -350,10 +347,7 @@ class Matrix
       size_col = param[1].end - from_col
       size_col += 1 unless param[1].exclude_end?
     when 4
-      from_row = param[0]
-      size_row = param[1]
-      from_col = param[2]
-      size_col = param[3]
+      from_row, size_row, from_col, size_col = param
     else
       Matrix.Raise ArgumentError, param.inspect
     end
@@ -414,7 +408,7 @@ class Matrix
   def compare_by_row_vectors(rows, comparison = :==)
     return false unless @rows.size == rows.size
 
-    0.upto(@rows.size - 1) do |i|
+    @rows.size.times do |i|
       return false unless @rows[i].send(comparison, rows[i])
     end
     true
@@ -432,13 +426,7 @@ class Matrix
   # Returns a hash-code for the matrix.
   #
   def hash
-    value = 0
-    for row in @rows
-      for e in row
-        value ^= e.hash
-      end
-    end
-    return value
+    @rows.hash
   end
 
   #--
@@ -467,13 +455,11 @@ class Matrix
     when Matrix
       Matrix.Raise ErrDimensionMismatch if column_size != m.row_size
 
-      rows = (0 .. row_size - 1).collect {|i|
-        (0 .. m.column_size - 1).collect {|j|
-          vij = 0
-          0.upto(column_size - 1) do |k|
-            vij += self[i, k] * m[k, j]
+      rows = (0 ... row_size).collect {|i|
+        (0 ... m.column_size).collect {|j|
+          (0 ... column_size).inject(0) do |vij, k|
+            vij + self[i, k] * m[k, j]
           end
-          vij
         }
       }
       return Matrix.rows(rows, false)
@@ -503,8 +489,8 @@ class Matrix
 
     Matrix.Raise ErrDimensionMismatch unless row_size == m.row_size and column_size == m.column_size
 
-    rows = (0 .. row_size - 1).collect {|i|
-      (0 .. column_size - 1).collect {|j|
+    rows = (0 ... row_size).collect {|i|
+      (0 ... column_size).collect {|j|
         self[i, j] + m[i, j]
       }
     }
@@ -531,8 +517,8 @@ class Matrix
 
     Matrix.Raise ErrDimensionMismatch unless row_size == m.row_size and column_size == m.column_size
 
-    rows = (0 .. row_size - 1).collect {|i|
-      (0 .. column_size - 1).collect {|j|
+    rows = (0 ... row_size).collect {|i|
+      (0 ... column_size).collect {|j|
         self[i, j] - m[i, j]
       }
     }
@@ -558,7 +544,7 @@ class Matrix
       return self * other.inverse
     else
       x, y = other.coerce(self)
-      rerurn x / y
+      return x / y
     end
   end
 
@@ -578,13 +564,13 @@ class Matrix
   # Not for public consumption?
   #
   def inverse_from(src)
-    size = row_size - 1
+    size = row_size
     a = src.to_a
 
-    for k in 0..size
+    size.times do |k|
       i = k
       akk = a[k][k].abs
-      ((k+1)..size).each do |j|
+      (k+1 ... size).each do |j|
         v = a[j][k].abs
         if v > akk
           i = j
@@ -598,23 +584,23 @@ class Matrix
       end
       akk = a[k][k]
 
-      for i in 0 .. size
+      size.times do |i|
         next if i == k
         q = a[i][k].quo(akk)
         a[i][k] = 0
 
-	for j in (k + 1).. size
+        (k + 1 ... size).each do |j|
           a[i][j] -= a[k][j] * q
         end
-        for j in 0..size
+        size.times do |j|
           @rows[i][j] -= @rows[k][j] * q
         end
       end
 
-      for j in (k + 1).. size
+      (k + 1 ... size).each do |j|
         a[k][j] = a[k][j].quo(akk)
       end
-      for j in 0..size
+      size.times do |j|
         @rows[k][j] = @rows[k][j].quo(akk)
       end
     end
@@ -662,42 +648,39 @@ class Matrix
 
   #
   # Returns the determinant of the matrix.  If the matrix is not square, the
-  # result is 0. This method's algorism is Gaussian elimination method
+  # result is 0. This method's algorithm is Gaussian elimination method
   # and using Numeric#quo(). Beware that using Float values, with their
   # usual lack of precision, can affect the value returned by this method.  Use
   # Rational values or Matrix#det_e instead if this is important to you.
   #
   #   Matrix[[7,6], [3,9]].determinant
-  #     => 63.0
+  #     => 45.0
   #
   def determinant
     return 0 unless square?
 
-    size = row_size - 1
+    size = row_size
     a = to_a
 
     det = 1
-    k = 0
-    loop do
+    size.times do |k|
       if (akk = a[k][k]) == 0
-        i = k
-        loop do
-          return 0 if (ii += 1) > size
-          break unless a[i][k] == 0
-        end
+        i = (k+1 ... size).find {|i|
+          a[i][k] != 0
+        }
+        return 0 if i.nil?
         a[i], a[k] = a[k], a[i]
         akk = a[k][k]
         det *= -1
       end
 
-      for i in k + 1 .. size
+      (k + 1 ... size).each do |i|
         q = a[i][k].quo(akk)
-        (k + 1).upto(size) do |j|
+        (k + 1 ... size).each do |j|
           a[i][j] -= a[k][j] * q
         end
       end
       det *= akk
-      break unless (k += 1) <= size
     end
     det
   end
@@ -705,8 +688,8 @@ class Matrix
 
   #
   # Returns the determinant of the matrix.  If the matrix is not square, the
-  # result is 0. This method's algorism is Gaussian elimination method.
-  # This method uses Euclidean algorism. If all elements are integer,
+  # result is 0. This method's algorithm is Gaussian elimination method.
+  # This method uses Euclidean algorithm. If all elements are integer,
   # really exact value. But, if an element is a float, can't return
   # exact value.
   #
@@ -716,25 +699,23 @@ class Matrix
   def determinant_e
     return 0 unless square?
 
-    size = row_size - 1
+    size = row_size
     a = to_a
 
     det = 1
-    k = 0
-    loop do
+    size.times do |k|
       if a[k][k].zero?
-        i = k
-        loop do
-          return 0 if (i += 1) > size
-          break unless a[i][k].zero?
-        end
+        i = (k+1 ... size).find {|i|
+          a[i][k] != 0
+        }
+        return 0 if i.nil?
         a[i], a[k] = a[k], a[i]
         det *= -1
       end
 
-      for i in (k + 1)..size
+      (k + 1 ... size).each do |i|
         q = a[i][k].quo(a[k][k])
-        k.upto(size) do |j|
+        (k ... size).each do |j|
           a[i][j] -= a[k][j] * q
         end
         unless a[i][k].zero?
@@ -744,7 +725,6 @@ class Matrix
         end
       end
       det *= a[k][k]
-      break unless (k += 1) <= size
     end
     det
   end
@@ -769,56 +749,40 @@ class Matrix
       a_row_size = row_size
     end
     rank = 0
-    k = 0
-    begin
+    a_column_size.times do |k|
       if (akk = a[k][k]) == 0
-        i = k
-        exists = true
-        loop do
-          if (i += 1) > a_column_size - 1
-            exists = false
-            break
-          end
-          break unless a[i][k] == 0
-        end
-        if exists
+        i = (k+1 ... a_row_size).find {|i|
+          a[i][k] != 0
+        }
+        if i
           a[i], a[k] = a[k], a[i]
           akk = a[k][k]
         else
-          i = k
-          exists = true
-          loop do
-            if (i += 1) > a_row_size - 1
-              exists = false
-              break
-            end
-            break unless a[k][i] == 0
+          i = (k+1 ... a_column_size).find {|i|
+            a[k][i] != 0
+          }
+          next if i.nil?
+          (k ... a_column_size).each do |j|
+            a[j][k], a[j][i] = a[j][i], a[j][k]
           end
-          if exists
-            k.upto(a_column_size - 1) do |j|
-              a[j][k], a[j][i] = a[j][i], a[j][k]
-            end
-            akk = a[k][k]
-          else
-            next
-          end
+          akk = a[k][k]
         end
       end
 
-      for i in (k + 1)..(a_row_size - 1)
+      (k + 1 ... a_row_size).each do |i|
         q = a[i][k].quo(akk)
-	for j in (k + 1)..(a_column_size - 1)
+        (k + 1... a_column_size).each do |j|
           a[i][j] -= a[k][j] * q
         end
       end
       rank += 1
-    end while (k += 1) <= a_column_size - 1
+    end
     return rank
   end
 
   #
   # Returns the rank of the matrix. This method uses Euclidean
-  # algorism. If all elements are integer, really exact value. But, if
+  # algorithm. If all elements are integer, really exact value. But, if
   # an element is a float, can't return exact value.
   #
   #   Matrix[[7,6], [3,9]].rank
@@ -829,7 +793,7 @@ class Matrix
     a_column_size = column_size
     a_row_size = row_size
     pi = 0
-    (0 ... a_column_size).each do |j|
+    a_column_size.times do |j|
       if i = (pi ... a_row_size).find{|i0| !a[i0][j].zero?}
         if i != pi
           a[pi], a[i] = a[i], a[pi]
@@ -857,11 +821,9 @@ class Matrix
   #     => 16
   #
   def trace
-    tr = 0
-    0.upto(column_size - 1) do |i|
-      tr += @rows[i][i]
+    (0...column_size).inject(0) do |tr, i|
+      tr + @rows[i][i]
     end
-    tr
   end
   alias tr trace
 
@@ -900,27 +862,25 @@ class Matrix
   # Returns an array of the row vectors of the matrix.  See Vector.
   #
   def row_vectors
-    rows = (0 .. row_size - 1).collect {|i|
+    (0 ... row_size).collect {|i|
       row(i)
     }
-    rows
   end
 
   #
   # Returns an array of the column vectors of the matrix.  See Vector.
   #
   def column_vectors
-    columns = (0 .. column_size - 1).collect {|i|
+    (0 ... column_size).collect {|i|
       column(i)
     }
-    columns
   end
 
   #
   # Returns an array of arrays that describe the rows of the matrix.
   #
   def to_a
-    @rows.collect{|row| row.collect{|e| e}}
+    @rows.collect{|row| row.dup}
   end
 
   def elements_to_f
@@ -1012,7 +972,7 @@ class Matrix
       when Vector
         Scalar.Raise WrongArgType, other.class, "Numeric or Scalar or Matrix"
       when Matrix
-	self * other.inverse
+        self * other.inverse
       else
         x, y = other.coerce(self)
         x.quo(y)
@@ -1150,7 +1110,7 @@ class Vector
   #
   def each2(v) # :yield: e1, e2
     Vector.Raise ErrDimensionMismatch if size != v.size
-    0.upto(size - 1) do |i|
+    size.times do |i|
       yield @elements[i], v[i]
     end
   end
@@ -1161,7 +1121,7 @@ class Vector
   #
   def collect2(v) # :yield: e1, e2
     Vector.Raise ErrDimensionMismatch if size != v.size
-    (0 .. size - 1).collect do |i|
+    (0 ... size).collect do |i|
       yield @elements[i], v[i]
     end
   end
@@ -1284,10 +1244,8 @@ class Vector
   #
   # Like Array#collect.
   #
-  def collect # :yield: e
-    els = @elements.collect {|v|
-      yield v
-    }
+  def collect(&block) # :yield: e
+    els = @elements.collect(&block)
     Vector.elements(els, false)
   end
   alias map collect
@@ -1295,10 +1253,8 @@ class Vector
   #
   # Like Vector#collect2, but returns a Vector instead of an Array.
   #
-  def map2(v) # :yield: e1, e2
-    els = collect2(v) {|v1, v2|
-      yield v1, v2
-    }
+  def map2(v, &block) # :yield: e1, e2
+    els = collect2(v, &block)
     Vector.elements(els, false)
   end
 
@@ -1307,11 +1263,7 @@ class Vector
   #   Vector[5,8,2].r => 9.643650761
   #
   def r
-    v = 0
-    for e in @elements
-      v += e*e
-    end
-    return Math.sqrt(v)
+    Math.sqrt(@elements.inject(0) {|v, e| v + e*e})
   end
 
   #--
@@ -1374,7 +1326,6 @@ class Vector
     str = "Vector"+@elements.inspect
   end
 end
-
 
 # Documentation comments:
 #  - Matrix#coerce and Vector#coerce need to be documented

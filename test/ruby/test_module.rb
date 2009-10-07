@@ -55,7 +55,7 @@ class TestModule < Test::Unit::TestCase
   end
 
   def test_CMP_0
-    assert_equal -1, (String <=> Object)
+    assert_equal(-1, (String <=> Object))
     assert_equal 1, (Object <=> String)
     assert_nil(Array <=> String)
   end
@@ -528,10 +528,10 @@ class TestModule < Test::Unit::TestCase
       class << o; self; end.instance_eval { undef_method(:foo) }
     end
 
-    %w(object_id __send__ initialize).each do |m|
-      assert_in_out_err([], <<-INPUT, [], /warning: undefining `#{m}' may cause serious problems$/)
+    %w(object_id __send__ initialize).each do |n|
+      assert_in_out_err([], <<-INPUT, [], /warning: undefining `#{n}' may cause serious problems$/)
         $VERBOSE = false
-        Class.new.instance_eval { undef_method(:#{m}) }
+        Class.new.instance_eval { undef_method(:#{n}) }
       INPUT
     end
   end
@@ -754,5 +754,104 @@ class TestModule < Test::Unit::TestCase
     assert_equal("C\u{df}", c.name, '[ruby-core:24600]')
     c = eval("class C\u{df}; self; end")
     assert_equal("TestModule::C\u{df}", c.name, '[ruby-core:24600]')
+  end
+
+  def test_method_added
+    memo = []
+    mod = Module.new do
+      mod = self
+      (class << self ; self ; end).class_eval do
+        define_method :method_added do |sym|
+          memo << sym
+          memo << mod.instance_methods(false)
+          memo << (mod.instance_method(sym) rescue nil)
+        end
+      end
+      def f
+      end
+      alias g f
+      attr_reader :a
+      attr_writer :a
+    end
+    assert_equal :f, memo.shift
+    assert_equal [:f], memo.shift, '[ruby-core:25536]'
+    assert_equal mod.instance_method(:f), memo.shift
+    assert_equal :g, memo.shift
+    assert_equal [:f, :g], memo.shift
+    assert_equal mod.instance_method(:f), memo.shift
+    assert_equal :a, memo.shift
+    assert_equal [:f, :g, :a], memo.shift
+    assert_equal mod.instance_method(:a), memo.shift
+    assert_equal :a=, memo.shift
+    assert_equal [:f, :g, :a, :a=], memo.shift
+    assert_equal mod.instance_method(:a=), memo.shift
+  end
+
+  def test_method_redefinition
+    feature2155 = '[ruby-dev:39400]'
+
+    line = __LINE__+4
+    stderr = EnvUtil.verbose_warning do
+      Module.new do
+        def foo; end
+        def foo; end
+      end
+    end
+    assert_match(/:#{line}: warning: method redefined; discarding old foo/, stderr)
+    assert_match(/:#{line-1}: warning: previous definition of foo/, stderr, feature2155)
+
+    stderr = EnvUtil.verbose_warning do
+      Module.new do
+        def foo; end
+        alias bar foo
+        def foo; end
+      end
+    end
+    assert_equal("", stderr)
+
+    stderr = EnvUtil.verbose_warning do
+      Module.new do
+        def foo; end
+        alias bar foo
+        alias bar foo
+      end
+    end
+    assert_equal("", stderr)
+
+    line = __LINE__+4
+    stderr = EnvUtil.verbose_warning do
+      Module.new do
+        define_method(:foo) do end
+        def foo; end
+      end
+    end
+    assert_match(/:#{line}: warning: method redefined; discarding old foo/, stderr)
+    assert_match(/:#{line-1}: warning: previous definition of foo/, stderr, feature2155)
+
+    stderr = EnvUtil.verbose_warning do
+      Module.new do
+        define_method(:foo) do end
+        alias bar foo
+        alias barf oo
+      end
+    end
+    assert_equal("", stderr)
+
+    stderr = EnvUtil.verbose_warning do
+      Module.new do
+        module_function
+        def foo; end
+        module_function :foo
+      end
+    end
+    assert_equal("", stderr, '[ruby-dev:39397]')
+
+    stderr = EnvUtil.verbose_warning do
+      Module.new do
+        def foo; end
+        undef foo
+      end
+    end
+    assert_equal("", stderr)
   end
 end

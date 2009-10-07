@@ -150,8 +150,28 @@ TESTUI = console
 !ifndef TESTS
 TESTS =
 !endif
-!ifndef RDOCTARGET
-RDOCTARGET = install-doc
+!ifndef CAPITARGET
+! ifdef DOXYGEN
+CAPITARGET = capi
+! else
+CAPITARGET = nodoc
+! endif
+!endif
+!ifndef DOCTARGETS
+! if "$(RDOCTARGET)" == "rdoc" || "$(RDOCTARGET)" == ""
+DOCTARGETS = $(DOCTARGETS) rdoc
+! endif
+! if "$(CAPITARGET)" == "capi"
+DOCTARGETS = $(DOCTARGETS) capi
+! endif
+!endif
+!ifndef INSTALLDOC
+! if "$(DOCTARGETS)" != ""
+INSTALLDOC = all
+! else
+INSTALLDOC = nodoc
+DOCTARGETS = nodoc
+! endif
 !endif
 
 OUTFLAG       = -Fe
@@ -205,9 +225,9 @@ XCFLAGS = -DRUBY_EXPORT -I. -I$(arch_hdrdir) -I$(hdrdir) -I$(srcdir) -I$(srcdir)
 !if $(MSC_VER) >= 1400
 # Prevents VC++ 2005 (cl ver 14) warnings
 MANIFESTTOOL = mt -nologo
-LDSHARED_0 = @$(MINIRUBY) -run -e wait_writable -- -n 10 $@
-LDSHARED_1 = $(MANIFESTTOOL) -manifest $(@).manifest -outputresource:$(@);2
-LDSHARED_2 = @$(RM) $(@:/=\).manifest
+LDSHARED_0 = @if exist $(@).manifest $(MINIRUBY) -run -e wait_writable -- -n 10 $@
+LDSHARED_1 = @if exist $(@).manifest $(MANIFESTTOOL) -manifest $(@).manifest -outputresource:$(@);2
+LDSHARED_2 = @if exist $(@).manifest @$(RM) $(@:/=\).manifest
 !endif
 CPPFLAGS = $(DEFS) $(ARCHDEFS) $(CPPFLAGS)
 
@@ -237,6 +257,7 @@ RUNRUBY = $(RUNRUBY) "$(srcdir)/tool/runruby.rb" --extout="$(EXTOUT)" $(RUNRUBYO
 !ifndef RUBY
 RUBY = ruby
 !endif
+MAKEDIRS = @$(MINIRUBY) -run -e mkdir -- -p
 
 !if !defined(STACK)
 !if "$(ARCH)" == "x64" || "$(ARCH)" == "ia64"
@@ -369,6 +390,7 @@ $(CONFIG_H): $(MKFILES) $(srcdir)/win32/Makefile.sub $(win_srcdir)/Makefile.sub
 !if "$(ENABLE_WIN95)" == "yes" && "$(MACHINE)" == "x86"
 #define WIN95 1
 !endif
+#define RT_VER $(RT_VER)
 #define STDC_HEADERS 1
 #define HAVE_SYS_TYPES_H 1
 #define HAVE_SYS_STAT_H 1
@@ -401,7 +423,7 @@ $(CONFIG_H): $(MKFILES) $(srcdir)/win32/Makefile.sub $(win_srcdir)/Makefile.sub
 !endif
 #define SIZEOF_FLOAT 4
 #define SIZEOF_DOUBLE 8
-!if $(MSC_VER) >= 1400
+!if $(RT_VER) >= 80
 #define SIZEOF_TIME_T 8
 #define TIMET2NUM(v) LL2NUM(v)
 #define NUM2TIMET(v) NUM2LL(v)
@@ -594,9 +616,10 @@ s,@localstatedir@,/var,;t t
 s,@libdir@,$${exec_prefix}/lib,;t t
 s,@includedir@,$${prefix}/include,;t t
 s,@oldincludedir@,/usr/include,;t t
-s,@infodir@,$${prefix}/info,;t t
-s,@mandir@,$${prefix}/man,;t t
-s,@ridir@,$${prefix}/share/ri,;t t
+s,@infodir@,$${datadir}/info,;t t
+s,@mandir@,$${datadir}/man,;t t
+s,@ridir@,$${datadir}/ri,;t t
+s,@docdir@,$${datadir}/doc/$${RUBY_BASE_NAME},;t t
 s,@build@,$(CPU)-pc-$(PLATFORM),;t t
 s,@build_alias@,$(CPU)-$(PLATFORM),;t t
 s,@build_cpu@,$(CPU),;t t
@@ -674,9 +697,9 @@ s,@RPATHFLAG@,,;t t
 s,@LIBARG@,%s.lib,;t t
 s,@LINK_SO@,$$(LDSHARED) -Fe$$(@) $$(OBJS) $$(LIBS) $$(LOCAL_LIBS) -link $$(DLDFLAGS) -implib:$$(*F:.so=)-$$(arch).lib -pdb:$$(*F:.so=)-$$(arch).pdb -def:$$(DEFFILE),;t t
 !if $(MSC_VER) >= 1400
-s,@LINK_SO@,@$$(RUBY) -run -e wait_writable -- -n 10 $$(@),;t t
-s,@LINK_SO@,$(MANIFESTTOOL) -manifest $$(@).manifest -outputresource:$$(@);2,;t t
-s,@LINK_SO@,@$$(RM) $$(@:/=\).manifest,;t t
+s,@LINK_SO@,@if exist $$(@).manifest $$(RUBY) -run -e wait_writable -- -n 10 $$(@),;t t
+s,@LINK_SO@,@if exist $$(@).manifest $(MANIFESTTOOL) -manifest $$(@).manifest -outputresource:$$(@);2,;t t
+s,@LINK_SO@,@if exist $$(@).manifest $$(RM) $$(@:/=\).manifest,;t t
 !endif
 s,@COMPILE_C@,$$(CC) $$(INCFLAGS) $$(CFLAGS) $$(CPPFLAGS) $$(COUTFLAG)$$(@) -c -Tc$$(<:\=/),;t t
 s,@COMPILE_CXX@,$$(CXX) $$(INCFLAGS) $$(CXXFLAGS) $$(CPPFLAGS) $$(COUTFLAG)$$(@) -c -Tp$$(<:\=/),;t t
@@ -853,6 +876,10 @@ end
 lex.c: {$(srcdir)}lex.c.blt
 	copy $(?:/=\) $@
 
+enc/unicode/name2ctype.h: {$(srcdir)}enc/unicode/name2ctype.h.blt
+	@md $(@D:/=\)
+	copy $(?:/=\) $(@:/=\)
+
 $(OBJS): {$(hdrdir)/ruby}win32.h
 
 dir.$(OBJEXT) win32.$(OBJEXT): {$(srcdir)}win32/dir.h
@@ -866,7 +893,9 @@ INSNS	= opt_sc.inc optinsn.inc optunifs.inc insns.inc insns_info.inc \
 !ifdef insns
 make_insns_rules:
 	@type <<
-$(insns): $$(srcdir)/insns.def {$$(VPATH)}vm_opts.h $$(srcdir)/defs/opt_operand.def $$(srcdir)/defs/opt_insn_unif.def
+$(insns): $$(srcdir)/insns.def {$$(VPATH)}vm_opts.h \
+	  $$(srcdir)/defs/opt_operand.def $$(srcdir)/defs/opt_insn_unif.def \
+	  $$(srcdir)/tool/instruction.rb $$(srcdir)/tool/insns2vm.rb
 	@$$(RM) $$(PROGRAM)
 	$$(BASERUBY) -Ks $$(srcdir)/tool/insns2vm.rb $$(INSNS2VMOPT) $(insns)
 

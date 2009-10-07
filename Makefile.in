@@ -34,7 +34,8 @@ ruby_version = @ruby_version@
 
 TESTUI = console
 TESTS =
-RDOCTARGET = @RDOCTARGET@
+INSTALLDOC = @INSTALLDOC@
+DOCTARGETS = @RDOCTARGET@ @CAPITARGET@
 
 EXTOUT = @EXTOUT@
 arch_hdrdir = $(EXTOUT)/include/$(arch)
@@ -136,8 +137,8 @@ all:
 .NOEXPORT:
 
 miniruby$(EXEEXT):
-		@-if test -f $@; then mv -f $@ $@.old; $(RM) $@.old; fi
-		$(PURIFY) $(CC) $(LDFLAGS) $(XLDFLAGS) $(MAINLIBS) $(MAINOBJ) $(MINIOBJS) $(COMMONOBJS) $(DMYEXT) $(ARCHFILE) $(LIBS) $(OUTFLAG)$@
+		@-if test -f $@; then $(MV) -f $@ $@.old; $(RM) $@.old; fi
+		$(PURIFY) $(CC) $(LDFLAGS) $(XLDFLAGS) $(MAINLIBS) $(MAINOBJ) $(MINIOBJS) $(COMMONOBJS) $(DMYEXT) $(LIBS) $(OUTFLAG)$@
 
 $(PROGRAM):
 		@$(RM) $@
@@ -185,9 +186,6 @@ $(srcdir)/configure: $(srcdir)/configure.in
 	$(CHDIR) $(srcdir) && exec $(AUTOCONF)
 
 incs: id.h
-id.h: parse.h $(srcdir)/tool/generic_erb.rb $(srcdir)/template/id.h.tmpl
-	$(BASERUBY) $(srcdir)/tool/generic_erb.rb --output=$@ \
-		$(srcdir)/template/id.h.tmpl --vpath=$(VPATH) parse.h
 
 # Things which should be considered:
 # * with gperf v.s. without gperf
@@ -199,13 +197,32 @@ lex.c: defs/keywords
 	@\
 	if cmp -s $(srcdir)/defs/lex.c.src $?; then \
 	  set -x; \
-	  cp $(srcdir)/lex.c.blt $@; \
+	  $(CP) $(srcdir)/lex.c.blt $@; \
 	else \
 	  set -x; \
 	  gperf -C -p -j1 -i 1 -g -o -t -N rb_reserved_word -k1,3,$$ $? > $@.tmp && \
-	  mv $@.tmp $@ && \
-	  cp $? $(srcdir)/defs/lex.c.src && \
-	  cp $@ $(srcdir)/lex.c.blt; \
+	  $(MV) $@.tmp $@ && \
+	  $(CP) $? $(srcdir)/defs/lex.c.src && \
+	  $(CP) $@ $(srcdir)/lex.c.blt; \
+	fi
+
+NAME2CTYPE_OPTIONS = -7 -c -j1 -i1 -t -C -P -T -H uniname2ctype_hash -Q uniname2ctype_pool -N uniname2ctype_p
+
+enc/unicode/name2ctype.h: enc/unicode/name2ctype.kwd
+	$(MAKEDIRS) $(@D)
+	@set +e; \
+	if cmp -s $(?:.kwd=.src) $?; then \
+	  set -x; \
+	  $(CP) $(?:.kwd=.h.blt) $@; \
+	else \
+	  trap '$(RM) $@-1.h $@-2.h' 0 && \
+	  set -x; \
+	  sed '/^#ifdef USE_UNICODE_PROPERTIES/,/^#endif/d' $? | gperf $(NAME2CTYPE_OPTIONS) > $@-1.h && \
+	  gperf $(NAME2CTYPE_OPTIONS) < $? > $@-2.h && \
+	  diff -DUSE_UNICODE_PROPERTIES $@-1.h $@-2.h > $@.tmp || :; \
+	  $(MV) $@.tmp $@ && \
+	  $(CP) $? $(?:.kwd=.src) && \
+	  $(CP) $@ $(?:.kwd=.h.blt); \
 	fi
 
 .c.@OBJEXT@:
@@ -281,10 +298,12 @@ update-rubyspec: update-mspec
 
 test-rubyspec:
 	@if [ ! -d $(srcdir)/spec/rubyspec ]; then echo No rubyspec here.  make update-rubyspec first.; exit 1; fi
-	$(RUNRUBY) $(srcdir)/spec/mspec/bin/mspec -B $(srcdir)/spec/default.mspec $(MSPECOPT)
+	$(RUNRUBY) $(srcdir)/spec/mspec/bin/mspec run -B $(srcdir)/spec/default.mspec $(MSPECOPT)
 
 INSNS	= opt_sc.inc optinsn.inc optunifs.inc insns.inc insns_info.inc \
 	  vmtc.inc vm.inc
 
-$(INSNS): $(srcdir)/insns.def vm_opts.h $(srcdir)/defs/opt_operand.def $(srcdir)/defs/opt_insn_unif.def
+$(INSNS): $(srcdir)/insns.def vm_opts.h \
+	  $(srcdir)/defs/opt_operand.def $(srcdir)/defs/opt_insn_unif.def \
+	  $(srcdir)/tool/instruction.rb $(srcdir)/tool/insns2vm.rb
 	$(BASERUBY) -Ks $(srcdir)/tool/insns2vm.rb $(INSNS2VMOPT) $@

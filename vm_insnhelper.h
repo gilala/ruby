@@ -48,6 +48,7 @@ enum {
   BOP_AREF,
   BOP_ASET,
   BOP_LENGTH,
+  BOP_SIZE,
   BOP_SUCC,
   BOP_GT,
   BOP_GE,
@@ -58,12 +59,7 @@ enum {
 };
 
 extern char ruby_vm_redefined_flag[BOP_LAST_];
-extern VALUE ruby_vm_global_state_version;
 extern VALUE ruby_vm_const_missing_count;
-
-#define GET_VM_STATE_VERSION() (ruby_vm_global_state_version)
-#define INC_VM_STATE_VERSION() \
-  (ruby_vm_global_state_version = (ruby_vm_global_state_version+1) & 0x8fffffff)
 
 
 /**********************************************************/
@@ -188,9 +184,24 @@ extern VALUE ruby_vm_const_missing_count;
 #define BASIC_OP_UNREDEFINED_P(op) (LIKELY(ruby_vm_redefined_flag[op] == 0))
 #define HEAP_CLASS_OF(obj) RBASIC(obj)->klass
 
+#ifndef USE_IC_FOR_SPECIALIZED_METHOD
+#define USE_IC_FOR_SPECIALIZED_METHOD 1
+#endif
+
+#if USE_IC_FOR_SPECIALIZED_METHOD
+
+#define CALL_SIMPLE_METHOD(num, id, recv) do { \
+    VALUE klass = CLASS_OF(recv); \
+    CALL_METHOD(num, 0, 0, id, vm_method_search(id, klass, ic), recv); \
+} while (0)
+
+#else
+
 #define CALL_SIMPLE_METHOD(num, id, recv) do { \
     VALUE klass = CLASS_OF(recv); \
     CALL_METHOD(num, 0, 0, id, rb_method_entry(klass, id), recv); \
 } while (0)
+
+#endif
 
 #endif /* RUBY_INSNHELPER_H */

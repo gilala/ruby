@@ -681,7 +681,7 @@ enum_first(int argc, VALUE *argv, VALUE obj)
  *  +1 depending on the comparison between <i>a</i> and <i>b</i>. As of
  *  Ruby 1.8, the method <code>Enumerable#sort_by</code> implements a
  *  built-in Schwartzian Transform, useful when key computation or
- *  comparison is expensive..
+ *  comparison is expensive.
  *
  *     %w(rhea kea flea).sort         #=> ["flea", "kea", "rhea"]
  *     (1..10).sort {|a,b| b <=> a}   #=> [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
@@ -1134,57 +1134,123 @@ enum_max(VALUE obj)
     return result[0];
 }
 
-static VALUE
-minmax_i(VALUE i, VALUE *memo, int argc, VALUE *argv)
+struct minmax_t {
+    VALUE min;
+    VALUE max;
+    VALUE ary;
+    VALUE last;
+};
+
+static void
+minmax_i_update(VALUE i, VALUE j, struct minmax_t *memo)
 {
     int n;
 
-    ENUM_WANT_SVALUE();
-
-    if (memo[0] == Qundef) {
-	memo[0] = i;
-	memo[1] = i;
+    if (memo->min == Qundef) {
+	memo->min = i;
+	memo->max = j;
     }
     else {
-	n = rb_cmpint(rb_funcall(i, id_cmp, 1, memo[0]), i, memo[0]);
+	n = rb_cmpint(rb_funcall(i, id_cmp, 1, memo->min), i, memo->min);
 	if (n < 0) {
-	    memo[0] = i;
+	    memo->min = i;
 	}
-	n = rb_cmpint(rb_funcall(i, id_cmp, 1, memo[1]), i, memo[1]);
+	n = rb_cmpint(rb_funcall(j, id_cmp, 1, memo->max), j, memo->max);
 	if (n > 0) {
-	    memo[1] = i;
+	    memo->max = j;
 	}
     }
-    return Qnil;
 }
 
 static VALUE
-minmax_ii(VALUE i, VALUE *memo, int argc, VALUE *argv)
+minmax_i(VALUE i, VALUE _memo, int argc, VALUE *argv)
 {
+    struct minmax_t *memo = (struct minmax_t *)_memo;
     int n;
+    VALUE j;
 
     ENUM_WANT_SVALUE();
 
-    if (memo[0] == Qundef) {
-	memo[0] = i;
-	memo[1] = i;
+    if (memo->last == Qundef) {
+        memo->last = i;
+        return Qnil;
+    }
+    j = memo->last;
+    memo->last = Qundef;
+
+    n = rb_cmpint(rb_funcall(j, id_cmp, 1, i), j, i);
+    if (n == 0)
+        i = j;
+    else if (n < 0) {
+        VALUE tmp;
+        tmp = i;
+        i = j;
+        j = tmp;
+    }
+
+    minmax_i_update(i, j, memo);
+
+    return Qnil;
+}
+
+static void
+minmax_ii_update(VALUE i, VALUE j, struct minmax_t *memo)
+{
+    int n;
+
+    if (memo->min == Qundef) {
+	memo->min = i;
+	memo->max = j;
     }
     else {
-	VALUE ary = memo[2];
+	VALUE ary = memo->ary;
 
-	RARRAY_PTR(ary)[0] = i;
-	RARRAY_PTR(ary)[1] = memo[0];
-	n = rb_cmpint(rb_yield(ary), i, memo[0]);
+        rb_ary_store(ary, 0, i);
+        rb_ary_store(ary, 1, memo->min);
+	n = rb_cmpint(rb_yield(ary), i, memo->min);
 	if (n < 0) {
-	    memo[0] = i;
+	    memo->min = i;
 	}
-	RARRAY_PTR(ary)[0] = i;
-	RARRAY_PTR(ary)[1] = memo[1];
-	n = rb_cmpint(rb_yield(ary), i, memo[1]);
+        rb_ary_store(ary, 0, j);
+        rb_ary_store(ary, 1, memo->max);
+	n = rb_cmpint(rb_yield(ary), j, memo->max);
 	if (n > 0) {
-	    memo[1] = i;
+	    memo->max = j;
 	}
     }
+}
+
+static VALUE
+minmax_ii(VALUE i, VALUE _memo, int argc, VALUE *argv)
+{
+    struct minmax_t *memo = (struct minmax_t *)_memo;
+    int n;
+    VALUE ary, j;
+
+    ENUM_WANT_SVALUE();
+
+    if (memo->last == Qundef) {
+        memo->last = i;
+        return Qnil;
+    }
+    j = memo->last;
+    memo->last = Qundef;
+
+    ary = memo->ary;
+    rb_ary_store(ary, 0, j);
+    rb_ary_store(ary, 1, i);
+    n = rb_cmpint(rb_yield(ary), j, i);
+    if (n == 0)
+        i = j;
+    else if (n < 0) {
+        VALUE tmp;
+        tmp = i;
+        i = j;
+        j = tmp;
+    }
+
+    minmax_ii_update(i, j, memo);
+
     return Qnil;
 }
 
@@ -1206,20 +1272,25 @@ minmax_ii(VALUE i, VALUE *memo, int argc, VALUE *argv)
 static VALUE
 enum_minmax(VALUE obj)
 {
-    VALUE result[3];
+    struct minmax_t memo;
     VALUE ary = rb_ary_new3(2, Qnil, Qnil);
 
-    result[0] = Qundef;
+    memo.min = Qundef;
+    memo.last = Qundef;
     if (rb_block_given_p()) {
-	result[2] = ary;
-	rb_block_call(obj, id_each, 0, 0, minmax_ii, (VALUE)result);
+	memo.ary = ary;
+	rb_block_call(obj, id_each, 0, 0, minmax_ii, (VALUE)&memo);
+        if (memo.last != Qundef)
+            minmax_ii_update(memo.last, memo.last, &memo);
     }
     else {
-	rb_block_call(obj, id_each, 0, 0, minmax_i, (VALUE)result);
+	rb_block_call(obj, id_each, 0, 0, minmax_i, (VALUE)&memo);
+        if (memo.last != Qundef)
+            minmax_i_update(memo.last, memo.last, &memo);
     }
-    if (result[0] != Qundef) {
-        RARRAY_PTR(ary)[0] = result[0];
-        RARRAY_PTR(ary)[1] = result[1];
+    if (memo.min != Qundef) {
+        rb_ary_store(ary, 0, memo.min);
+        rb_ary_store(ary, 1, memo.max);
     }
     return ary;
 }
@@ -1310,30 +1381,73 @@ enum_max_by(VALUE obj)
     return memo[1];
 }
 
-static VALUE
-minmax_by_i(VALUE i, VALUE *memo, int argc, VALUE *argv)
+struct minmax_by_t {
+    VALUE min_bv;
+    VALUE max_bv;
+    VALUE min;
+    VALUE max;
+    VALUE last_bv;
+    VALUE last;
+};
+
+static void
+minmax_by_i_update(VALUE v1, VALUE v2, VALUE i1, VALUE i2, struct minmax_by_t *memo)
 {
-    VALUE v;
+    if (memo->min_bv == Qundef) {
+	memo->min_bv = v1;
+	memo->max_bv = v2;
+	memo->min = i1;
+	memo->max = i2;
+    }
+    else {
+	if (rb_cmpint(rb_funcall(v1, id_cmp, 1, memo->min_bv), v1, memo->min_bv) < 0) {
+	    memo->min_bv = v1;
+	    memo->min = i1;
+	}
+	if (rb_cmpint(rb_funcall(v2, id_cmp, 1, memo->max_bv), v2, memo->max_bv) > 0) {
+	    memo->max_bv = v2;
+	    memo->max = i2;
+	}
+    }
+}
+
+static VALUE
+minmax_by_i(VALUE i, VALUE _memo, int argc, VALUE *argv)
+{
+    struct minmax_by_t *memo = (struct minmax_by_t *)_memo;
+    VALUE vi, vj, j;
+    int n;
 
     ENUM_WANT_SVALUE();
 
-    v = rb_yield(i);
-    if (memo[0] == Qundef) {
-	memo[0] = v;
-	memo[1] = v;
-	memo[2] = i;
-	memo[3] = i;
+    vi = rb_yield(i);
+
+    if (memo->last_bv == Qundef) {
+        memo->last_bv = vi;
+        memo->last = i;
+        return Qnil;
     }
-    else {
-	if (rb_cmpint(rb_funcall(v, id_cmp, 1, memo[0]), v, memo[0]) < 0) {
-	    memo[0] = v;
-	    memo[2] = i;
-	}
-	if (rb_cmpint(rb_funcall(v, id_cmp, 1, memo[1]), v, memo[1]) > 0) {
-	    memo[1] = v;
-	    memo[3] = i;
-	}
+    vj = memo->last_bv;
+    j = memo->last;
+    memo->last_bv = Qundef;
+
+    n = rb_cmpint(rb_funcall(vj, id_cmp, 1, vi), vj, vi);
+    if (n == 0) {
+        i = j;
+        vi = vj;
     }
+    else if (n < 0) {
+        VALUE tmp;
+        tmp = i;
+        i = j;
+        j = tmp;
+        tmp = vi;
+        vi = vj;
+        vj = tmp;
+    }
+
+    minmax_by_i_update(vi, vj, i, j, memo);
+
     return Qnil;
 }
 
@@ -1352,16 +1466,20 @@ minmax_by_i(VALUE i, VALUE *memo, int argc, VALUE *argv)
 static VALUE
 enum_minmax_by(VALUE obj)
 {
-    VALUE memo[4];
+    struct minmax_by_t memo;
 
     RETURN_ENUMERATOR(obj, 0, 0);
 
-    memo[0] = Qundef;
-    memo[1] = Qundef;
-    memo[2] = Qnil;
-    memo[3] = Qnil;
-    rb_block_call(obj, id_each, 0, 0, minmax_by_i, (VALUE)memo);
-    return rb_assoc_new(memo[2], memo[3]);
+    memo.min_bv = Qundef;
+    memo.max_bv = Qundef;
+    memo.min = Qnil;
+    memo.max = Qnil;
+    memo.last_bv = Qundef;
+    memo.last = Qundef;
+    rb_block_call(obj, id_each, 0, 0, minmax_by_i, (VALUE)&memo);
+    if (memo.last_bv != Qundef)
+        minmax_by_i_update(memo.last_bv, memo.last_bv, memo.last, memo.last, &memo);
+    return rb_assoc_new(memo.min, memo.max);
 }
 
 static VALUE
@@ -1802,6 +1920,407 @@ enum_cycle(int argc, VALUE *argv, VALUE obj)
     return Qnil;		/* not reached */
 }
 
+struct chunk_arg {
+    VALUE categorize;
+    VALUE state;
+    VALUE prev_value;
+    VALUE prev_elts;
+    VALUE yielder;
+};
+
+static VALUE
+chunk_ii(VALUE i, VALUE _argp, int argc, VALUE *argv)
+{
+    struct chunk_arg *argp = (struct chunk_arg *)_argp;
+    VALUE v;
+    VALUE alone = ID2SYM(rb_intern("_alone"));
+    VALUE separator = ID2SYM(rb_intern("_separator"));
+
+    ENUM_WANT_SVALUE();
+
+    if (NIL_P(argp->state))
+        v = rb_funcall(argp->categorize, rb_intern("call"), 1, i);
+    else
+        v = rb_funcall(argp->categorize, rb_intern("call"), 2, i, argp->state);
+
+    if (v == alone) {
+        if (!NIL_P(argp->prev_value)) {
+            rb_funcall(argp->yielder, rb_intern("<<"), 1, rb_assoc_new(argp->prev_value, argp->prev_elts));
+            argp->prev_value = argp->prev_elts = Qnil;
+        }
+        rb_funcall(argp->yielder, rb_intern("<<"), 1, rb_assoc_new(v, rb_ary_new3(1, i)));
+    }
+    else if (NIL_P(v) || v == separator) {
+        if (!NIL_P(argp->prev_value)) {
+            rb_funcall(argp->yielder, rb_intern("<<"), 1, rb_assoc_new(argp->prev_value, argp->prev_elts));
+            argp->prev_value = argp->prev_elts = Qnil;
+        }
+    }
+    else if (SYMBOL_P(v) && rb_id2name(SYM2ID(v))[0] == '_') {
+	rb_raise(rb_eRuntimeError, "symbol begins with an underscore is reserved");
+    }
+    else {
+        if (NIL_P(argp->prev_value)) {
+            argp->prev_value = v;
+            argp->prev_elts = rb_ary_new3(1, i);
+        }
+        else {
+            if (rb_equal(argp->prev_value, v)) {
+                rb_ary_push(argp->prev_elts, i);
+            }
+            else {
+                rb_funcall(argp->yielder, rb_intern("<<"), 1, rb_assoc_new(argp->prev_value, argp->prev_elts));
+                argp->prev_value = v;
+                argp->prev_elts = rb_ary_new3(1, i);
+            }
+        }
+    }
+    return Qnil;
+}
+
+static VALUE
+chunk_i(VALUE yielder, VALUE enumerator, int argc, VALUE *argv)
+{
+    VALUE enumerable;
+    struct chunk_arg arg;
+
+    enumerable = rb_ivar_get(enumerator, rb_intern("chunk_enumerable"));
+    arg.categorize = rb_ivar_get(enumerator, rb_intern("chunk_categorize"));
+    arg.state = rb_ivar_get(enumerator, rb_intern("chunk_initial_state"));
+    arg.prev_value = Qnil;
+    arg.prev_elts = Qnil;
+    arg.yielder = yielder;
+
+    if (!NIL_P(arg.state))
+        arg.state = rb_obj_dup(arg.state);
+
+    rb_block_call(enumerable, id_each, 0, 0, chunk_ii, (VALUE)&arg);
+    if (!NIL_P(arg.prev_elts))
+        rb_funcall(arg.yielder, rb_intern("<<"), 1, rb_assoc_new(arg.prev_value, arg.prev_elts));
+    return Qnil;
+}
+
+/*
+ *  call-seq:
+ *     enum.chunk {|elt| ... } => enumerator
+ *     enum.chunk(initial_state) {|elt, state| ... } => enumerator
+ *
+ *  Creates an enumerator for each chunked elements.
+ *  The consecutive elements which have same block value are chunked.
+ *
+ *  The result enumerator yields the block value and an array of chunked elements.
+ *  So "each" method can be called as follows.
+ *
+ *    enum.chunk {|elt| key }.each {|key, ary| ... }
+ *    enum.chunk(initial_state) {|elt, state| key }.each {|key, ary| ... }
+ *
+ *  For example, consecutive even numbers and odd numbers can be
+ *  splitted as follows.
+ *
+ *    [3,1,4,1,5,9,2,6,5,3,5].chunk {|n|
+ *      n.even?          
+ *    }.each {|even, ary|
+ *      p [even, ary]
+ *    }
+ *    #=> [false, [3, 1]]
+ *    #   [true, [4]]
+ *    #   [false, [1, 5, 9]]
+ *    #   [true, [2, 6]]
+ *    #   [false, [5, 3, 5]]
+ *
+ *  This method is especially useful for sorted series of elements.
+ *  The following example counts words for each initial letter.
+ *
+ *    open("/usr/share/dict/words", "r:iso-8859-1") {|f|
+ *      f.chunk {|line| line.ord }.each {|ch, lines| p [ch.chr, lines.length] }
+ *    }
+ *    #=> ["\n", 1]
+ *    #   ["A", 1327]
+ *    #   ["B", 1372]
+ *    #   ["C", 1507]
+ *    #   ["D", 791]
+ *    #   ...
+ *
+ *  The following key values has special meaning:
+ *  - nil and :_separator specifies that the elements are dropped.
+ *  - :_alone specifies that the element should be chunked as a singleton.
+ *  Other symbols which begins an underscore are reserved.
+ *
+ *  nil and :_separator can be used to ignore some elements.
+ *  For example, the sequence of hyphens in svn log can be eliminated as follows.
+ *
+ *    sep = "-"*72 + "\n"
+ *    IO.popen("svn log README") {|f|                 
+ *      f.chunk {|line|
+ *        line != sep || nil
+ *      }.each {|_, lines|
+ *        pp lines
+ *      }      
+ *    }
+ *    #=> ["r20018 | knu | 2008-10-29 13:20:42 +0900 (Wed, 29 Oct 2008) | 2 lines\n",
+ *    #    "\n",
+ *    #    "* README, README.ja: Update the portability section.\n",
+ *    #    "\n"]
+ *    #   ["r16725 | knu | 2008-05-31 23:34:23 +0900 (Sat, 31 May 2008) | 2 lines\n",
+ *    #    "\n",
+ *    #    "* README, README.ja: Add a note about default C flags.\n",
+ *    #    "\n"]
+ *    #   ...
+ *
+ *  paragraphs separated by empty lines can be parsed as follows. 
+ *
+ *    File.foreach("README").chunk {|line|
+ *      /\A\s*\z/ !~ line || nil
+ *    }.each {|_, lines|
+ *      pp lines
+ *    }
+ *
+ *  :_alone can be used to pass through bunch of elements.
+ *  For example, sort consective lines formed as Foo#bar and
+ *  pass other lines, chunk can be used as follows.
+ *
+ *    pat = /\A[A-Z][A-Za-z0-9_]+\#/
+ *    open(filename) {|f|
+ *      f.chunk {|line| pat =~ line ? $& : :_alone }.each {|key, lines|
+ *        if key != :_alone
+ *          print lines.sort.join('')
+ *        else
+ *          print lines.join('')
+ *        end
+ *      }
+ *    }
+ *
+ *  If the block needs to maintain state over multiple elements,
+ *  _initial_state_ argument can be used.
+ *  If non-nil value is given,
+ *  it is duplicated for each "each" method invocation of the enumerator.
+ *  The duplicated object is passed to 2nd argument of the block for "chunk" method.
+ *
+ */
+static VALUE
+enum_chunk(int argc, VALUE *argv, VALUE enumerable)
+{
+    VALUE initial_state;
+    VALUE enumerator;
+
+    if(!rb_block_given_p())
+	rb_raise(rb_eArgError, "no block given");
+    rb_scan_args(argc, argv, "01", &initial_state);
+
+    enumerator = rb_obj_alloc(rb_cEnumerator);
+    rb_ivar_set(enumerator, rb_intern("chunk_enumerable"), enumerable);
+    rb_ivar_set(enumerator, rb_intern("chunk_categorize"), rb_block_proc());
+    rb_ivar_set(enumerator, rb_intern("chunk_initial_state"), initial_state);
+    rb_block_call(enumerator, rb_intern("initialize"), 0, 0, chunk_i, enumerator);
+    return enumerator;
+}
+
+
+struct slicebefore_arg {
+    VALUE sep_pred;
+    VALUE sep_pat;
+    VALUE state;
+    VALUE prev_elts;
+    VALUE yielder;
+};
+
+static VALUE
+slicebefore_ii(VALUE i, VALUE _argp, int argc, VALUE *argv)
+{
+    struct slicebefore_arg *argp = (struct slicebefore_arg *)_argp;
+    VALUE header_p;
+
+    ENUM_WANT_SVALUE();
+
+    if (!NIL_P(argp->sep_pat))
+        header_p = rb_funcall(argp->sep_pat, id_eqq, 1, i);
+    else if (NIL_P(argp->state))
+        header_p = rb_funcall(argp->sep_pred, rb_intern("call"), 1, i);
+    else
+        header_p = rb_funcall(argp->sep_pred, rb_intern("call"), 2, i, argp->state);
+    if (RTEST(header_p)) {
+        if (!NIL_P(argp->prev_elts))
+            rb_funcall(argp->yielder, rb_intern("<<"), 1, argp->prev_elts);
+        argp->prev_elts = rb_ary_new3(1, i);
+    }
+    else {
+        if (NIL_P(argp->prev_elts))
+            argp->prev_elts = rb_ary_new3(1, i);
+        else
+            rb_ary_push(argp->prev_elts, i);
+    }
+
+    return Qnil;
+}
+
+static VALUE
+slicebefore_i(VALUE yielder, VALUE enumerator, int argc, VALUE *argv)
+{
+    VALUE enumerable;
+    struct slicebefore_arg arg;
+
+    enumerable = rb_ivar_get(enumerator, rb_intern("slicebefore_enumerable"));
+    arg.sep_pred = rb_attr_get(enumerator, rb_intern("slicebefore_sep_pred"));
+    arg.sep_pat = NIL_P(arg.sep_pred) ? rb_ivar_get(enumerator, rb_intern("slicebefore_sep_pat")) : Qnil;
+    arg.state = rb_ivar_get(enumerator, rb_intern("slicebefore_initial_state"));
+    arg.prev_elts = Qnil;
+    arg.yielder = yielder;
+
+    if (!NIL_P(arg.state))
+        arg.state = rb_obj_dup(arg.state);
+
+    rb_block_call(enumerable, id_each, 0, 0, slicebefore_ii, (VALUE)&arg);
+    if (!NIL_P(arg.prev_elts))
+        rb_funcall(arg.yielder, rb_intern("<<"), 1, arg.prev_elts);
+    return Qnil;
+}
+
+/*
+ *  call-seq:
+ *     enum.slice_before(pattern) => enumerator
+ *     enum.slice_before {|elt| bool } => enumerator
+ *     enum.slice_before(initial_state) {|elt, state| bool } => enumerator
+ *
+ *  Creates an enumerator for each chunked elements.
+ *  The beginnings of chunks are defined by _pattern_ and the block.
+ *  If _pattern_ === _elt_ returns true or 
+ *  the block returns true for the element,
+ *  the element is beginning of a chunk.
+ *
+ *  The result enumerator yields the chunked elements as an array.
+ *  So "each" method can be called as follows.
+ *
+ *    enum.slice_before(pattern).each {|ary| ... }
+ *    enum.slice_before {|elt| bool }.each {|ary| ... }
+ *    enum.slice_before(initial_state) {|elt, state| bool }.each {|ary| ... }
+ *
+ *  For example, iteration over ChangeLog entries can be implemented as
+ *  follows.
+ *
+ *    # iterate over ChangeLog entries.
+ *    open("ChangeLog") {|f|
+ *      f.slice_before(/\A\S/).each {|e| pp e}
+ *    }
+ *
+ *    # same as above.  block is used instead of pattern argument.
+ *    open("ChangeLog") {|f|
+ *      f.slice_before {|line| /\A\S/ === line }.each {|e| pp e}
+ *    }
+ *
+ * "svn proplist -R" produces multiline output for each file.
+ * They can be chunked as follows: 
+ *
+ *    IO.popen([{"LC_ALL"=>"C"}, "svn", "proplist", "-R"]) {|f|
+ *      f.lines.slice_before(/\AProp/).each {|lines| p lines }
+ *    }
+ *    #=> ["Properties on '.':\n", "  svn:ignore\n", "  svk:merge\n"]
+ *    #   ["Properties on 'goruby.c':\n", "  svn:eol-style\n"]
+ *    #   ["Properties on 'complex.c':\n", "  svn:mime-type\n", "  svn:eol-style\n"]
+ *    #   ["Properties on 'regparse.c':\n", "  svn:eol-style\n"]
+ *    #   ...
+ *
+ *  If the block needs to maintain state over multiple elements,
+ *  local variables can be used.
+ *  For example, monotonically increasing elements can be chunked as follows.
+ *
+ *    a = [3,1,4,1,5,9,2,6,5,3,5]
+ *    n = 0
+ *    p a.slice_before {|elt|
+ *      prev, n = n, elt
+ *      prev > elt
+ *    }.to_a
+ *    #=> [[3], [1, 4], [1, 5, 9], [2, 6], [5], [3, 5]]
+ *
+ *  However local variables are not appropriate to maintain state
+ *  if the result enumerator is used twice or more.
+ *  In such case, the last state of the 1st +each+ is used in 2nd +each+.
+ *  _initial_state_ argument can be used to avoid this problem.
+ *  If non-nil value is given as _initial_state_,
+ *  it is duplicated for each "each" method invocation of the enumerator.
+ *  The duplicated object is passed to 2nd argument of the block for
+ *  +slice_before+ method.
+ *
+ *    # word wrapping
+ *    def wordwrap(words, width)
+ *      # if cols is a local variable, 2nd "each" may start with non-zero cols.
+ *      words.slice_before(cols: 0) {|w, h|
+ *        h[:cols] += 1 if h[:cols] != 0
+ *        h[:cols] += w.length
+ *        if width < h[:cols]
+ *          h[:cols] = w.length
+ *          true
+ *        else
+ *          false
+ *        end
+ *      }
+ *    end
+ *    text = (1..20).to_a.join(" ")
+ *    enum = wordwrap(text.split(/\s+/), 10)
+ *    puts "-"*10
+ *    enum.each {|ws| puts ws.join(" ") }
+ *    puts "-"*10
+ *    #=> ----------
+ *    #   1 2 3 4 5
+ *    #   6 7 8 9 10
+ *    #   11 12 13
+ *    #   14 15 16
+ *    #   17 18 19
+ *    #   20
+ *    #   ----------
+ *
+ * mbox contains series of mails which start with Unix From line.
+ * So each mail can be extracted by slice before Unix From line.
+ *
+ *    # parse mbox
+ *    open("mbox") {|f|
+ *      f.slice_before {|line|
+ *        line.start_with? "From "
+ *      }.each {|mail|
+ *        unix_from = mail.shift
+ *        i = mail.index("\n")
+ *        header = mail[0...i]
+ *        body = mail[(i+1)..-1]
+ *        fields = header.slice_before {|line| !" \t".include?(line[0]) }.to_a
+ *        p unix_from
+ *        pp fields
+ *        pp body
+ *      }
+ *    }
+ *
+ *    # split mails in mbox (slice before Unix From line after an empty line)
+ *    open("mbox") {|f|
+ *      f.slice_before(emp: true) {|line,h|
+ *      prevemp = h[:emp]
+ *      h[:emp] = line == "\n"
+ *      prevemp && line.start_with?("From ")
+ *    }.each {|mail|
+ *      pp mail
+ *    }
+ *
+ */
+static VALUE
+enum_slice_before(int argc, VALUE *argv, VALUE enumerable)
+{
+    VALUE enumerator;
+
+    if (rb_block_given_p()) {
+        VALUE initial_state;
+        rb_scan_args(argc, argv, "01", &initial_state);
+        enumerator = rb_obj_alloc(rb_cEnumerator);
+        rb_ivar_set(enumerator, rb_intern("slicebefore_sep_pred"), rb_block_proc());
+        rb_ivar_set(enumerator, rb_intern("slicebefore_initial_state"), initial_state);
+    }
+    else {
+        VALUE sep_pat;
+        rb_scan_args(argc, argv, "1", &sep_pat);
+        enumerator = rb_obj_alloc(rb_cEnumerator);
+        rb_ivar_set(enumerator, rb_intern("slicebefore_sep_pat"), sep_pat);
+    }
+    rb_ivar_set(enumerator, rb_intern("slicebefore_enumerable"), enumerable);
+    rb_block_call(enumerator, rb_intern("initialize"), 0, 0, slicebefore_i, enumerator);
+    return enumerator;
+}
+
 /*
  *  call-seq:
  *     enum.join(sep=$,)    -> str
@@ -1881,6 +2400,8 @@ Init_Enumerable(void)
     rb_define_method(rb_mEnumerable, "drop_while", enum_drop_while, 0);
     rb_define_method(rb_mEnumerable, "cycle", enum_cycle, -1);
     rb_define_method(rb_mEnumerable, "join", enum_join, -1);
+    rb_define_method(rb_mEnumerable, "chunk", enum_chunk, -1);
+    rb_define_method(rb_mEnumerable, "slice_before", enum_slice_before, -1);
 
     id_eqq  = rb_intern("===");
     id_each = rb_intern("each");

@@ -291,7 +291,7 @@ VALUE rb_ull2inum(unsigned LONG_LONG);
 
 #define SYMBOL_P(x) (((VALUE)(x)&~(~(VALUE)0<<RUBY_SPECIAL_SHIFT))==SYMBOL_FLAG)
 #define ID2SYM(x) (((VALUE)(x)<<RUBY_SPECIAL_SHIFT)|SYMBOL_FLAG)
-#define SYM2ID(x) RSHIFT((unsigned long)x,RUBY_SPECIAL_SHIFT)
+#define SYM2ID(x) RSHIFT((unsigned long)(x),RUBY_SPECIAL_SHIFT)
 
 /* Module#methods, #singleton_methods and so on return Symbols */
 #define USE_SYMBOL_AS_METHOD_NAME 1
@@ -384,6 +384,7 @@ enum ruby_value_type {
 
 #define BUILTIN_TYPE(x) (int)(((struct RBasic*)(x))->flags & T_MASK)
 
+static inline int rb_type(VALUE obj);
 #define TYPE(x) rb_type((VALUE)(x))
 
 #define RB_GC_GUARD(v) (*(volatile VALUE *)&(v))
@@ -450,11 +451,17 @@ NUM2LONG(VALUE x)
 long rb_num2int(VALUE);
 long rb_fix2int(VALUE);
 #define FIX2INT(x) ((int)rb_fix2int((VALUE)x))
+#define NUM2INT_internal(x) (FIXNUM_P(x) ? FIX2INT(x) : (int)rb_num2int(x))
+#ifdef __GNUC__
+#define NUM2INT(x) \
+    __extension__ ({VALUE num2int_x = (x); NUM2INT_internal(num2int_x);})
+#else
 static inline int
 NUM2INT(VALUE x)
 {
-    return FIXNUM_P(x) ? FIX2INT(x) : (int)rb_num2int(x);
+    return NUM2INT_internal(x);
 }
+#endif
 unsigned long rb_num2uint(VALUE);
 #define NUM2UINT(x) ((unsigned int)rb_num2uint(x))
 unsigned long rb_fix2uint(VALUE);
@@ -469,11 +476,17 @@ unsigned long rb_fix2uint(VALUE);
 #ifdef HAVE_LONG_LONG
 LONG_LONG rb_num2ll(VALUE);
 unsigned LONG_LONG rb_num2ull(VALUE);
+# define NUM2LL_internal(x) (FIXNUM_P(x) ? FIX2LONG(x) : rb_num2ll(x))
+# ifdef __GNUC__
+#   define NUM2LL(x) \
+    __extension__ ({VALUE num2ll_x = (x); NUM2LL_internal(num2ll_x);})
+# else
 static inline LONG_LONG
 NUM2LL(VALUE x)
 {
-    return FIXNUM_P(x) ? FIX2LONG(x) : rb_num2ll(x);
+    return NUM2LL_internal(x);
 }
+# endif
 # define NUM2ULL(x) rb_num2ull((VALUE)x)
 #endif
 
@@ -496,45 +509,6 @@ double rb_num2dbl(VALUE);
 
 VALUE rb_uint2big(VALUE);
 VALUE rb_int2big(SIGNED_VALUE);
-
-#if SIZEOF_INT < SIZEOF_VALUE
-# define INT2NUM(v) INT2FIX((int)(v))
-# define UINT2NUM(v) LONG2FIX((unsigned int)(v))
-#else
-static inline VALUE
-INT2NUM(int v)
-{
-    if (!FIXABLE(v))
-	return rb_int2big(v);
-    return INT2FIX(v);
-}
-
-static inline VALUE
-UINT2NUM(unsigned int v)
-{
-    if (!POSFIXABLE(v))
-	return rb_uint2big(v);
-    return LONG2FIX(v);
-}
-#endif
-
-static inline VALUE
-LONG2NUM(long v)
-{
-    if (FIXABLE(v)) return LONG2FIX(v);
-    return rb_int2big(v);
-}
-
-static inline VALUE
-ULONG2NUM(unsigned long v)
-{
-    if (POSFIXABLE(v)) return LONG2FIX(v);
-    return rb_uint2big(v);
-}
-
-#define NUM2CHR(x) (((TYPE(x) == T_STRING)&&(RSTRING_LEN(x)>=1))?\
-                     RSTRING_PTR(x)[0]:(char)(NUM2INT(x)&0xff))
-#define CHR2FIX(x) INT2FIX((long)((x)&0xff))
 
 VALUE rb_newobj(void);
 #define NEWOBJ(obj,type) type *obj = (type*)rb_newobj()
@@ -740,8 +714,11 @@ typedef struct rb_data_type_struct {
     const char *wrap_struct_name;
     void (*dmark)(void*);
     void (*dfree)(void*);
-    size_t (*dsize)(void *);
-    void *ary[4]; /* for extension */
+    size_t (*dsize)(const void *);
+    void *reserved[3]; /* For future extension.
+                          This array *must* be filled with ZERO. */
+    void *data;        /* This area can be used for any purpose
+                          by a programmer who define the type. */
 } rb_data_type_t;
 
 struct RTypedData {
@@ -921,6 +898,68 @@ struct RBignum {
 
 #define OBJ_FROZEN(x) (!!FL_TEST((x), FL_FREEZE))
 #define OBJ_FREEZE(x) FL_SET((x), FL_FREEZE)
+
+#if SIZEOF_INT < SIZEOF_VALUE
+# define INT2NUM(v) INT2FIX((int)(v))
+# define UINT2NUM(v) LONG2FIX((unsigned int)(v))
+#else
+# define INT2NUM_internal(v) (FIXABLE(v) ? INT2FIX(v) : rb_int2big(v))
+# ifdef __GNUC__
+#   define INT2NUM(v) __extension__ ({int int2num_v = (v); INT2NUM_internal(int2num_v);})
+# else
+static inline VALUE
+INT2NUM(int v)
+{
+    return INT2NUM_internal(v);
+}
+# endif
+
+# define UINT2NUM_internal(v) (POSFIXABLE(v) ? LONG2FIX(v) : rb_uint2big(v))
+# ifdef __GNUC__
+#   define UINT2NUM(v) __extension__ ({unsigned int uint2num_v = (v); UINT2NUM_internal(uint2num_v);})
+# else
+static inline VALUE
+UINT2NUM(unsigned int v)
+{
+    return UINT2NUM_internal(v);
+}
+# endif
+#endif
+
+#define LONG2NUM_internal(v) (FIXABLE(v) ? LONG2FIX(v) : rb_int2big(v))
+#ifdef __GNUC__
+# define LONG2NUM(v) __extension__ ({long long2num_v = (v); LONG2NUM_internal(long2num_v);})
+#else
+static inline VALUE
+LONG2NUM(long v)
+{
+    return LONG2NUM_internal(v);
+}
+#endif
+
+#define ULONG2NUM_internal(v) (POSFIXABLE(v) ? LONG2FIX(v) : rb_uint2big(v))
+#ifdef __GNUC__
+# define ULONG2NUM(v) __extension__ ({unsigned long ulong2num_v = (v); ULONG2NUM_internal(ulong2num_v);})
+#else
+static inline VALUE
+ULONG2NUM(unsigned long v)
+{
+    return ULONG2NUM_internal(v);
+}
+#endif
+
+#define NUM2CHR_internal(x) (((TYPE(x) == T_STRING)&&(RSTRING_LEN(x)>=1))?\
+                     RSTRING_PTR(x)[0]:(char)(NUM2INT(x)&0xff))
+#ifdef __GNUC__
+# define NUM2CHR(x) ({VALUE num2chr_x = (x); NUM2CHR_internal(num2chr_x);})
+#else
+static inline char
+NUM2CHR(VALUE x)
+{
+    return NUM2CHR_internal(x);
+}
+#endif
+#define CHR2FIX(x) INT2FIX((long)((x)&0xff))
 
 #define ALLOC_N(type,n) (type*)xmalloc2((n),sizeof(type))
 #define ALLOC(type) (type*)xmalloc(sizeof(type))
@@ -1213,12 +1252,34 @@ rb_type(VALUE obj)
     return BUILTIN_TYPE(obj);
 }
 
+#define RB_TYPE_P(obj, type) ( \
+	((type) == T_FIXNUM) ? FIXNUM_P(obj) : \
+	((type) == T_TRUE) ? ((obj) == Qtrue) : \
+	((type) == T_FALSE) ? ((obj) == Qfalse) : \
+	((type) == T_NIL) ? ((obj) == Qnil) : \
+	((type) == T_UNDEF) ? ((obj) == Qundef) : \
+	((type) == T_SYMBOL) ? SYMBOL_P(obj) : \
+	(!SPECIAL_CONST_P(obj) && BUILTIN_TYPE(obj) == (type)))
+
+#ifdef __GNUC__
+#define rb_type_p(obj, type) \
+    __extension__ (__builtin_constant_p(type) ? RB_TYPE_P(obj, type) : \
+		   rb_type(obj) == (type))
+#else
+#define rb_type_p(obj, type) (rb_type(obj) == (type))
+#endif
+
+#ifdef __GNUC__
+#define rb_special_const_p(obj) \
+    __extension__ ({VALUE special_const_obj = (obj); (int)(SPECIAL_CONST_P(special_const_obj) ? Qtrue : Qfalse);})
+#else
 static inline int
 rb_special_const_p(VALUE obj)
 {
     if (SPECIAL_CONST_P(obj)) return (int)Qtrue;
     return (int)Qfalse;
 }
+#endif
 
 #include "ruby/missing.h"
 #include "ruby/intern.h"
@@ -1229,8 +1290,7 @@ static char *dln_libs_to_be_linked[] = { EXTLIB, 0 };
 #endif
 
 #if (defined(__APPLE__) || defined(__NeXT__)) && defined(__MACH__)
-/* to link startup code with ObjC support */
-#define RUBY_GLOBAL_SETUP static void objcdummyfunction(void) {objc_msgSend();}
+#define RUBY_GLOBAL_SETUP /* use linker option to link startup code with ObjC support */
 #else
 #define RUBY_GLOBAL_SETUP
 #endif

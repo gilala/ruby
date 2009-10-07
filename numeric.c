@@ -63,6 +63,8 @@
 #define DBL_EPSILON 2.2204460492503131e-16
 #endif
 
+extern double round(double);
+
 #ifndef HAVE_ROUND
 double
 round(double x)
@@ -79,9 +81,6 @@ round(double x)
     }
     return x;
 }
-#elif defined(__BEOS__)
-/* appears to be a bug in the BeOS headers */
-double round(double x);
 #endif
 
 static ID id_coerce, id_to_i, id_eq;
@@ -203,13 +202,13 @@ rb_num_coerce_relop(VALUE x, VALUE y, ID func)
 static VALUE
 num_sadded(VALUE x, VALUE name)
 {
-    const char *nstr = rb_id2name(rb_to_id(name));
+    ID mid = rb_to_id(name);
     /* ruby_frame = ruby_frame->prev; */ /* pop frame for "singleton_method_added" */
     /* Numerics should be values; singleton_methods should not be added to them */
-    rb_remove_method(rb_singleton_class(x), nstr);
+    rb_remove_method_id(rb_singleton_class(x), mid);
     rb_raise(rb_eTypeError,
 	     "can't define singleton method \"%s\" for %s",
-	     nstr,
+	     rb_id2name(mid),
 	     rb_obj_classname(x));
     return Qnil;		/* not reached */
 }
@@ -696,6 +695,13 @@ flo_div(VALUE x, VALUE y)
     }
 }
 
+/*
+ *  call-seq:
+ *     float.quo(numeric)  ->  float
+ *
+ *  Returns float / numeric.
+ */
+
 static VALUE
 flo_quo(VALUE x, VALUE y)
 {
@@ -930,7 +936,7 @@ static VALUE
 flo_hash(VALUE num)
 {
     double d;
-    int hash;
+    st_index_t hash;
 
     d = RFLOAT_VALUE(num);
     /* normalize -0.0 to 0.0 */
@@ -2260,6 +2266,8 @@ fixdivmod(long x, long y, long *divp, long *modp)
     if (modp) *modp = mod;
 }
 
+VALUE rb_big_fdiv(VALUE x, VALUE y);
+
 /*
  *  call-seq:
  *     fix.fdiv(numeric)  ->  float
@@ -2271,8 +2279,6 @@ fixdivmod(long x, long y, long *divp, long *modp)
  *     654321.fdiv(13731.24)   #=> 47.6519964693647
  *
  */
-
-VALUE rb_big_fdiv(VALUE x, VALUE y);
 
 static VALUE
 fix_fdiv(VALUE x, VALUE y)
@@ -3062,6 +3068,19 @@ int_dotimes(VALUE num)
     }
     return num;
 }
+
+/*
+ *  call-seq:
+ *     num.round([ndigits])  ->  integer or float
+ *
+ *  Rounds <i>flt</i> to a given precision in decimal digits (default 0 digits).
+ *  Precision may be negative.  Returns a floating point number when +ndigits+
+ *  is positive, +self+ for zero, and round down for negative.
+ *
+ *     1.round        #=> 1
+ *     1.round(2)     #=> 1.0
+ *     15.round(-1)   #=> 20
+ */
 
 static VALUE
 int_round(int argc, VALUE* argv, VALUE num)

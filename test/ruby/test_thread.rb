@@ -450,13 +450,17 @@ class TestThread < Test::Unit::TestCase
     m.unlock
   end
 
-  def test_recursive_error
-    o = Object.new
-    def o.inspect
-      Thread.current[:__recursive_key__][:inspect] = nil
+  def test_recursive_outer
+    arr = []
+    obj = Struct.new(:foo, :visited).new(arr, false)
+    arr << obj
+    def obj.hash
+      self[:visited] = true
       super
+      raise "recursive_outer should short circuit intermediate calls"
     end
-    assert_raise(TypeError) { [o].inspect }
+    assert_nothing_raised {arr.hash}
+    assert(obj[:visited])
   end
 end
 

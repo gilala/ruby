@@ -1,59 +1,145 @@
-############################################################
-# This file is imported from a different project.
-# DO NOT make modifications in this repo.
-# File a patch instead and assign it to Ryan Davis
-############################################################
+require 'minitest/unit'
+require 'pp'
 
-require 'mini/test'
-require 'test/unit/deprecate'
+module Test
+  module Unit
+    module Assertions
+      include MiniTest::Assertions
 
-module Test; end
-module Test::Unit # patch up bastards that that extend improperly.
-  if defined? Assertions then
-    warn "ARGH! someone defined Test::Unit::Assertions rather than requiring"
-    CRAP_ASSERTIONS = Assertions
-    remove_const :Assertions
+      def mu_pp(obj)
+        obj.pretty_inspect.chomp
+      end
 
-    # this will break on junit and rubinius... *sigh*
-    ObjectSpace.each_object(Module) do |offender|
-      offender.send :include, ::Mini::Assertions if offender < CRAP_ASSERTIONS
-    end rescue nil
+      def assert_raise(*args, &b)
+        assert_raises(*args, &b)
+      end
 
-    Test::Unit::TestCase.send :include, CRAP_ASSERTIONS
-  end
+      def assert_nothing_raised(*args)
+        self._assertions += 1
+        if Module === args.last
+          msg = nil
+        else
+          msg = args.pop
+        end
+        begin
+          line = __LINE__; yield
+        rescue Exception => e
+          bt = e.backtrace
+          as = e.instance_of?(MiniTest::Assertion)
+          if as
+            ans = /\A#{Regexp.quote(__FILE__)}:#{line}:in /o
+            bt.reject! {|ln| ans =~ ln}
+          end
+          if ((args.empty? && !as) ||
+              args.any? {|a| a.instance_of?(Module) ? e.is_a?(a) : e.class == a })
+            msg = message(msg) { "Exception raised:\n<#{mu_pp(e)}>" }
+            raise MiniTest::Assertion, msg.call, bt
+          else
+            raise
+          end
+        end
+        nil
+      end
 
-  Assertions = ::Mini::Assertions
+      def assert_nothing_thrown(msg=nil)
+        begin
+          yield
+        rescue ArgumentError => error
+          raise error if /\Auncaught throw (.+)\z/m !~ error.message
+          msg = message(msg) { "<#{$1}> was thrown when nothing was expected" }
+          flunk(msg)
+        end
+        assert(true, "Expected nothing to be thrown")
+      end
 
-  module Assertions
-    def self.included mod
-      mod.send :include, Test::Unit::CRAP_ASSERTIONS
-    end if defined? Test::Unit::CRAP_ASSERTIONS
-  end
-end
+      def assert_equal(exp, act, msg = nil)
+        msg = message(msg) {
+          exp_str = mu_pp(exp)
+          act_str = mu_pp(act)
+          exp_comment = ''
+          act_comment = ''
+          if exp_str == act_str
+            if (exp.is_a?(String) && act.is_a?(String)) ||
+               (exp.is_a?(Regexp) && act.is_a?(Regexp))
+              exp_comment = " (#{exp.encoding})"
+              act_comment = " (#{act.encoding})"
+            elsif exp.is_a?(Float) && act.is_a?(Float)
+              exp_str = "%\#.#{Float::DIG+2}g" % exp
+              act_str = "%\#.#{Float::DIG+2}g" % act
+            elsif exp.is_a?(Time) && act.is_a?(Time)
+              if exp.subsec * 1000_000_000 == exp.nsec
+                exp_comment = " (#{exp.nsec}[ns])"
+              else
+                exp_comment = " (subsec=#{exp.subsec})"
+              end
+              if act.subsec * 1000_000_000 == act.nsec
+                act_comment = " (#{act.nsec}[ns])"
+              else
+                act_comment = " (subsec=#{act.subsec})"
+              end
+            elsif exp.class != act.class
+              # a subclass of Range, for example.
+              exp_comment = " (#{exp.class})"
+              act_comment = " (#{act.class})"
+            end
+          elsif !Encoding.compatible?(exp_str, act_str)
+            if exp.is_a?(String) && act.is_a?(String)
+              exp_str = exp.dump
+              act_str = act.dump
+              exp_comment = " (#{exp.encoding})"
+              act_comment = " (#{act.encoding})"
+            else
+              exp_str = exp_str.dump
+              act_str = act_str.dump
+            end
+          end
+          "<#{exp_str}>#{exp_comment} expected but was\n<#{act_str}>#{act_comment}"
+        }
+        assert(exp == act, msg)
+      end
 
-module Test::Unit
-  module Assertions # deprecations
-    tu_deprecate :assert_nothing_thrown, :assert_nothing_raised # 2009-06-01
-    tu_deprecate :assert_raises,         :assert_raise          # 2010-06-01
-    tu_deprecate :assert_not_equal,      :refute_equal          # 2009-06-01
-    tu_deprecate :assert_no_match,       :refute_match          # 2009-06-01
-    tu_deprecate :assert_not_nil,        :refute_nil            # 2009-06-01
-    tu_deprecate :assert_not_same,       :refute_same           # 2009-06-01
+      def assert_not_nil(exp, msg=nil)
+        msg = message(msg) { "<#{mu_pp(exp)}> expected to not be nil" }
+        assert(!exp.nil?, msg)
+      end
 
-    def assert_nothing_raised _ = :ignored                      # 2009-06-01
-      self.class.tu_deprecation_warning :assert_nothing_raised
-      self._assertions += 1
-      yield
-    rescue => e
-      raise Mini::Assertion, exception_details(e, "Exception raised:")
-    end
+      def assert_not_equal(exp, act, msg=nil)
+        msg = message(msg) { "<#{mu_pp(exp)}> expected to be != to\n<#{mu_pp(act)}>" }
+        assert(exp != act, msg)
+      end
 
-    def build_message(user_message, template_message, *args)    # 2009-06-01
-      self.class.tu_deprecation_warning :build_message
-      user_message ||= ''
-      user_message += ' ' unless user_message.empty?
-      msg = template_message.split(/<\?>/).zip(args.map { |o| o.inspect })
-      user_message + msg.join
+      def assert_no_match(regexp, string, msg=nil)
+        assert_instance_of(Regexp, regexp, "The first argument to assert_no_match should be a Regexp.")
+        self._assertions -= 1
+        msg = message(msg) { "<#{mu_pp(regexp)}> expected to not match\n<#{mu_pp(string)}>" }
+        assert(regexp !~ string, msg)
+      end
+
+      def assert_not_same(expected, actual, message="")
+        msg = message(msg) { build_message(message, <<EOT, expected, expected.__id__, actual, actual.__id__) }
+<?>
+with id <?> expected to not be equal\\? to
+<?>
+with id <?>.
+EOT
+        assert(!actual.equal?(expected), msg)
+      end
+
+      # get rid of overcounting
+      def assert_respond_to obj, meth, msg = nil
+        super if !caller[0].rindex(MiniTest::MINI_DIR, 0) || !obj.respond_to?(meth)
+      end
+
+      ms = instance_methods(true).map {|sym| sym.to_s }
+      ms.grep(/\Arefute_/) do |m|
+        mname = ('assert_not_' << m.to_s[/.*?_(.*)/, 1])
+        alias_method(mname, m) unless ms.include? mname
+      end
+
+      def build_message(head, template=nil, *arguments)
+        template &&= template.chomp
+        template.gsub(/\?/) { mu_pp(arguments.shift) }
+      end
     end
   end
 end

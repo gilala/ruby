@@ -286,6 +286,7 @@ esignal_signo(VALUE self)
     return rb_iv_get(self, "signo");
 }
 
+/* :nodoc: */
 static VALUE
 interrupt_init(int argc, VALUE *argv, VALUE self)
 {
@@ -325,6 +326,16 @@ ruby_default_signal(int sig)
  *  <em>produces:</em>
  *
  *     Ouch!
+ *
+ *  If _signal_ is an integer but wrong for signal,
+ *  <code>Errno::EINVAL</code> or +RangeError+ will be raised.
+ *  Otherwise unless _signal_ is a +String+ or a +Symbol+, and a known
+ *  sinal name, +ArgumentError+ will be raised.
+ *
+ *  Also, <code>Errno::ESRCH</code> or +RangeError+ for invalid _pid_,
+ *  <code>Errno::EPERM</code> when failed because of no privilege,
+ *  will be raised.  In these cases, signals may have been sent to
+ *  preceding processes.
  */
 
 VALUE

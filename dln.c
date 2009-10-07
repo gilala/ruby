@@ -9,7 +9,18 @@
 
 **********************************************************************/
 
+#ifdef RUBY_EXPORT
 #include "ruby/ruby.h"
+#define dln_notimplement rb_notimplement
+#define dln_memerror rb_memerror
+#define dln_exit rb_exit
+#define dln_loaderror rb_loaderror
+#else
+#define dln_notimplement --->>> dln not implemented <<<---
+#define dln_memerror abort
+#define dln_exit exit
+static void dln_loaderror(const char *format, ...);
+#endif
 #include "dln.h"
 
 #ifdef HAVE_STDLIB_H
@@ -77,6 +88,18 @@ char *getenv();
 # include <image.h>
 #endif
 
+#ifndef dln_loaderror
+static void
+dln_loaderror(const char *format, ...)
+{
+    va_list ap;
+    va_start(ap, format);
+    vfprintf(stderr, format, ap);
+    va_end(ap);
+    abort();
+}
+#endif
+
 #ifndef NO_DLN_LOAD
 
 #if defined(HAVE_DLOPEN) && !defined(USE_DLN_A_OUT) && !defined(_AIX) && !defined(MACOSX_DYLD) && !defined(_UNICOSMP)
@@ -119,7 +142,7 @@ init_funcname_len(char **buf, const char *file)
     char *tmp = ALLOCA_N(char, len+1);\
     if (!tmp) {\
 	free(*buf);\
-	rb_memerror();\
+	dln_memerror();\
     }\
     strlcpy(tmp, *buf, len + 1);\
     free(*buf);\
@@ -451,7 +474,7 @@ dln_undefined(void)
     if (undef_tbl->num_entries > 0) {
 	fprintf(stderr, "dln: Calling undefined function\n");
 	dln_print_undef();
-	rb_exit(1);
+	dln_exit(1);
     }
 }
 
@@ -884,12 +907,13 @@ struct symdef {
     int lib_offset;
 };
 
-char *dln_librrb_ary_path = DLN_DEFAULT_LIB_PATH;
+const char *dln_librrb_ary_path = DLN_DEFAULT_LIB_PATH;
 
 static int
 load_lib(const char *lib)
 {
     char *path, *file, fbuf[MAXPATHLEN];
+    char *envpath = 0;
     char armagic[SARMAG];
     int fd, size;
     struct ar_hdr ahdr;
@@ -919,8 +943,10 @@ load_lib(const char *lib)
     /* if path is still NULL, use "." for path. */
     path = getenv("DLN_LIBRARY_PATH");
     if (path == NULL) path = dln_librrb_ary_path;
+    else path = envpath = strdup(path);
 
     file = dln_find_file_r(lib, path, fbuf, sizeof(fbuf));
+    if (envpath) free(envpath);
     fd = open(file, O_RDONLY);
     if (fd == -1) goto syserr;
     size = read(fd, armagic, SARMAG);
@@ -1094,6 +1120,7 @@ dln_sym(const char *name)
 #include <windows.h>
 #endif
 
+#if ! defined _AIX
 static const char *
 dln_strerror(void)
 {
@@ -1143,18 +1170,18 @@ dln_strerror(void)
     return message;
 #endif
 }
-
+#endif
 
 #if defined(_AIX) && ! defined(_IA64)
 static void
 aix_loaderror(const char *pathname)
 {
-    char *message[8], errbuf[1024];
+    char *message[1024], errbuf[1024];
     int i,j;
 
-    struct errtab {
+    static const struct errtab {
 	int errnum;
-	char *errstr;
+	const char * errstr;
     } load_errtab[] = {
 	{L_ERROR_TOOMANY,	"too many errors, rest skipped."},
 	{L_ERROR_NOLIB,		"can't load library:"},
@@ -1173,23 +1200,23 @@ aix_loaderror(const char *pathname)
 #define LOAD_ERRTAB_LEN	(sizeof(load_errtab)/sizeof(load_errtab[0]))
 #define ERRBUF_APPEND(s) strncat(errbuf, s, sizeof(errbuf)-strlen(errbuf)-1)
 
-    snprintf(errbuf, 1024, "load failed - %s ", pathname);
+    snprintf(errbuf, sizeof(errbuf), "load failed - %s ", pathname);
 
-    if (!loadquery(1, &message[0], sizeof(message)))
+    message[0] = NULL;
+    if (!loadquery(L_GETMESSAGES, &message[0], sizeof(message)))
 	ERRBUF_APPEND(strerror(errno));
     for(i = 0; message[i] && *message[i]; i++) {
 	int nerr = atoi(message[i]);
 	for (j=0; j<LOAD_ERRTAB_LEN; j++) {
-           if (nerr == load_errtab[i].errnum && load_errtab[i].errstr)
-		ERRBUF_APPEND(load_errtab[i].errstr);
+           if (nerr == load_errtab[j].errnum && load_errtab[j].errstr)
+		ERRBUF_APPEND(load_errtab[j].errstr);
 	}
 	while (isdigit(*message[i])) message[i]++;
 	ERRBUF_APPEND(message[i]);
 	ERRBUF_APPEND("\n");
     }
     errbuf[strlen(errbuf)-1] = '\0';	/* trim off last newline */
-    rb_loaderror(errbuf);
-    return;
+    dln_loaderror("%s", errbuf);
 }
 #endif
 
@@ -1199,7 +1226,7 @@ void*
 dln_load(const char *file)
 {
 #ifdef NO_DLN_LOAD
-    rb_raise(rb_eLoadError, "this executable file can't load extension libraries");
+    dln_loaderror("this executable file can't load extension libraries");
 #else
 
 #if !defined(_AIX) && !defined(NeXT)
@@ -1213,7 +1240,7 @@ dln_load(const char *file)
     void (*init_fct)();
     char *buf;
 
-    if (strlen(file) >= MAXPATHLEN) rb_loaderror("filename too long");
+    if (strlen(file) >= MAXPATHLEN) dln_loaderror("filename too long");
 
     /* Load the file as an object one */
     init_funcname(&buf, file);
@@ -1227,7 +1254,7 @@ dln_load(const char *file)
     }
 
     if ((init_fct = (void(*)())GetProcAddress(handle, buf)) == NULL) {
-	rb_loaderror("%s - %s\n%s", dln_strerror(), buf, file);
+	dln_loaderror("%s - %s\n%s", dln_strerror(), buf, file);
     }
 
     /* Call the init code */
@@ -1297,14 +1324,14 @@ dln_load(const char *file)
 	lib = shl_load(file, flags, 0);
 	if (lib == NULL) {
 	    extern int errno;
-	    rb_loaderror("%s - %s", strerror(errno), file);
+	    dln_loaderror("%s - %s", strerror(errno), file);
 	}
 	shl_findsym(&lib, buf, TYPE_PROCEDURE, (void*)&init_fct);
 	if (init_fct == NULL) {
 	    shl_findsym(&lib, buf, TYPE_UNDEFINED, (void*)&init_fct);
 	    if (init_fct == NULL) {
 		errno = ENOSYM;
-		rb_loaderror("%s - %s", strerror(ENOSYM), file);
+		dln_loaderror("%s - %s", strerror(ENOSYM), file);
 	    }
 	}
 	(*init_fct)();
@@ -1357,14 +1384,14 @@ dln_load(const char *file)
 	if(rld_load(s, NULL, object_files, NULL) == 0) {
 	    NXFlush(s);
 	    NXClose(s);
-	    rb_loaderror("Failed to load %.200s", file);
+	    dln_loaderror("Failed to load %.200s", file);
 	}
 
 	/* lookup the initial function */
 	if(rld_lookup(s, buf, &init_address) == 0) {
 	    NXFlush(s);
 	    NXClose(s);
-	    rb_loaderror("Failed to lookup Init function %.200s", file);
+	    dln_loaderror("Failed to lookup Init function %.200s", file);
 	}
 
 	NXFlush(s);
@@ -1389,14 +1416,14 @@ dln_load(const char *file)
 	dyld_result = NSCreateObjectFileImageFromFile(file, &obj_file);
 
 	if (dyld_result != NSObjectFileImageSuccess) {
-	    rb_loaderror("Failed to load %.200s", file);
+	    dln_loaderror("Failed to load %.200s", file);
 	}
 
 	NSLinkModule(obj_file, file, NSLINKMODULE_OPTION_BINDNOW);
 
 	/* lookup the initial function */
 	if(!NSIsSymbolNameDefined(buf)) {
-	    rb_loaderror("Failed to lookup Init function %.200s",file);
+	    dln_loaderror("Failed to lookup Init function %.200s",file);
 	}
 	init_fct = NSAddressOfSymbol(NSLookupAndBindSymbol(buf));
 	(*init_fct)();
@@ -1416,7 +1443,7 @@ dln_load(const char *file)
       /* load extention module */
       img_id = load_add_on(file);
       if (img_id <= 0) {
-	rb_loaderror("Failed to load add_on %.200s error_code=%x",
+	dln_loaderror("Failed to load add_on %.200s error_code=%x",
 	  file, img_id);
       }
 
@@ -1440,12 +1467,12 @@ dln_load(const char *file)
 
       if ((B_BAD_IMAGE_ID == err_stat) || (B_BAD_INDEX == err_stat)) {
 	unload_add_on(img_id);
-	rb_loaderror("Failed to lookup Init function %.200s", file);
+	dln_loaderror("Failed to lookup Init function %.200s", file);
       }
       else if (B_NO_ERROR != err_stat) {
 	char errmsg[] = "Internal of BeOS version. %.200s (symbol_name = %s)";
 	unload_add_on(img_id);
-	rb_loaderror(errmsg, strerror(err_stat), buf);
+	dln_loaderror(errmsg, strerror(err_stat), buf);
       }
 
       /* call module initialize function. */
@@ -1455,14 +1482,14 @@ dln_load(const char *file)
 #endif /* __BEOS__*/
 
 #ifndef DLN_DEFINED
-    rb_notimplement();
+    dln_notimplement();
 #endif
 
 #endif /* USE_DLN_A_OUT */
 #endif
 #if !defined(_AIX) && !defined(NeXT)
   failed:
-    rb_loaderror("%s - %s", error, file);
+    dln_loaderror("%s - %s", error, file);
 #endif
 
 #endif /* NO_DLN_LOAD */
@@ -1474,8 +1501,11 @@ static char *dln_find_1(const char *fname, const char *path, char *buf, size_t s
 char *
 dln_find_exe_r(const char *fname, const char *path, char *buf, size_t size)
 {
+    char *envpath = 0;
+
     if (!path) {
 	path = getenv(PATH_ENV);
+	if (path) path = envpath = strdup(path);
     }
 
     if (!path) {
@@ -1485,7 +1515,9 @@ dln_find_exe_r(const char *fname, const char *path, char *buf, size_t size)
 	path = "/usr/local/bin:/usr/ucb:/usr/bin:/bin:.";
 #endif
     }
-    return dln_find_1(fname, path, buf, size, 1);
+    buf = dln_find_1(fname, path, buf, size, 1);
+    if (envpath) free(envpath);
+    return buf;
 }
 
 char *

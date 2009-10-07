@@ -21,7 +21,8 @@ typedef enum {
     NOEX_UNDEF     = NOEX_NOSUPER,
     NOEX_MODFUNC   = 0x12,
     NOEX_SUPER     = 0x20,
-    NOEX_VCALL     = 0x40
+    NOEX_VCALL     = 0x40,
+    NOEX_RESPONDS  = 0x80
 } rb_method_flag_t;
 
 #define NOEX_SAFE(n) ((int)((n) >> 8) & 0x0F)
@@ -39,7 +40,8 @@ typedef enum {
     VM_METHOD_TYPE_ZSUPER,
     VM_METHOD_TYPE_UNDEF,
     VM_METHOD_TYPE_NOTIMPLEMENTED,
-    VM_METHOD_TYPE_OPTIMIZED /* Kernel#send, Proc#call, etc */
+    VM_METHOD_TYPE_OPTIMIZED, /* Kernel#send, Proc#call, etc */
+    VM_METHOD_TYPE_MISSING   /* wrapper for method_missing(id) */
 } rb_method_type_t;
 
 typedef struct rb_method_cfunc_struct {
@@ -49,30 +51,39 @@ typedef struct rb_method_cfunc_struct {
 
 typedef struct rb_iseq_struct rb_iseq_t;
 
-typedef struct rb_method_entry_struct {
-    rb_method_flag_t flag;
+typedef struct rb_method_definition_struct {
     rb_method_type_t type; /* method type */
-    ID called_id;
     ID original_id;
-    VALUE klass;                    /* should be mark */
     union {
 	rb_iseq_t *iseq;            /* should be mark */
 	rb_method_cfunc_t cfunc;
 	ID attr_id;
-	VALUE proc;
+	VALUE proc;                 /* should be mark */
 	enum method_optimized_type {
 	    OPTIMIZED_METHOD_TYPE_SEND,
 	    OPTIMIZED_METHOD_TYPE_CALL
 	} optimize_type;
     } body;
     int alias_count;
+} rb_method_definition_t;
+
+typedef struct rb_method_entry_struct {
+    rb_method_flag_t flag;
+    rb_method_definition_t *def;
+    ID called_id;
+    VALUE klass;                    /* should be mark */
 } rb_method_entry_t;
+
+#define UNDEFINED_METHOD_ENTRY_P(me) (!(me) || !(me)->def || (me)->def->type == VM_METHOD_TYPE_UNDEF)
 
 void rb_add_method_cfunc(VALUE klass, ID mid, VALUE (*func)(ANYARGS), int argc, rb_method_flag_t noex);
 rb_method_entry_t *rb_add_method(VALUE klass, ID mid, rb_method_type_t type, void *option, rb_method_flag_t noex);
-void rb_add_method_me(VALUE klass, ID mid, const rb_method_entry_t *, rb_method_flag_t noex);
+rb_method_entry_t *rb_add_method_me(VALUE klass, ID mid, const rb_method_entry_t *, rb_method_flag_t noex);
 rb_method_entry_t *rb_method_entry(VALUE klass, ID id);
+rb_method_entry_t *rb_get_method_entry(VALUE klass, ID id);
+#define rb_method_entry_without_cache(klass, id) rb_get_method_entry((klass), (id))
 int rb_method_entry_arity(const rb_method_entry_t *me);
 void rb_gc_mark_method_entry(const rb_method_entry_t *me);
+void rb_free_method_entry(rb_method_entry_t *me);
 
 #endif /* METHOD_H */

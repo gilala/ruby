@@ -1938,6 +1938,15 @@ syck_emitter_s_alloc(VALUE class)
     return pobj;
 }
 
+static VALUE
+id_hash_new(void)
+{
+    VALUE hash;
+    hash = rb_hash_new();
+    rb_funcall(hash, rb_intern("compare_by_identity"), 0);
+    return hash;
+}
+
 /*
  * YAML::Syck::Emitter.reset( options )
  */
@@ -1953,7 +1962,7 @@ syck_emitter_reset(int argc, VALUE *argv, VALUE self)
 
     bonus->oid = Qnil;
     bonus->port = rb_str_new2( "" );
-    bonus->data = rb_hash_new();
+    bonus->data = id_hash_new();
 
     if (rb_scan_args(argc, argv, "01", &options) == 0)
     {

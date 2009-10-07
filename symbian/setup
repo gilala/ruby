@@ -211,6 +211,8 @@ define ruby_mmp
 @echo>>$(1) SECUREID $(RUBY_UID)
 @echo>>$(1) CAPABILITY LocalServices NetworkServices ReadUserData UserEnvironment WriteUserData
 
+@echo>>$(1) MACRO RUBY_EXPORT
+
 
 @echo>>$(1) USERINCLUDE ..\$(subst /,\,$(arch_hdrdir))
 @echo>>$(1) USERINCLUDE ..
@@ -232,7 +234,6 @@ define ruby_mmp
 @echo>>$(1) SOURCEPATH ..\$(subst /,\,$(srcdir))
 @echo>>$(1) SOURCE array.c
 @echo>>$(1) SOURCE bignum.c
-@echo>>$(1) SOURCE blockinlining.c
 @echo>>$(1) SOURCE class.c
 @echo>>$(1) SOURCE compar.c
 @echo>>$(1) SOURCE compile.c
@@ -344,6 +345,7 @@ define ext_mmp
 @echo>>$(1)$(2).mmp SYSTEMINCLUDE ..\$(subst /,\,$(srcdir))\missing
 
 @echo>>$(1)$(2).mmp SYSTEMINCLUDE \epoc32\include\stdapis
+@echo>>$(1)$(2).mmp SYSTEMINCLUDE \epoc32\include
 
 @echo>>$(1)$(2).mmp SOURCEPATH ..\$(subst /,\,$(srcdir))\ext\$(2)
 @echo>>$(1)$(2).mmp SOURCE $(2).c $(4)
@@ -369,7 +371,7 @@ define ruby_pkg
 
 @echo>>$(1) :"Symbian Research"
 
-@echo>>$(1) (0x20013851), 1, 3, 0, {"Symbian OS PIPS"}
+@echo>>$(1) (0x20013851), 1, 6, 0, {"Symbian OS PIPS"}
 
 @echo>>$(1) [0x101F7961], 0, 0, 0, {"S60ProductID"}
 

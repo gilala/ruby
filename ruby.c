@@ -370,8 +370,11 @@ ruby_init_loadpath_safe(int safe_level)
 	VALUE fname = rb_str_new_cstr(dli.dli_fname);
 	sopath = rb_file_absolute_path(fname, Qnil);
 	rb_str_resize(fname, 0);
-	libpath = RSTRING_PTR(sopath);
     }
+    else {
+	sopath = rb_str_new(0, 0);
+    }
+    libpath = RSTRING_PTR(sopath);
 #endif
 
 #if !VARIABLE_LIBPATH
@@ -494,7 +497,7 @@ process_sflag(int *sflag)
 	    VALUE v = *args++;
 	    char *s = StringValuePtr(v);
 	    char *p;
-	    int hyphen = Qfalse;
+	    int hyphen = FALSE;
 
 	    if (s[0] != '-')
 		break;
@@ -511,7 +514,7 @@ process_sflag(int *sflag)
 		    break;
 		}
 		if (*p == '-') {
-		    hyphen = Qtrue;
+		    hyphen = TRUE;
 		}
 		else if (*p != '_' && !ISALNUM(*p)) {
 		    VALUE name_error[2];
@@ -692,17 +695,17 @@ proc_options(long argc, char **argv, struct cmdline_options *opt, int envopt)
 	switch (*s) {
 	  case 'a':
 	    if (envopt) goto noenvopt;
-	    opt->do_split = Qtrue;
+	    opt->do_split = TRUE;
 	    s++;
 	    goto reswitch;
 
 	  case 'p':
 	    if (envopt) goto noenvopt;
-	    opt->do_print = Qtrue;
+	    opt->do_print = TRUE;
 	    /* through */
 	  case 'n':
 	    if (envopt) goto noenvopt;
-	    opt->do_loop = Qtrue;
+	    opt->do_loop = TRUE;
 	    s++;
 	    goto reswitch;
 
@@ -775,7 +778,7 @@ proc_options(long argc, char **argv, struct cmdline_options *opt, int envopt)
 
 	  case 'l':
 	    if (envopt) goto noenvopt;
-	    opt->do_line = Qtrue;
+	    opt->do_line = TRUE;
 	    rb_output_rs = rb_rs;
 	    s++;
 	    goto reswitch;
@@ -783,7 +786,7 @@ proc_options(long argc, char **argv, struct cmdline_options *opt, int envopt)
 	  case 'S':
 	    if (envopt) goto noenvopt;
 	    forbid_setid("-S");
-	    opt->do_search = Qtrue;
+	    opt->do_search = TRUE;
 	    s++;
 	    goto reswitch;
 
@@ -825,7 +828,7 @@ proc_options(long argc, char **argv, struct cmdline_options *opt, int envopt)
 
 	  case 'x':
 	    if (envopt) goto noenvopt;
-	    opt->xflag = Qtrue;
+	    opt->xflag = TRUE;
 	    s++;
 	    if (*s && chdir(s) < 0) {
 		rb_fatal("Can't chdir to %s", s);
@@ -1536,7 +1539,7 @@ load_file_internal(VALUE arg)
 	if (opt->xflag) {
 	  search_shebang:
 	    forbid_setid("-x");
-	    opt->xflag = Qfalse;
+	    opt->xflag = FALSE;
 	    while (!NIL_P(line = rb_io_gets(f))) {
 		line_start++;
 		if (RSTRING_LEN(line) > 2
@@ -1607,7 +1610,7 @@ load_file_internal(VALUE arg)
     rb_funcall(f, set_encoding, 2, rb_enc_from_encoding(enc), rb_str_new_cstr("-"));
     tree = rb_parser_compile_file(parser, fname, f, line_start);
     rb_funcall(f, set_encoding, 1, rb_parser_encoding(parser));
-    if (script && rb_parser_end_seen_p(parser)) {
+    if (script && tree && rb_parser_end_seen_p(parser)) {
 	rb_define_global_const("DATA", f);
     }
     else if (f != rb_stdin) {

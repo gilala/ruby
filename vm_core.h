@@ -31,6 +31,21 @@
 #error "unsupported thread type"
 #endif
 
+#ifndef ENABLE_VM_OBJSPACE
+#ifdef _WIN32
+/*
+ * TODO: object space indenpendent st_table.
+ * socklist needs st_table in rb_w32_sysinit(), before object space
+ * initialization.
+ * It is too early now to change st_hash_type, since it breaks binary
+ * compatibility.
+ */
+#define ENABLE_VM_OBJSPACE 0
+#else
+#define ENABLE_VM_OBJSPACE 1
+#endif
+#endif
+
 #include <setjmp.h>
 #include <signal.h>
 
@@ -110,11 +125,13 @@ typedef struct rb_compile_option_struct {
 } rb_compile_option_t;
 
 struct iseq_inline_cache_entry {
-    long  ic_vmstat;
+    VALUE ic_vmstat;
     VALUE ic_class;
-    VALUE ic_value;
-    rb_method_entry_t *ic_method;
-#define ic_index ic_vmstat
+    union {
+	VALUE value;
+	rb_method_entry_t *method;
+	long index;
+    } ic_value;
 };
 
 #if 1
@@ -236,6 +253,11 @@ enum ruby_special_exceptions {
 
 #define GetVMPtr(obj, ptr) \
   GetCoreDataFromValue(obj, rb_vm_t, ptr)
+
+#if defined(ENABLE_VM_OBJSPACE) && ENABLE_VM_OBJSPACE
+struct rb_objspace;
+void rb_objspace_free(struct rb_objspace *);
+#endif
 
 typedef struct rb_vm_struct {
     VALUE self;
@@ -449,7 +471,7 @@ VALUE rb_iseq_new_with_bopt(NODE*, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE);
 VALUE rb_iseq_new_with_opt(NODE*, VALUE, VALUE, VALUE, VALUE, VALUE, const rb_compile_option_t*);
 VALUE rb_iseq_compile(VALUE src, VALUE file, VALUE line);
 VALUE rb_iseq_disasm(VALUE self);
-VALUE rb_iseq_disasm_insn(VALUE str, VALUE *iseqval, int pos, rb_iseq_t *iseq, VALUE child);
+int rb_iseq_disasm_insn(VALUE str, VALUE *iseqval, size_t pos, rb_iseq_t *iseq, VALUE child);
 const char *ruby_node_name(int node);
 int rb_iseq_first_lineno(rb_iseq_t *iseq);
 
@@ -529,6 +551,11 @@ typedef struct {
 /* inline cache */
 typedef struct iseq_inline_cache_entry *IC;
 
+extern VALUE ruby_vm_global_state_version;
+
+#define GET_VM_STATE_VERSION() (ruby_vm_global_state_version)
+#define INC_VM_STATE_VERSION() \
+  (ruby_vm_global_state_version = (ruby_vm_global_state_version+1) & 0x8fffffff)
 void rb_vm_change_state(void);
 
 typedef VALUE CDHASH;
@@ -589,7 +616,7 @@ void *rb_thread_call_with_gvl(void *(*func)(void *), void *data1);
 int ruby_thread_has_gvl_p(void);
 VALUE rb_make_backtrace(void);
 typedef int rb_backtrace_iter_func(void *, VALUE, int, VALUE);
-VALUE rb_backtrace_each(rb_backtrace_iter_func *iter, void *arg);
+int rb_backtrace_each(rb_backtrace_iter_func *iter, void *arg);
 rb_control_frame_t *rb_vm_get_ruby_level_next_cfp(rb_thread_t *th, rb_control_frame_t *cfp);
 
 NOINLINE(void rb_gc_save_machine_context(rb_thread_t *));

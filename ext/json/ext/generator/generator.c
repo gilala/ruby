@@ -409,7 +409,7 @@ static VALUE mString_Extend_json_create(VALUE self, VALUE o) {
 }
 
 /*
- * call-seq: to_json(state = nil, depth = 0)
+ * call-seq: to_json(*)
  *
  * Returns a JSON string for true: 'true'.
  */
@@ -421,7 +421,7 @@ static VALUE mTrueClass_to_json(int argc, VALUE *argv, VALUE self)
 }
 
 /*
- * call-seq: to_json(state = nil, depth = 0)
+ * call-seq: to_json(*)
  *
  * Returns a JSON string for false: 'false'.
  */
@@ -433,7 +433,7 @@ static VALUE mFalseClass_to_json(int argc, VALUE *argv, VALUE self)
 }
 
 /*
- * call-seq: to_json(state = nil, depth = 0)
+ * call-seq: to_json(*)
  *
  */
 static VALUE mNilClass_to_json(int argc, VALUE *argv, VALUE self)
@@ -496,7 +496,7 @@ static VALUE cState_s_allocate(VALUE klass)
  * Configure this State instance with the Hash _opts_, and return
  * itself.
  */
-static inline VALUE cState_configure(VALUE self, VALUE opts)
+static VALUE cState_configure(VALUE self, VALUE opts)
 {
     VALUE tmp;
     GET_STATE(self);

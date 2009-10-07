@@ -41,7 +41,7 @@ typedef struct rb_context_struct {
 #endif
     rb_thread_t saved_thread;
     rb_jmpbuf_t jmpbuf;
-    int machine_stack_size;
+    size_t machine_stack_size;
 } rb_context_t;
 
 enum fiber_status {
@@ -58,21 +58,25 @@ typedef struct rb_fiber_struct {
     struct rb_fiber_struct *next_fiber;
 } rb_fiber_t;
 
+static const rb_data_type_t cont_data_type, fiber_data_type;
 static VALUE rb_cContinuation;
 static VALUE rb_cFiber;
 static VALUE rb_eFiberError;
 
 #define GetContPtr(obj, ptr)  \
-  Data_Get_Struct(obj, rb_context_t, ptr)
+    TypedData_Get_Struct(obj, rb_context_t, &cont_data_type, ptr)
 
 #define GetFiberPtr(obj, ptr)  do {\
-  ptr = (rb_fiber_t*)DATA_PTR(obj);\
-  if (!ptr) rb_raise(rb_eFiberError, "uninitialized fiber");\
+    TypedData_Get_Struct(obj, rb_fiber_t, &fiber_data_type, ptr); \
+    if (!ptr) rb_raise(rb_eFiberError, "uninitialized fiber"); \
 } while(0)
 
 NOINLINE(static VALUE cont_capture(volatile int *stat));
 
 void rb_thread_mark(rb_thread_t *th);
+#define THREAD_MUST_BE_RUNNING(th) do { \
+	if (!th->tag) rb_raise(rb_eThreadError, "not running thread");	\
+    } while (0)
 
 static void
 cont_mark(void *ptr)
@@ -126,6 +130,34 @@ cont_free(void *ptr)
     RUBY_FREE_LEAVE("cont");
 }
 
+static size_t
+cont_memsize(const void *ptr)
+{
+    const rb_context_t *cont = ptr;
+    size_t size = 0;
+    if (cont) {
+	size = sizeof(*cont);
+	if (cont->vm_stack) {
+#ifdef CAPTURE_JUST_VALID_VM_STACK
+	    size_t n = (cont->vm_stack_slen + cont->vm_stack_clen);
+#else
+	    size_t n = cont->saved_thread.stack_size;
+#endif
+	    size += n * sizeof(*cont->vm_stack);
+	}
+
+	if (cont->machine_stack) {
+	    size += cont->machine_stack_size * sizeof(*cont->machine_stack);
+	}
+#ifdef __ia64
+	if (cont->machine_register_stack) {
+	    size += cont->machine_register_stack_size * sizeof(*cont->machine_register_stack);
+	}
+#endif
+    }
+    return size;
+}
+
 static void
 fiber_mark(void *ptr)
 {
@@ -174,6 +206,21 @@ fiber_free(void *ptr)
 	cont_free(&fib->cont);
     }
     RUBY_FREE_LEAVE("fiber");
+}
+
+static size_t
+fiber_memsize(const void *ptr)
+{
+    const rb_fiber_t *fib = ptr;
+    size_t size = 0;
+    if (ptr) {
+	size = sizeof(*fib);
+	if (fib->cont.type != ROOT_FIBER_CONTEXT) {
+	    size += st_memsize(fib->cont.saved_thread.local_storage);
+	}
+	size += cont_memsize(&fib->cont);
+    }
+    return 0;
 }
 
 static void
@@ -226,11 +273,14 @@ cont_save_machine_stack(rb_thread_t *th, rb_context_t *cont)
 #endif
 }
 
-static void
-cont_init(rb_context_t *cont)
-{
-    rb_thread_t *th = GET_THREAD();
+static const rb_data_type_t cont_data_type = {
+    "continuation",
+    cont_mark, cont_free, cont_memsize,
+};
 
+static void
+cont_init(rb_context_t *cont, rb_thread_t *th)
+{
     /* save thread context */
     cont->saved_thread = *th;
 }
@@ -240,10 +290,12 @@ cont_new(VALUE klass)
 {
     rb_context_t *cont;
     volatile VALUE contval;
+    rb_thread_t *th = GET_THREAD();
 
-    contval = Data_Make_Struct(klass, rb_context_t, cont_mark, cont_free, cont);
+    THREAD_MUST_BE_RUNNING(th);
+    contval = TypedData_Make_Struct(klass, rb_context_t, &cont_data_type, cont);
     cont->self = contval;
-    cont_init(cont);
+    cont_init(cont, th);
     return cont;
 }
 
@@ -256,6 +308,7 @@ cont_capture(volatile int *stat)
     rb_thread_t *th = GET_THREAD(), *sth;
     volatile VALUE contval;
 
+    THREAD_MUST_BE_RUNNING(th);
     rb_vm_stack_to_heap(th);
     cont = cont_new(rb_cContinuation);
     contval = cont->self;
@@ -306,10 +359,10 @@ cont_restore_1(rb_context_t *cont)
 	fib = th->fiber ? th->fiber : th->root_fiber;
 
 	if (fib) {
-	    rb_context_t *fcont;
-	    GetContPtr(fib, fcont);
-	    th->stack_size = fcont->saved_thread.stack_size;
-	    th->stack = fcont->saved_thread.stack;
+	    rb_fiber_t *fcont;
+	    GetFiberPtr(fib, fcont);
+	    th->stack_size = fcont->cont.saved_thread.stack_size;
+	    th->stack = fcont->cont.saved_thread.stack;
 	}
 #ifdef CAPTURE_JUST_VALID_VM_STACK
 	MEMCPY(th->stack, cont->vm_stack, VALUE, cont->vm_stack_slen);
@@ -570,8 +623,8 @@ rb_cont_call(int argc, VALUE *argv, VALUE contval)
 	rb_raise(rb_eRuntimeError, "continuation called across trap");
     }
     if (cont->saved_thread.fiber) {
-	rb_context_t *fcont;
-	GetContPtr(cont->saved_thread.fiber, fcont);
+	rb_fiber_t *fcont;
+	GetFiberPtr(cont->saved_thread.fiber, fcont);
 
 	if (th->fiber != cont->saved_thread.fiber) {
 	    rb_raise(rb_eRuntimeError, "continuation called across fiber");
@@ -653,21 +706,29 @@ rb_cont_call(int argc, VALUE *argv, VALUE contval)
 
 #define FIBER_VM_STACK_SIZE (4 * 1024)
 
+static const rb_data_type_t fiber_data_type = {
+    "fiber",
+    fiber_mark, fiber_free, fiber_memsize,
+};
+
 static VALUE
 fiber_alloc(VALUE klass)
 {
-    return Data_Wrap_Struct(klass, fiber_mark, fiber_free, 0);
+    return TypedData_Wrap_Struct(klass, &fiber_data_type, 0);
 }
 
 static rb_fiber_t*
 fiber_t_alloc(VALUE fibval)
 {
-    rb_fiber_t *fib = ALLOC(rb_fiber_t);
+    rb_fiber_t *fib;
+    rb_thread_t *th = GET_THREAD();
 
+    THREAD_MUST_BE_RUNNING(th);
+    fib = ALLOC(rb_fiber_t);
     memset(fib, 0, sizeof(rb_fiber_t));
     fib->cont.self = fibval;
     fib->cont.type = FIBER_CONTEXT;
-    cont_init(&fib->cont);
+    cont_init(&fib->cont, th);
     fib->prev = Qnil;
     fib->status = CREATED;
 
@@ -715,6 +776,7 @@ fiber_init(VALUE fibval, VALUE proc)
     return fibval;
 }
 
+/* :nodoc: */
 static VALUE
 rb_fiber_init(VALUE fibval)
 {

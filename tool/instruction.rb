@@ -1,4 +1,4 @@
-#
+#!./miniruby
 #
 #
 
@@ -63,12 +63,12 @@ class RubyVM
          rets.any?{|t, v| v == '...'})
         # user definision
         raise "no sp increase definition" if @sp_inc.nil?
-        ret = "rb_num_t inc = 0;\n"
+        ret = "int inc = 0;\n"
 
         @opes.each_with_index{|(t, v), i|
           if t == 'rb_num_t' && ((re = /\b#{v}\b/n) =~ @sp_inc ||
                                  @defopes.any?{|t, val| re =~ val})
-            ret << "        #{t} #{v} = FIX2INT(opes[#{i}]);\n"
+            ret << "        int #{v} = FIX2INT(opes[#{i}]);\n"
           end
         }
         @defopes.each_with_index{|((t, var), val), i|
@@ -317,10 +317,10 @@ class RubyVM
         defv  << [opes[i], e]
       }
 
-      make_insn_operand_optimiized(insn, ninsn, nopes, defv)
+      make_insn_operand_optimized(insn, ninsn, nopes, defv)
     end
 
-    def make_insn_operand_optimiized orig_insn, name, opes, defopes
+    def make_insn_operand_optimized orig_insn, name, opes, defopes
       comm = orig_insn.comm.dup
       comm[:c] = 'optimize'
       add_insn insn = Instruction.new(
@@ -505,14 +505,9 @@ class RubyVM
         orets = insn.rets
         oopes = insn.opes
         ocomm = insn.comm
+        oname = insn.name
 
-        after = nil
-        SPECIAL_INSN_FOR_SC_AFTER.any?{|k, v|
-          if k =~ insn.name
-            after = v
-            break
-          end
-        }
+        after = SPECIAL_INSN_FOR_SC_AFTER.find {|k, v| k =~ oname}
 
         insns = []
         FROM_SC.each{|from|
@@ -689,6 +684,9 @@ class RubyVM
       push_ba = insn.pushsc
       raise "unsupport" if push_ba[0].size > 0 && push_ba[1].size > 0
 
+      n = 0
+      push_ba.each {|pushs| n += pushs.length}
+      commit "  CHECK_STACK_OVERFLOW(REG_CFP, #{n});" if n > 0
       push_ba.each{|pushs|
         pushs.each{|r|
           commit "  PUSH(SCREG(#{r}));"
@@ -709,7 +707,7 @@ class RubyVM
         end
 
         re = /\b#{var}\b/n
-        if re =~ insn.body or re =~ insn.sp_inc or insn.rets.any?{|t, v| re =~ v}
+        if re =~ insn.body or re =~ insn.sp_inc or insn.rets.any?{|t, v| re =~ v} or re =~ 'ic'
           ops << "  #{type} #{var} = (#{type})GET_OPERAND(#{i+1});"
         end
         n   += 1
@@ -821,13 +819,22 @@ class RubyVM
       commit  "  #define LABEL_IS_SC(lab) LABEL_##lab##_###{insn.sc.size == 0 ? 't' : 'f'}"
     end
 
+    def each_footer_stack_val insn
+      insn.rets.reverse_each{|v|
+        break if v[1] == '...'
+        yield v
+      }
+    end
+
     def make_footer_stack_val insn
       comment "  /* push stack val */"
 
-      insn.rets.reverse_each{|v|
-        if v[1] == '...'
-          break
-        end
+      n = 0
+      each_footer_stack_val(insn){|v|
+        n += 1 unless v[2]
+      }
+      commit "  CHECK_STACK_OVERFLOW(REG_CFP, #{n});" if n > 0
+      each_footer_stack_val(insn){|v|
         if v[2]
           commit "  SCREG(#{v[2]}) = #{v[1]};"
         else
