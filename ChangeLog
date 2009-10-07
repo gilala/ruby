@@ -1,3 +1,8 @@
+Wed Oct  7 10:15:50 2009  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* dir.c (dir_chdir, dir_s_mkdir, dir_s_rmdir): use wrapper macros
+	  instead of using platform ifdefs.
+
 Wed Sep  2 11:30:49 2009  NAKAMURA Usaku  <usa@ruby-lang.org>
 
 	* file.c (rb_stat, rb_file_lstat, eaccess, rb_file_s_ftype,
