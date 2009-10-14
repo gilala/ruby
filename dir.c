@@ -69,13 +69,12 @@ char *strchr(char*,char);
 
 /* define system APIs */
 #ifdef _WIN32
-#define CHDIR(p) _wchdir((WCHAR *)(p))
-#define MKDIR(p, m) rb_w32_wmkdir((WCHAR *)(p), m)
-#define RMDIR(p) _wrmdir((WCHAR *)(p))
-#else
-#define CHDIR(p) chdir(p)
-#define MKDIR(p, m) mkdir(p, m)
-#define RMDIR(p, m) rmdir(p, m)
+#undef chdir
+#define chdir(p) _wchdir((WCHAR *)(p))
+#undef mkdir
+#define mkdir(p, m) rb_w32_wmkdir((WCHAR *)(p), m)
+#undef rmdir
+#define rmdir(p) _wrmdir((WCHAR *)(p))
 #endif
 
 #define FNM_NOESCAPE	0x01
@@ -752,7 +751,7 @@ static void
 dir_chdir(VALUE path)
 {
     path = rb_str_conv_for_path(path);
-    if (CHDIR(RSTRING_PTR(path)) < 0)
+    if (chdir(RSTRING_PTR(path)) < 0)
 	rb_sys_fail(RSTRING_PTR(path));
 }
 
@@ -955,7 +954,7 @@ dir_s_mkdir(int argc, VALUE *argv, VALUE obj)
 
     check_dirname(&path);
     path = rb_str_conv_for_path(path);
-    if (MKDIR(RSTRING_PTR(path), mode) == -1)
+    if (mkdir(RSTRING_PTR(path), mode) == -1)
 	rb_sys_fail(RSTRING_PTR(path));
 
     return INT2FIX(0);
@@ -975,7 +974,7 @@ dir_s_rmdir(VALUE obj, VALUE dir)
 {
     check_dirname(&dir);
     dir = rb_str_conv_for_path(dir);
-    if (RMDIR(RSTRING_PTR(dir)) < 0)
+    if (rmdir(RSTRING_PTR(dir)) < 0)
 	rb_sys_fail(RSTRING_PTR(dir));
 
     return INT2FIX(0);

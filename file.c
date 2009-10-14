@@ -73,24 +73,24 @@ int flock(int, int);
 /* define system APIs */
 #ifdef _WIN32
 #define STAT(p, s)	rb_w32_wstati64((WCHAR *)(p), s)
-#define LSTAT(p, s)	rb_w32_wstati64((WCHAR *)(p), s)
-#define ACCESS(p, m)	_waccess((WCHAR *)(p), m)
-#define CHMOD(p, m)	_wchmod((WCHAR *)(p), m)
-#define CHOWN(p, o, g)	rb_w32_wchown((WCHAR *)(p), o, g)
-#define UTIME(p, t)	rb_w32_wutime((WCHAR *)(p), t)
-#define LINK(f, t)	rb_w32_wlink((WCHAR *)(f), (WCHAR *)(t))
-#define UNLINK(p)	rb_w32_wunlink((WCHAR *)(p))
-#define RENAME(f, t)	_wrename((WCHAR *)(f), (WCHAR *)(t))
+#undef lstat
+#define lstat(p, s)	rb_w32_wstati64((WCHAR *)(p), s)
+#undef access
+#define access(p, m)	_waccess((WCHAR *)(p), m)
+#undef chmod
+#define chmod(p, m)	_wchmod((WCHAR *)(p), m)
+#undef chown
+#define chown(p, o, g)	rb_w32_wchown((WCHAR *)(p), o, g)
+#undef utime
+#define utime(p, t)	rb_w32_wutime((WCHAR *)(p), t)
+#undef link
+#define link(f, t)	rb_w32_wlink((WCHAR *)(f), (WCHAR *)(t))
+#undef unlink
+#define unlink(p)	rb_w32_wunlink((WCHAR *)(p))
+#undef rename
+#define rename(f, t)	_wrename((WCHAR *)(f), (WCHAR *)(t))
 #else
 #define STAT(p, s)	stat(p, s)
-#define LSTAT(p, s)	lstat(p, s)
-#define ACCESS(p, m)	access(p, m)
-#define CHMOD(p, m)	chmod(p, m)
-#define CHOWN(p, o, g)	chown(p, o, g)
-#define UTIME(p, t)	utime(p, t)
-#define LINK(f, t)	link(f, t)
-#define UNLINK(p)	unlink(p)
-#define RENAME(f, t)	rename(f, t)
 #endif
 
 #ifdef __BEOS__ /* should not change ID if -1 */
@@ -99,7 +99,7 @@ be_chown(const char *path, uid_t owner, gid_t group)
 {
     if (owner == -1 || group == -1) {
 	struct stat st;
-	if (stat(path, &st) < 0) return -1;
+	if (STAT(path, &st) < 0) return -1;
 	if (owner == -1) owner = st.st_uid;
 	if (group == -1) group = st.st_gid;
     }
@@ -956,7 +956,7 @@ rb_file_lstat(VALUE obj)
     GetOpenFile(obj, fptr);
     if (NIL_P(fptr->pathv)) return Qnil;
     path = rb_str_conv_for_path(fptr->pathv);
-    if (LSTAT(RSTRING_PTR(path), &st) == -1) {
+    if (lstat(RSTRING_PTR(path), &st) == -1) {
 	rb_sys_fail_path(fptr->pathv);
     }
     return stat_new(&st);
@@ -1039,7 +1039,7 @@ eaccess(const char *path, int mode)
 
     return -1;
 #else
-    return ACCESS(path, mode);
+    return access(path, mode);
 #endif
 }
 #endif
@@ -1047,7 +1047,7 @@ eaccess(const char *path, int mode)
 static inline int
 access_internal(const char *path, int mode)
 {
-    return ACCESS(path, mode);
+    return access(path, mode);
 }
 
 
@@ -1559,7 +1559,7 @@ check3rdbyte(VALUE fname, int mode)
     rb_secure(2);
     FilePathValue(fname);
     fname = rb_str_conv_for_path(fname);
-    if (stat(RSTRING_PTR(fname), &st) < 0) return Qfalse;
+    if (STAT(RSTRING_PTR(fname), &st) < 0) return Qfalse;
     if (st.st_mode & mode) return Qtrue;
     return Qfalse;
 }
@@ -1765,7 +1765,7 @@ rb_file_s_ftype(VALUE klass, VALUE fname)
     rb_secure(2);
     FilePathValue(fname);
     fname = rb_str_conv_for_path(fname);
-    if (LSTAT(RSTRING_PTR(fname), &st) == -1)
+    if (lstat(RSTRING_PTR(fname), &st) == -1)
 	rb_sys_fail(RSTRING_PTR(fname));
 
     return rb_file_ftype(&st);
@@ -1939,7 +1939,7 @@ rb_file_size(VALUE obj)
 static void
 chmod_internal(const char *path, void *mode)
 {
-    if (CHMOD(path, *(int *)mode) < 0)
+    if (chmod(path, *(int *)mode) < 0)
 	rb_sys_fail(path);
 }
 
@@ -2004,7 +2004,7 @@ rb_file_chmod(VALUE obj, VALUE vmode)
 #else
     if (NIL_P(fptr->pathv)) return Qnil;
     path = rb_str_conv_for_path(fptr->pathv);
-    if (CHMOD(RSTRING_PTR(path), mode) == -1)
+    if (chmod(RSTRING_PTR(path), mode) == -1)
 	rb_sys_fail_path(fptr->pathv);
 #endif
 
@@ -2132,7 +2132,7 @@ rb_file_chown(VALUE obj, VALUE owner, VALUE group)
 #ifndef HAVE_FCHOWN
     if (NIL_P(fptr->pathv)) return Qnil;
     path = rb_str_conv_for_path(fptr->pathv);
-    if (CHOWN(RSTRING_PTR(path), o, g) == -1)
+    if (chown(RSTRING_PTR(path), o, g) == -1)
 	rb_sys_fail_path(fptr->pathv);
 #else
     if (fchown(fptr->fd, o, g) == -1)
@@ -2292,7 +2292,7 @@ utime_internal(const char *path, void *arg)
         utbuf.modtime = tsp[1].tv_sec;
         utp = &utbuf;
     }
-    if (UTIME(path, utp) < 0)
+    if (utime(path, utp) < 0)
 	utime_failed(path, tsp, v->atime, v->mtime);
 }
 
@@ -2471,7 +2471,7 @@ rb_file_s_readlink(VALUE klass, VALUE path)
 static void
 unlink_internal(const char *path, void *arg)
 {
-    if (UNLINK(path) < 0)
+    if (unlink(path) < 0)
 	rb_sys_fail(path);
 }
 
@@ -2521,16 +2521,16 @@ rb_file_s_rename(VALUE klass, VALUE from, VALUE to)
 #if defined __CYGWIN__
     errno = 0;
 #endif
-    if (RENAME(src, dst) < 0) {
+    if (rename(src, dst) < 0) {
 #if defined DOSISH
 	switch (errno) {
 	  case EEXIST:
 #if defined (__EMX__)
 	  case EACCES:
 #endif
-	    if (CHMOD(dst, 0666) == 0 &&
-		UNLINK(dst) == 0 &&
-		RENAME(src, dst) == 0)
+	    if (chmod(dst, 0666) == 0 &&
+		unlink(dst) == 0 &&
+		rename(src, dst) == 0)
 		return INT2FIX(0);
 	}
 #endif
@@ -4637,7 +4637,7 @@ path_check_0(VALUE path, int execpath)
 #ifndef S_IWOTH
 # define S_IWOTH 002
 #endif
-	if (stat(p0, &st) == 0 && S_ISDIR(st.st_mode) && (st.st_mode & S_IWOTH)
+	if (STAT(p0, &st) == 0 && S_ISDIR(st.st_mode) && (st.st_mode & S_IWOTH)
 #ifdef S_ISVTX
 	    && !(p && execpath && (st.st_mode & S_ISVTX))
 #endif

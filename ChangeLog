@@ -1,3 +1,10 @@
+Wed Oct 14 17:17:25 2009  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* dir.c, file.c: define wrapper macros by the original function name
+	  directly. suggested by matz.
+	  but, ``stat'' is used as function's name and struct's name, so cannot
+	  define simply. it's pending.
+
 Wed Oct  7 10:15:50 2009  NAKAMURA Usaku  <usa@ruby-lang.org>
 
 	* dir.c (dir_chdir, dir_s_mkdir, dir_s_rmdir): use wrapper macros
