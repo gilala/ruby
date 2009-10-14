@@ -167,7 +167,7 @@ rb_get_path(VALUE obj)
 }
 
 VALUE
-rb_str_conv_for_path(VALUE path)
+rb_str_encode_ospath(VALUE path)
 {
     char *s;
 #ifdef _WIN32
@@ -218,7 +218,7 @@ apply2files(void (*func)(const char *, void *), VALUE vargs, void *arg)
     rb_secure(4);
     for (i=0; i<RARRAY_LEN(vargs); i++) {
 	path = rb_get_path(RARRAY_PTR(vargs)[i]);
-	path = rb_str_conv_for_path(path);
+	path = rb_str_encode_ospath(path);
 	(*func)(RSTRING_PTR(path), arg);
     }
 
@@ -806,7 +806,7 @@ rb_stat(VALUE file, struct stat *st)
 	return fstat(fptr->fd, st);
     }
     FilePathValue(file);
-    file = rb_str_conv_for_path(file);
+    file = rb_str_encode_ospath(file);
     return STAT(RSTRING_PTR(file), st);
 }
 
@@ -828,7 +828,7 @@ w32_io_info(VALUE *file, BY_HANDLE_FILE_INFORMATION *st)
     else {
 	VALUE tmp;
 	FilePathValue(*file);
-	tmp = rb_str_conv_for_path(*file);
+	tmp = rb_str_encode_ospath(*file);
 	f = CreateFileW((WCHAR *)RSTRING_PTR(tmp), 0,
 			FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
 			rb_w32_iswin95() ? 0 : FILE_FLAG_BACKUP_SEMANTICS,
@@ -920,7 +920,7 @@ rb_file_s_lstat(VALUE klass, VALUE fname)
 
     rb_secure(2);
     FilePathValue(fname);
-    fname = rb_str_conv_for_path(fname);
+    fname = rb_str_encode_ospath(fname);
     if (lstat(RSTRING_PTR(fname), &st) == -1) {
 	rb_sys_fail(RSTRING_PTR(fname));
     }
@@ -955,7 +955,7 @@ rb_file_lstat(VALUE obj)
     rb_secure(2);
     GetOpenFile(obj, fptr);
     if (NIL_P(fptr->pathv)) return Qnil;
-    path = rb_str_conv_for_path(fptr->pathv);
+    path = rb_str_encode_ospath(fptr->pathv);
     if (lstat(RSTRING_PTR(path), &st) == -1) {
 	rb_sys_fail_path(fptr->pathv);
     }
@@ -1162,7 +1162,7 @@ rb_file_symlink_p(VALUE obj, VALUE fname)
 
     rb_secure(2);
     FilePathValue(fname);
-    fname = rb_str_conv_for_path(fname);
+    fname = rb_str_encode_ospath(fname);
     if (lstat(RSTRING_PTR(fname), &st) < 0) return Qfalse;
     if (S_ISLNK(st.st_mode)) return Qtrue;
 #endif
@@ -1283,7 +1283,7 @@ rb_file_readable_p(VALUE obj, VALUE fname)
 {
     rb_secure(2);
     FilePathValue(fname);
-    fname = rb_str_conv_for_path(fname);
+    fname = rb_str_encode_ospath(fname);
     if (eaccess(RSTRING_PTR(fname), R_OK) < 0) return Qfalse;
     return Qtrue;
 }
@@ -1301,7 +1301,7 @@ rb_file_readable_real_p(VALUE obj, VALUE fname)
 {
     rb_secure(2);
     FilePathValue(fname);
-    fname = rb_str_conv_for_path(fname);
+    fname = rb_str_encode_ospath(fname);
     if (access_internal(RSTRING_PTR(fname), R_OK) < 0) return Qfalse;
     return Qtrue;
 }
@@ -1355,7 +1355,7 @@ rb_file_writable_p(VALUE obj, VALUE fname)
 {
     rb_secure(2);
     FilePathValue(fname);
-    fname = rb_str_conv_for_path(fname);
+    fname = rb_str_encode_ospath(fname);
     if (eaccess(RSTRING_PTR(fname), W_OK) < 0) return Qfalse;
     return Qtrue;
 }
@@ -1373,7 +1373,7 @@ rb_file_writable_real_p(VALUE obj, VALUE fname)
 {
     rb_secure(2);
     FilePathValue(fname);
-    fname = rb_str_conv_for_path(fname);
+    fname = rb_str_encode_ospath(fname);
     if (access_internal(RSTRING_PTR(fname), W_OK) < 0) return Qfalse;
     return Qtrue;
 }
@@ -1419,7 +1419,7 @@ rb_file_executable_p(VALUE obj, VALUE fname)
 {
     rb_secure(2);
     FilePathValue(fname);
-    fname = rb_str_conv_for_path(fname);
+    fname = rb_str_encode_ospath(fname);
     if (eaccess(RSTRING_PTR(fname), X_OK) < 0) return Qfalse;
     return Qtrue;
 }
@@ -1437,7 +1437,7 @@ rb_file_executable_real_p(VALUE obj, VALUE fname)
 {
     rb_secure(2);
     FilePathValue(fname);
-    fname = rb_str_conv_for_path(fname);
+    fname = rb_str_encode_ospath(fname);
     if (access_internal(RSTRING_PTR(fname), X_OK) < 0) return Qfalse;
     return Qtrue;
 }
@@ -1558,7 +1558,7 @@ check3rdbyte(VALUE fname, int mode)
 
     rb_secure(2);
     FilePathValue(fname);
-    fname = rb_str_conv_for_path(fname);
+    fname = rb_str_encode_ospath(fname);
     if (STAT(RSTRING_PTR(fname), &st) < 0) return Qfalse;
     if (st.st_mode & mode) return Qtrue;
     return Qfalse;
@@ -1667,9 +1667,9 @@ rb_file_identical_p(VALUE obj, VALUE fname1, VALUE fname2)
 # else
     FilePathValue(fname1);
     fname1 = rb_str_new4(fname1);
-    fname1 = rb_str_conv_for_path(fname1);
+    fname1 = rb_str_encode_ospath(fname1);
     FilePathValue(fname2);
-    fname2 = rb_str_conv_for_path(fname2);
+    fname2 = rb_str_encode_ospath(fname2);
     if (access(RSTRING_PTR(fname1), 0)) return Qfalse;
     if (access(RSTRING_PTR(fname2), 0)) return Qfalse;
 # endif
@@ -1764,7 +1764,7 @@ rb_file_s_ftype(VALUE klass, VALUE fname)
 
     rb_secure(2);
     FilePathValue(fname);
-    fname = rb_str_conv_for_path(fname);
+    fname = rb_str_encode_ospath(fname);
     if (lstat(RSTRING_PTR(fname), &st) == -1)
 	rb_sys_fail(RSTRING_PTR(fname));
 
@@ -2003,7 +2003,7 @@ rb_file_chmod(VALUE obj, VALUE vmode)
 	rb_sys_fail_path(fptr->pathv);
 #else
     if (NIL_P(fptr->pathv)) return Qnil;
-    path = rb_str_conv_for_path(fptr->pathv);
+    path = rb_str_encode_ospath(fptr->pathv);
     if (chmod(RSTRING_PTR(path), mode) == -1)
 	rb_sys_fail_path(fptr->pathv);
 #endif
@@ -2131,7 +2131,7 @@ rb_file_chown(VALUE obj, VALUE owner, VALUE group)
     GetOpenFile(obj, fptr);
 #ifndef HAVE_FCHOWN
     if (NIL_P(fptr->pathv)) return Qnil;
-    path = rb_str_conv_for_path(fptr->pathv);
+    path = rb_str_encode_ospath(fptr->pathv);
     if (chown(RSTRING_PTR(path), o, g) == -1)
 	rb_sys_fail_path(fptr->pathv);
 #else
@@ -2381,8 +2381,8 @@ rb_file_s_link(VALUE klass, VALUE from, VALUE to)
     rb_secure(2);
     FilePathValue(from);
     FilePathValue(to);
-    from = rb_str_conv_for_path(from);
-    to = rb_str_conv_for_path(to);
+    from = rb_str_encode_ospath(from);
+    to = rb_str_encode_ospath(to);
 
     if (link(RSTRING_PTR(from), RSTRING_PTR(to)) < 0)
 	sys_fail2(from, to);
@@ -2411,8 +2411,8 @@ rb_file_s_symlink(VALUE klass, VALUE from, VALUE to)
     rb_secure(2);
     FilePathValue(from);
     FilePathValue(to);
-    from = rb_str_conv_for_path(from);
-    to = rb_str_conv_for_path(to);
+    from = rb_str_encode_ospath(from);
+    to = rb_str_encode_ospath(to);
 
     if (symlink(RSTRING_PTR(from), RSTRING_PTR(to)) < 0) {
 	sys_fail2(from, to);
@@ -2445,7 +2445,7 @@ rb_file_s_readlink(VALUE klass, VALUE path)
 
     rb_secure(2);
     FilePathValue(path);
-    path = rb_str_conv_for_path(path);
+    path = rb_str_encode_ospath(path);
     buf = xmalloc(size);
     while ((rv = readlink(RSTRING_PTR(path), buf, size)) == size
 #ifdef _AIX
@@ -2514,8 +2514,8 @@ rb_file_s_rename(VALUE klass, VALUE from, VALUE to)
     rb_secure(2);
     FilePathValue(from);
     FilePathValue(to);
-    f = rb_str_conv_for_path(from);
-    t = rb_str_conv_for_path(to);
+    f = rb_str_encode_ospath(from);
+    t = rb_str_encode_ospath(to);
     src = RSTRING_PTR(f);
     dst = RSTRING_PTR(t);
 #if defined __CYGWIN__
@@ -3534,7 +3534,7 @@ rb_file_s_truncate(VALUE klass, VALUE path, VALUE len)
     rb_secure(2);
     pos = NUM2OFFT(len);
     FilePathValue(path);
-    path = rb_str_conv_for_path(path);
+    path = rb_str_encode_ospath(path);
 #ifdef HAVE_TRUNCATE
     if (truncate(RSTRING_PTR(path), pos) < 0)
 	rb_sys_fail(RSTRING_PTR(path));
@@ -3979,7 +3979,7 @@ rb_stat_init(VALUE obj, VALUE fname)
 
     rb_secure(2);
     FilePathValue(fname);
-    fname = rb_str_conv_for_path(fname);
+    fname = rb_str_encode_ospath(fname);
     if (STAT(RSTRING_PTR(fname), &st) == -1) {
 	rb_sys_fail(RSTRING_PTR(fname));
     }

@@ -750,7 +750,7 @@ dir_close(VALUE dir)
 static void
 dir_chdir(VALUE path)
 {
-    path = rb_str_conv_for_path(path);
+    path = rb_str_encode_ospath(path);
     if (chdir(RSTRING_PTR(path)) < 0)
 	rb_sys_fail(RSTRING_PTR(path));
 }
@@ -916,7 +916,7 @@ dir_s_chroot(VALUE dir, VALUE path)
 {
     check_dirname(&path);
 
-    path = rb_str_conv_for_path(path);
+    path = rb_str_encode_ospath(path);
     if (chroot(RSTRING_PTR(path)) == -1)
 	rb_sys_fail(RSTRING_PTR(path));
 
@@ -953,7 +953,7 @@ dir_s_mkdir(int argc, VALUE *argv, VALUE obj)
     }
 
     check_dirname(&path);
-    path = rb_str_conv_for_path(path);
+    path = rb_str_encode_ospath(path);
     if (mkdir(RSTRING_PTR(path), mode) == -1)
 	rb_sys_fail(RSTRING_PTR(path));
 
@@ -973,7 +973,7 @@ static VALUE
 dir_s_rmdir(VALUE obj, VALUE dir)
 {
     check_dirname(&dir);
-    dir = rb_str_conv_for_path(dir);
+    dir = rb_str_encode_ospath(dir);
     if (rmdir(RSTRING_PTR(dir)) < 0)
 	rb_sys_fail(RSTRING_PTR(dir));
 

@@ -4439,7 +4439,7 @@ rb_sysopen(VALUE fname, int oflags, mode_t perm)
 #ifdef O_BINARY
     oflags |= O_BINARY;
 #endif
-    data.fname = rb_str_conv_for_path(fname);
+    data.fname = rb_str_encode_ospath(fname);
     data.oflags = oflags;
     data.perm = perm;
 
