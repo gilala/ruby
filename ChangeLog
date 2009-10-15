@@ -1,3 +1,8 @@
+Thu Oct 15 14:52:34 2009  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* file.c (rb_str_encode_ospath): no more gurantee that the returned
+	  string is ended with NUL.
+
 Thu Oct 15 14:30:39 2009  NAKAMURA Usaku  <usa@ruby-lang.org>
 
 	* file.c (rb_file_s_truncate): remove unnecessary WIN32 specific code.
