@@ -1,3 +1,7 @@
+Thu Oct 15 15:02:29 2009  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* file.c (win32_io_info): UTF-8 handling.
+
 Thu Oct 15 14:52:34 2009  NAKAMURA Usaku  <usa@ruby-lang.org>
 
 	* file.c (rb_str_encode_ospath): no more gurantee that the returned
