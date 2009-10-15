@@ -3524,15 +3524,9 @@ rb_file_s_truncate(VALUE klass, VALUE path, VALUE len)
     {
 	int tmpfd;
 
-#  ifdef _WIN32
-	if ((tmpfd = rb_w32_wopen((WCHAR *)RSTRING_PTR(path), O_RDWR)) < 0) {
-	    rb_sys_fail(RSTRING_PTR(path));
-	}
-#  else
 	if ((tmpfd = open(RSTRING_PTR(path), 0)) < 0) {
 	    rb_sys_fail(RSTRING_PTR(path));
 	}
-#  endif
 	if (chsize(tmpfd, pos) < 0) {
 	    close(tmpfd);
 	    rb_sys_fail(RSTRING_PTR(path));
