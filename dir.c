@@ -70,11 +70,11 @@ char *strchr(char*,char);
 /* define system APIs */
 #ifdef _WIN32
 #undef chdir
-#define chdir(p) _wchdir((WCHAR *)(p))
+#define chdir(p) rb_w32_uchdir(p)
 #undef mkdir
-#define mkdir(p, m) rb_w32_wmkdir((WCHAR *)(p), m)
+#define mkdir(p, m) rb_w32_umkdir(p, m)
 #undef rmdir
-#define rmdir(p) _wrmdir((WCHAR *)(p))
+#define rmdir(p) rb_w32_urmdir(p)
 #endif
 
 #define FNM_NOESCAPE	0x01

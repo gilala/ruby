@@ -259,14 +259,15 @@ extern int    rb_w32_socketpair(int, int, int, int *);
 extern char * rb_w32_getcwd(char *, int);
 extern char * rb_w32_getenv(const char *);
 extern int    rb_w32_rename(const char *, const char *);
+extern int    rb_w32_urename(const char *, const char *);
 extern char **rb_w32_get_environ(void);
 extern void   rb_w32_free_environ(char **);
 extern int    rb_w32_map_errno(DWORD);
 
 extern int chown(const char *, int, int);
-extern int rb_w32_wchown(const WCHAR *, int, int);
+extern int rb_w32_uchown(const char *, int, int);
 extern int link(const char *, const char *);
-extern int rb_w32_wlink(const WCHAR *, const WCHAR *);
+extern int rb_w32_ulink(const char *, const char *);
 extern int gettimeofday(struct timeval *, struct timezone *);
 extern rb_pid_t waitpid (rb_pid_t, int *, int);
 extern rb_pid_t rb_w32_spawn(int, const char *, const char*);
@@ -278,14 +279,17 @@ extern rb_pid_t rb_w32_getppid(void);
 #if !defined(__BORLANDC__)
 extern int rb_w32_isatty(int);
 #endif
-extern int rb_w32_wmkdir(const WCHAR *, int);
 extern int rb_w32_mkdir(const char *, int);
+extern int rb_w32_umkdir(const char *, int);
 extern int rb_w32_rmdir(const char *);
+extern int rb_w32_urmdir(const char *);
 extern int rb_w32_unlink(const char *);
-extern int rb_w32_wunlink(const WCHAR *);
+extern int rb_w32_uunlink(const char *);
+extern int rb_w32_uchmod(const char *, int);
 extern int rb_w32_stati64(const char *, struct stati64 *);
-extern int rb_w32_wstati64(const WCHAR *, struct stati64 *);
+extern int rb_w32_ustati64(const char *, struct stati64 *);
 extern int rb_w32_access(const char *, int);
+extern int rb_w32_uaccess(const char *, int);
 
 #ifdef __BORLANDC__
 extern int rb_w32_fstati64(int, struct stati64 *);
@@ -558,15 +562,16 @@ HANDLE GetCurrentThreadHandle(void);
 int  rb_w32_sleep(unsigned long msec);
 int  rb_w32_putc(int, FILE*);
 int  rb_w32_getc(FILE*);
-int  rb_w32_wopen(const WCHAR *, int, ...);
 int  rb_w32_open(const char *, int, ...);
+int  rb_w32_uopen(const char *, int, ...);
+int  rb_w32_wopen(const WCHAR *, int, ...);
 int  rb_w32_close(int);
 int  rb_w32_fclose(FILE*);
 int  rb_w32_pipe(int[2]);
 size_t rb_w32_read(int, void *, size_t);
 size_t rb_w32_write(int, const void *, size_t);
 int  rb_w32_utime(const char *, const struct utimbuf *);
-int  rb_w32_wutime(const WCHAR *, const struct utimbuf *);
+int  rb_w32_uutime(const char *, const struct utimbuf *);
 long rb_w32_write_console(unsigned long, int);
 int  WINAPI rb_w32_Sleep(unsigned long msec);
 int  rb_w32_wait_events_blocking(HANDLE *events, int num, DWORD timeout);

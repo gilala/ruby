@@ -109,6 +109,12 @@ extern void Init_File(void);
 
 #define numberof(array) (int)(sizeof(array) / sizeof((array)[0]))
 
+/* define system APIs */
+#ifdef _WIN32
+#undef open
+#define open	rb_w32_uopen
+#endif
+
 VALUE rb_cIO;
 VALUE rb_eEOFError;
 VALUE rb_eIOError;
@@ -4417,11 +4423,7 @@ sysopen_func(void *ptr)
 {
     const struct sysopen_struct *data = ptr;
     const char *fname = RSTRING_PTR(data->fname);
-#ifdef _WIN32
-    return (VALUE)rb_w32_wopen((WCHAR *)fname, data->oflags, data->perm);
-#else
     return (VALUE)open(fname, data->oflags, data->perm);
-#endif
 }
 
 static inline int

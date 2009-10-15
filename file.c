@@ -72,23 +72,23 @@ int flock(int, int);
 
 /* define system APIs */
 #ifdef _WIN32
-#define STAT(p, s)	rb_w32_wstati64((WCHAR *)(p), s)
+#define STAT(p, s)	rb_w32_ustati64(p, s)
 #undef lstat
-#define lstat(p, s)	rb_w32_wstati64((WCHAR *)(p), s)
+#define lstat(p, s)	rb_w32_ustati64(p, s)
 #undef access
-#define access(p, m)	_waccess((WCHAR *)(p), m)
+#define access(p, m)	rb_w32_uaccess(p, m)
 #undef chmod
-#define chmod(p, m)	_wchmod((WCHAR *)(p), m)
+#define chmod(p, m)	rb_w32_uchmod(p, m)
 #undef chown
-#define chown(p, o, g)	rb_w32_wchown((WCHAR *)(p), o, g)
+#define chown(p, o, g)	rb_w32_uchown(p, o, g)
 #undef utime
-#define utime(p, t)	rb_w32_wutime((WCHAR *)(p), t)
+#define utime(p, t)	rb_w32_uutime(p, t)
 #undef link
-#define link(f, t)	rb_w32_wlink((WCHAR *)(f), (WCHAR *)(t))
+#define link(f, t)	rb_w32_ulink(f, t)
 #undef unlink
-#define unlink(p)	rb_w32_wunlink((WCHAR *)(p))
+#define unlink(p)	rb_w32_uunlink(p)
 #undef rename
-#define rename(f, t)	_wrename((WCHAR *)(f), (WCHAR *)(t))
+#define rename(f, t)	rb_w32_urename(f, t)
 #else
 #define STAT(p, s)	stat(p, s)
 #endif
@@ -171,32 +171,14 @@ rb_str_encode_ospath(VALUE path)
 {
     char *s;
 #ifdef _WIN32
-    static rb_encoding *utf16 = (rb_encoding *)-1;
-    VALUE wpath;
-    if (utf16 == (rb_encoding *)-1) {
-	utf16 = rb_enc_find("UTF-16LE");
-	if (utf16 == rb_ascii8bit_encoding())
-	    utf16 = NULL;
+    rb_encoding *enc = rb_enc_get(path);
+    if (enc != rb_ascii8bit_encoding()) {
+	rb_encoding *utf8 = rb_utf8_encoding();
+	if (enc != utf8)
+	    path = rb_str_encode(path, rb_enc_from_encoding(utf8), 0, Qnil);
     }
-    if (utf16 && rb_enc_get(path) != rb_ascii8bit_encoding()) {
-	wpath = rb_str_encode(path, rb_enc_from_encoding(utf16), 0, Qnil);
-	rb_enc_str_buf_cat(wpath, "", 1, utf16); /* workaround */
-	return wpath;
-    }
-    else if (RSTRING_LEN(path) > 0) {
-	UINT cp = AreFileApisANSI() ? CP_ACP : CP_OEMCP;
-	int len = MultiByteToWideChar(cp, 0, RSTRING_PTR(path), -1, NULL, 0);
-	WCHAR *tmp;
-	if (len <= 0)
-	    rb_raise(rb_eArgError, "broken pathname");
-	tmp = ALLOCA_N(WCHAR, len);
-	len = MultiByteToWideChar(cp, 0, RSTRING_PTR(path), -1, tmp, len);
-	if (len <= 0)
-	    rb_raise(rb_eArgError, "broken pathname");
-	wpath = rb_str_new((char *)tmp, len * sizeof(WCHAR));
-	OBJ_INFECT(wpath, path);
-	return wpath;
-    }
+    else if (RSTRING_LEN(path) > 0)
+	path = rb_str_encode(path, rb_enc_from_encoding(rb_filesystem_encoding()), 0, Qnil);
 #elif defined __APPLE__
     rb_encoding *enc = rb_enc_get(path);
     rb_encoding *fenc = rb_filesystem_encoding();

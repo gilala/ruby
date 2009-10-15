@@ -1,3 +1,16 @@
+Thu Oct 15 14:16:04 2009  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* file.c (rb_str_encode_ospath): use UTF-8 instead of UTF-16LE as
+	  internal path encoding on Windows.  result of Ruby Developers' Meeting
+	  20091013.
+
+	* win32.c, include/ruby/win32.h (rb_w32_ulink, rb_w32_urename,
+	  rb_w32_ustati64, rb_w32_uopen, rb_w32_uutime, rb_w32_uchdir,
+	  rb_w32_umkdir, rb_w32_urmdir, rb_w32_uunlink): new functions to
+	  accept UTF-8 path.
+
+	* dir.c, file.c, io.c: follow above changes.
+
 Wed Oct 14 17:30:26 2009  NAKAMURA Usaku  <usa@ruby-lang.org>
 
 	* include/ruby/intern.h, dir.c, file.c, io.c (rb_str_encode_ospath):
