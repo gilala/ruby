@@ -423,7 +423,7 @@ dir_check(VALUE dir)
 }
 
 #define GetDIR(obj, dirp) do {\
-    dir_check(dir);\
+    dir_check(obj);\
     Data_Get_Struct(obj, struct dir_data, dirp);\
     if (dirp->dir == NULL) dir_closed();\
 } while (0)
@@ -985,7 +985,6 @@ sys_warning_1(const char* mesg)
 /* System call with warning */
 static int
 do_stat(const char *path, struct stat *pst, int flags)
-
 {
     int ret = stat(path, pst);
     if (ret < 0 && !to_be_ignored(errno))
