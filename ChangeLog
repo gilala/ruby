@@ -1,3 +1,8 @@
+Fri Nov  6 16:15:17 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* dir.c (rb_dir_aref, rb_dir_glob): added methods, Dir#[] and
+	  Dir#glob.
+
 Wed Nov  4 21:04:58 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* dir.c (GetDIR): fixed a variable name.

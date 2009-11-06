@@ -984,9 +984,20 @@ sys_warning_1(const char* mesg)
 
 /* System call with warning */
 static int
-do_stat(const char *path, struct stat *pst, int flags)
+do_stat(const struct dir_data *dp, const char *path, struct stat *pst, int flags)
 {
-    int ret = stat(path, pst);
+    int ret = 0;
+    if (dp) {
+#if USE_OPENAT
+	ret = fstatat(dirfd(dp->dir), path, pst, 0);
+#else
+	VALUE fullpath = rb_str_cat2(rb_str_dup(dp->path), path);
+	dirp = stat(RSTRING_PTR(fullpath), pst);
+#endif
+    }
+    else {
+	ret = stat(path, pst);
+    }
     if (ret < 0 && !to_be_ignored(errno))
 	sys_warning(path);
 
@@ -994,9 +1005,20 @@ do_stat(const char *path, struct stat *pst, int flags)
 }
 
 static int
-do_lstat(const char *path, struct stat *pst, int flags)
+do_lstat(const struct dir_data *dp, const char *path, struct stat *pst, int flags)
 {
-    int ret = lstat(path, pst);
+    int ret = 0;
+    if (dp) {
+#if USE_OPENAT
+	ret = fstatat(dirfd(dp->dir), path, pst, AT_SYMLINK_NOFOLLOW);
+#else
+	VALUE fullpath = rb_str_cat2(rb_str_dup(dp->path), path);
+	dirp = lstat(RSTRING_PTR(fullpath), pst);
+#endif
+    }
+    else {
+	ret = lstat(path, pst);
+    }
     if (ret < 0 && !to_be_ignored(errno))
 	sys_warning(path);
 
@@ -1004,9 +1026,23 @@ do_lstat(const char *path, struct stat *pst, int flags)
 }
 
 static DIR *
-do_opendir(const char *path, int flags)
+do_opendir(const struct dir_data *dp, const char *path, int flags)
 {
-    DIR *dirp = opendir(path);
+    DIR *dirp = NULL;
+    if (dp) {
+#if USE_OPENAT
+	int base = openat(dirfd(dp->dir), path, O_RDONLY|O_LARGEFILE|O_DIRECTORY);
+	if (base != -1 && !(dirp = fdopendir(base))) {
+	    preserving_errno(close(base));
+	}
+#else
+	VALUE fullpath = rb_str_cat2(rb_str_dup(dp->path), path);
+	dirp = opendir(RSTRING_PTR(fullpath));
+#endif
+    }
+    else {
+	dirp = opendir(path);
+    }
     if (dirp == NULL && !to_be_ignored(errno))
 	sys_warning(path);
 
@@ -1218,6 +1254,7 @@ enum answer { YES, NO, UNKNOWN };
 #endif
 
 struct glob_args {
+    const struct dir_data *base;
     void (*func)(const char *, VALUE, void *);
     const char *path;
     VALUE value;
@@ -1237,6 +1274,7 @@ glob_func_caller(VALUE val)
 
 static int
 glob_helper(
+    const struct dir_data *base,
     const char *path,
     int dirsep, /* '/' should be placed before appending child entry's name to 'path'. */
     enum answer exist, /* Does 'path' indicate an existing entry? */
@@ -1280,7 +1318,7 @@ glob_helper(
 
     if (*path) {
 	if (match_all && exist == UNKNOWN) {
-	    if (do_lstat(path, &st, flags) == 0) {
+	    if (do_lstat(base, path, &st, flags) == 0) {
 		exist = YES;
 		isdir = S_ISDIR(st.st_mode) ? YES : S_ISLNK(st.st_mode) ? UNKNOWN : NO;
 	    }
@@ -1290,7 +1328,7 @@ glob_helper(
 	    }
 	}
 	if (match_dir && isdir == UNKNOWN) {
-	    if (do_stat(path, &st, flags) == 0) {
+	    if (do_stat(base, path, &st, flags) == 0) {
 		exist = YES;
 		isdir = S_ISDIR(st.st_mode) ? YES : NO;
 	    }
@@ -1316,7 +1354,7 @@ glob_helper(
 
     if (magical || recursive) {
 	struct dirent *dp;
-	DIR *dirp = do_opendir(*path ? path : ".", flags);
+	DIR *dirp = do_opendir(base, *path ? path : ".", flags);
 	if (dirp == NULL) return 0;
 
 	for (dp = readdir(dirp); dp != NULL; dp = readdir(dirp)) {
@@ -1330,7 +1368,7 @@ glob_helper(
 	    if (recursive && strcmp(dp->d_name, ".") != 0 && strcmp(dp->d_name, "..") != 0
 		&& fnmatch("*", rb_usascii_encoding(), dp->d_name, flags) == 0) {
 #ifndef _WIN32
-		if (do_lstat(buf, &st, flags) == 0)
+		if (do_lstat(base, buf, &st, flags) == 0)
 		    new_isdir = S_ISDIR(st.st_mode) ? YES : S_ISLNK(st.st_mode) ? UNKNOWN : NO;
 		else
 		    new_isdir = NO;
@@ -1359,7 +1397,7 @@ glob_helper(
 		}
 	    }
 
-	    status = glob_helper(buf, 1, YES, new_isdir, new_beg, new_end,
+	    status = glob_helper(base, buf, 1, YES, new_isdir, new_beg, new_end,
 				 flags, func, arg, enc);
 	    GLOB_FREE(buf);
 	    GLOB_FREE(new_beg);
@@ -1409,7 +1447,7 @@ glob_helper(
 		    status = -1;
 		    break;
 		}
-		status = glob_helper(buf, 1, UNKNOWN, UNKNOWN, new_beg,
+		status = glob_helper(base, buf, 1, UNKNOWN, UNKNOWN, new_beg,
 				     new_end, flags, func, arg, enc);
 		GLOB_FREE(buf);
 		GLOB_FREE(new_beg);
@@ -1424,7 +1462,8 @@ glob_helper(
 }
 
 static int
-ruby_glob0(const char *path, int flags, ruby_glob_func *func, VALUE arg, rb_encoding *enc)
+ruby_glob0(const struct dir_data *base, const char *path, int flags,
+	   ruby_glob_func *func, VALUE arg, rb_encoding *enc)
 {
     struct glob_pattern *list;
     const char *root, *start;
@@ -1451,7 +1490,8 @@ ruby_glob0(const char *path, int flags, ruby_glob_func *func, VALUE arg, rb_enco
 	GLOB_FREE(buf);
 	return -1;
     }
-    status = glob_helper(buf, 0, UNKNOWN, UNKNOWN, &list, &list + 1, flags, func, arg, enc);
+    status = glob_helper(base, buf, 0, UNKNOWN, UNKNOWN,
+			 &list, &list + 1, flags, func, arg, enc);
     glob_free_pattern(list);
     GLOB_FREE(buf);
 
@@ -1461,7 +1501,7 @@ ruby_glob0(const char *path, int flags, ruby_glob_func *func, VALUE arg, rb_enco
 int
 ruby_glob(const char *path, int flags, ruby_glob_func *func, VALUE arg)
 {
-    return ruby_glob0(path, flags & ~GLOB_VERBOSE, func, arg,
+    return ruby_glob0(NULL, path, flags & ~GLOB_VERBOSE, func, arg,
 		      rb_ascii8bit_encoding());
 }
 
@@ -1491,7 +1531,7 @@ rb_glob2(const char *path, int flags,
 	rb_warning("Dir.glob() ignores File::FNM_CASEFOLD");
     }
 
-    return ruby_glob0(path, flags | GLOB_VERBOSE, rb_glob_caller, (VALUE)&args,
+    return ruby_glob0(NULL, path, flags | GLOB_VERBOSE, rb_glob_caller, (VALUE)&args,
 		      enc);
 }
 
@@ -1567,6 +1607,7 @@ ruby_brace_expand(const char *str, int flags, ruby_glob_func *func, VALUE arg,
 }
 
 struct brace_args {
+    const struct dir_data *base;
     ruby_glob_func *func;
     VALUE value;
     int flags;
@@ -1577,15 +1618,16 @@ glob_brace(const char *path, VALUE val, void *enc)
 {
     struct brace_args *arg = (struct brace_args *)val;
 
-    return ruby_glob0(path, arg->flags, arg->func, arg->value, enc);
+    return ruby_glob0(arg->base, path, arg->flags, arg->func, arg->value, enc);
 }
 
 static int
-ruby_brace_glob0(const char *str, int flags, ruby_glob_func *func, VALUE arg,
-		 rb_encoding* enc)
+ruby_brace_glob0(const struct dir_data *base, const char *str, int flags,
+		 ruby_glob_func *func, VALUE arg, rb_encoding* enc)
 {
     struct brace_args args;
 
+    args.base = base;
     args.func = func;
     args.value = arg;
     args.flags = flags;
@@ -1595,12 +1637,12 @@ ruby_brace_glob0(const char *str, int flags, ruby_glob_func *func, VALUE arg,
 int
 ruby_brace_glob(const char *str, int flags, ruby_glob_func *func, VALUE arg)
 {
-    return ruby_brace_glob0(str, flags & ~GLOB_VERBOSE, func, arg,
+    return ruby_brace_glob0(NULL, str, flags & ~GLOB_VERBOSE, func, arg,
 			    rb_ascii8bit_encoding());
 }
 
 static int
-push_glob(VALUE ary, VALUE str, int flags)
+push_glob(const struct dir_data *base, VALUE ary, VALUE str, int flags)
 {
     struct glob_args args;
     rb_encoding *enc = rb_enc_get(str);
@@ -1610,12 +1652,12 @@ push_glob(VALUE ary, VALUE str, int flags)
     args.value = ary;
     args.enc = enc;
 
-    return ruby_brace_glob0(RSTRING_PTR(str), flags | GLOB_VERBOSE,
+    return ruby_brace_glob0(base, RSTRING_PTR(str), flags | GLOB_VERBOSE,
 			    rb_glob_caller, (VALUE)&args, enc);
 }
 
 static VALUE
-rb_push_glob(VALUE str, int flags) /* '\0' is delimiter */
+rb_push_glob(const struct dir_data *base, VALUE str, int flags) /* '\0' is delimiter */
 {
     long offset = 0;
     VALUE ary;
@@ -1624,10 +1666,10 @@ rb_push_glob(VALUE str, int flags) /* '\0' is delimiter */
     ary = rb_ary_new();
 
     while (offset < RSTRING_LEN(str)) {
-	char *p, *pend;
+	const char *p, *pend;
 	int status;
 	p = RSTRING_PTR(str) + offset;
-	status = push_glob(ary, rb_enc_str_new(p, strlen(p), rb_enc_get(str)),
+	status = push_glob(base, ary, rb_enc_str_new(p, strlen(p), rb_enc_get(str)),
 			   flags);
 	if (status) GLOB_JUMP_TAG(status);
 	if (offset >= RSTRING_LEN(str)) break;
@@ -1642,7 +1684,7 @@ rb_push_glob(VALUE str, int flags) /* '\0' is delimiter */
 }
 
 static VALUE
-dir_globs(long argc, VALUE *argv, int flags)
+dir_globs(long argc, VALUE *argv, const struct dir_data *base, int flags)
 {
     VALUE ary = rb_ary_new();
     long i;
@@ -1651,11 +1693,20 @@ dir_globs(long argc, VALUE *argv, int flags)
 	int status;
 	VALUE str = argv[i];
 	SafeStringValue(str);
-	status = push_glob(ary, str, flags);
+	status = push_glob(base, ary, str, flags);
 	if (status) GLOB_JUMP_TAG(status);
     }
 
     return ary;
+}
+
+static VALUE
+dir_aref(int argc, VALUE *argv, const struct dir_data *base)
+{
+    if (argc == 1) {
+	return rb_push_glob(base, argv[0], 0);
+    }
+    return dir_globs(argc, argv, base, 0);
 }
 
 /*
@@ -1671,10 +1722,42 @@ dir_globs(long argc, VALUE *argv, int flags)
 static VALUE
 dir_s_aref(int argc, VALUE *argv, VALUE obj)
 {
-    if (argc == 1) {
-	return rb_push_glob(argv[0], 0);
+    return dir_aref(argc, argv, NULL);
+}
+
+static VALUE
+rb_dir_aref(int argc, VALUE *argv, VALUE obj)
+{
+    struct dir_data *base;
+    GetDIR(obj, base);
+    return dir_aref(argc, argv, base);
+}
+
+static VALUE
+dir_glob(int argc, VALUE *argv, const struct dir_data *base)
+{
+    VALUE str, rflags, ary;
+    int flags;
+
+    if (rb_scan_args(argc, argv, "11", &str, &rflags) == 2)
+	flags = NUM2INT(rflags);
+    else
+	flags = 0;
+
+    ary = rb_check_array_type(str);
+    if (NIL_P(ary)) {
+	ary = rb_push_glob(base, str, flags);
     }
-    return dir_globs(argc, argv, 0);
+    else {
+	volatile VALUE v = ary;
+	ary = dir_globs(RARRAY_LEN(v), RARRAY_PTR(v), base, flags);
+    }
+
+    if (rb_block_given_p()) {
+	rb_ary_each(ary);
+	return Qnil;
+    }
+    return ary;
 }
 
 /*
@@ -1740,29 +1823,17 @@ dir_s_aref(int argc, VALUE *argv, VALUE obj)
 static VALUE
 dir_s_glob(int argc, VALUE *argv, VALUE obj)
 {
-    VALUE str, rflags, ary;
-    int flags;
-
-    if (rb_scan_args(argc, argv, "11", &str, &rflags) == 2)
-	flags = NUM2INT(rflags);
-    else
-	flags = 0;
-
-    ary = rb_check_array_type(str);
-    if (NIL_P(ary)) {
-	ary = rb_push_glob(str, flags);
-    }
-    else {
-	volatile VALUE v = ary;
-	ary = dir_globs(RARRAY_LEN(v), RARRAY_PTR(v), flags);
-    }
-
-    if (rb_block_given_p()) {
-	rb_ary_each(ary);
-	return Qnil;
-    }
-    return ary;
+    return dir_glob(argc, argv, NULL);
 }
+
+static VALUE
+rb_dir_glob(int argc, VALUE *argv, VALUE obj)
+{
+    struct dir_data *base;
+    GetDIR(obj, base);
+    return dir_glob(argc, argv, base);
+}
+
 
 static VALUE
 dir_open_dir(int argc, VALUE *argv)
@@ -2405,6 +2476,8 @@ InitVM_Dir(void)
     rb_define_method(rb_cDir, "rmdir", rb_dir_rmdir, 1);
     rb_define_method(rb_cDir, "unlink", rb_dir_unlink, 1);
     rb_define_method(rb_cDir, "chdir", rb_dir_chdir, -1);
+    rb_define_method(rb_cDir,"glob", rb_dir_glob, -1);
+    rb_define_method(rb_cDir,"[]", rb_dir_aref, -1);
 
     rb_define_singleton_method(rb_cDir,"chdir", dir_s_chdir, -1);
     rb_define_singleton_method(rb_cDir,"getwd", dir_s_getwd, 0);
