@@ -992,7 +992,7 @@ do_stat(const struct dir_data *dp, const char *path, struct stat *pst, int flags
 	ret = fstatat(dirfd(dp->dir), path, pst, 0);
 #else
 	VALUE fullpath = rb_str_cat2(rb_str_dup(dp->path), path);
-	dirp = stat(RSTRING_PTR(fullpath), pst);
+	ret = stat(RSTRING_PTR(fullpath), pst);
 #endif
     }
     else {
@@ -1013,7 +1013,7 @@ do_lstat(const struct dir_data *dp, const char *path, struct stat *pst, int flag
 	ret = fstatat(dirfd(dp->dir), path, pst, AT_SYMLINK_NOFOLLOW);
 #else
 	VALUE fullpath = rb_str_cat2(rb_str_dup(dp->path), path);
-	dirp = lstat(RSTRING_PTR(fullpath), pst);
+	ret = lstat(RSTRING_PTR(fullpath), pst);
 #endif
     }
     else {

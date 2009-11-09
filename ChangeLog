@@ -1,3 +1,7 @@
+Mon Nov  9 20:56:50 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* dir.c (do_stat, do_lstat): fixed typo.
+
 Fri Nov  6 16:15:17 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* dir.c (rb_dir_aref, rb_dir_glob): added methods, Dir#[] and
