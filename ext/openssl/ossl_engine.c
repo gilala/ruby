@@ -119,7 +119,7 @@ ossl_engine_s_by_id(VALUE klass, VALUE id)
     if(!ENGINE_init(e))
 	ossl_raise(eEngineError, NULL);
     ENGINE_ctrl(e, ENGINE_CTRL_SET_PASSWORD_CALLBACK,
-		0, NULL, (void(*)())ossl_pem_passwd_cb);
+		0, NULL, (void(*)(void))ossl_pem_passwd_cb);
     ERR_clear_error();
 
     return obj;
@@ -166,10 +166,10 @@ ossl_engine_finish(VALUE self)
     return Qnil;
 }
 
+#if defined(HAVE_ENGINE_GET_CIPHER)
 static VALUE
 ossl_engine_get_cipher(VALUE self, VALUE name)
 {
-#if defined(HAVE_ENGINE_GET_CIPHER)
     ENGINE *e;
     const EVP_CIPHER *ciph, *tmp;
     char *s;
@@ -184,15 +184,15 @@ ossl_engine_get_cipher(VALUE self, VALUE name)
     if(!ciph) ossl_raise(eEngineError, NULL);
 
     return ossl_cipher_new(ciph);
-#else
-    rb_notimplement();
-#endif
 }
+#else
+#define ossl_engine_get_cipher rb_f_notimplement
+#endif
 
+#if defined(HAVE_ENGINE_GET_DIGEST)
 static VALUE
 ossl_engine_get_digest(VALUE self, VALUE name)
 {
-#if defined(HAVE_ENGINE_GET_DIGEST)
     ENGINE *e;
     const EVP_MD *md, *tmp;
     char *s;
@@ -207,10 +207,10 @@ ossl_engine_get_digest(VALUE self, VALUE name)
     if(!md) ossl_raise(eEngineError, NULL);
 
     return ossl_digest_new(md);
-#else
-    rb_notimplement();
-#endif
 }
+#else
+#define ossl_engine_get_digest rb_f_notimplement
+#endif
 
 static VALUE
 ossl_engine_load_privkey(int argc, VALUE *argv, VALUE self)

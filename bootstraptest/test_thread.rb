@@ -188,18 +188,18 @@ assert_equal %q{11}, %q{
     Thread.current[:a]
   }.value + Thread.current[:a]
 }
-assert_equal %q{100}, %q{
+assert_normal_exit %q{
 begin
   100.times do |i|
     begin
-      Thread.start(Thread.current) {|u| u.raise }
+      th = Thread.start(Thread.current) {|u| u.raise }
       raise
     rescue
     ensure
+      th.join
     end
   end
 rescue
-  100
 end
 }, '[ruby-dev:31371]'
 
@@ -214,6 +214,22 @@ assert_equal 'true', %{
   rescue NotImplementedError
     true
   end
+}
+
+assert_equal 'ok', %{
+  open("zzz.rb", "w") do |f|
+    f.puts <<-END
+      begin
+        Thread.new { fork { GC.start } }.join
+        pid, status = Process.wait2
+        $result = status.success? ? :ok : :ng
+      rescue NotImplementedError
+        $result = :ok
+      end
+    END
+  end
+  require "./zzz.rb"
+  $result
 }
 
 assert_finish 3, %{

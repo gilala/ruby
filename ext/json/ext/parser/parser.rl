@@ -1,13 +1,33 @@
 #include "ruby.h"
 #include "unicode.h"
+#if HAVE_RE_H
+#include "re.h"
+#endif
+#if HAVE_RUBY_ST_H
+#include "ruby/st.h"
+#endif
+#if HAVE_ST_H
+#include "st.h"
+#endif
 
 #define EVIL 0x666
+
+#ifndef RHASH_TBL
+#define RHASH_TBL(hsh) (RHASH(hsh)->tbl)
+#endif
+
+#ifdef HAVE_RUBY_ENCODING_H
+#include "ruby/encoding.h"
+#define FORCE_UTF8(obj) rb_enc_associate((obj), rb_utf8_encoding())
+#else
+#define FORCE_UTF8(obj)
+#endif
 
 static VALUE mJSON, mExt, cParser, eParserError, eNestingError;
 static VALUE CNaN, CInfinity, CMinusInfinity;
 
 static ID i_json_creatable_p, i_json_create, i_create_id, i_create_additions,
-          i_chr, i_max_nesting, i_allow_nan; 
+          i_chr, i_max_nesting, i_allow_nan, i_object_class, i_array_class; 
 
 #define MinusInfinity "-Infinity"
 
@@ -20,6 +40,8 @@ typedef struct JSON_ParserStruct {
     int max_nesting;
     int current_nesting;
     int allow_nan;
+    VALUE object_class;
+    VALUE array_class;
 } JSON_Parser;
 
 static char *JSON_parse_object(JSON_Parser *json, char *p, char *pe, VALUE *result);
@@ -98,12 +120,13 @@ static char *JSON_parse_object(JSON_Parser *json, char *p, char *pe, VALUE *resu
 {
     int cs = EVIL;
     VALUE last_name = Qnil;
+    VALUE object_class = json->object_class;
 
     if (json->max_nesting && json->current_nesting > json->max_nesting) {
-        rb_raise(eNestingError, "nesting of %d is to deep", json->current_nesting);
+        rb_raise(eNestingError, "nesting of %d is too deep", json->current_nesting);
     }
 
-    *result = rb_hash_new();
+    *result = NIL_P(object_class) ? rb_hash_new() : rb_class_new_instance(0, 0, object_class);
 
     %% write init;
     %% write exec;
@@ -310,11 +333,12 @@ static char *JSON_parse_float(JSON_Parser *json, char *p, char *pe, VALUE *resul
 static char *JSON_parse_array(JSON_Parser *json, char *p, char *pe, VALUE *result)
 {
     int cs = EVIL;
+    VALUE array_class = json->array_class;
 
     if (json->max_nesting && json->current_nesting > json->max_nesting) {
-        rb_raise(eNestingError, "nesting of %d is to deep", json->current_nesting);
+        rb_raise(eNestingError, "nesting of %d is too deep", json->current_nesting);
     }
-    *result = rb_ary_new();
+    *result = NIL_P(array_class) ? rb_ary_new() : rb_class_new_instance(0, 0, array_class);
 
     %% write init;
     %% write exec;
@@ -390,8 +414,14 @@ static VALUE json_string_unescape(char *p, char *pe)
 
     action parse_string {
         *result = json_string_unescape(json->memo + 1, p);
-        if (NIL_P(*result)) { fhold; fbreak; } else fexec p + 1;
-    }
+        if (NIL_P(*result)) {
+			fhold;
+			fbreak;
+		} else {
+			FORCE_UTF8(*result);
+			fexec p + 1;
+		}
+	}
 
     action exit { fhold; fbreak; }
 
@@ -474,6 +504,8 @@ static char *JSON_parse_string(JSON_Parser *json, char *p, char *pe, VALUE *resu
  * * *create_additions*: If set to false, the Parser doesn't create
  *   additions even if a matchin class and create_id was found. This option
  *   defaults to true.
+ * * *object_class*: Defaults to Hash
+ * * *array_class*: Defaults to Array
  */
 static VALUE cParser_initialize(int argc, VALUE *argv, VALUE self)
 {
@@ -523,11 +555,25 @@ static VALUE cParser_initialize(int argc, VALUE *argv, VALUE self)
             } else {
                 json->create_id = rb_funcall(mJSON, i_create_id, 0);
             }
+            tmp = ID2SYM(i_object_class);
+            if (st_lookup(RHASH_TBL(opts), tmp, 0)) {
+                json->object_class = rb_hash_aref(opts, tmp);
+            } else {
+                json->object_class = Qnil;
+            }
+            tmp = ID2SYM(i_array_class);
+            if (st_lookup(RHASH_TBL(opts), tmp, 0)) {
+                json->array_class = rb_hash_aref(opts, tmp);
+            } else {
+                json->array_class = Qnil;
+            }
         }
     } else {
         json->max_nesting = 19;
         json->allow_nan = 0;
         json->create_id = rb_funcall(mJSON, i_create_id, 0);
+        json->object_class = Qnil;
+        json->array_class = Qnil;
     }
     json->current_nesting = 0;
     /*
@@ -584,6 +630,8 @@ static void JSON_mark(JSON_Parser *json)
 {
     rb_gc_mark_maybe(json->Vsource);
     rb_gc_mark_maybe(json->create_id);
+    rb_gc_mark_maybe(json->object_class);
+    rb_gc_mark_maybe(json->array_class);
 }
 
 static void JSON_free(JSON_Parser *json)
@@ -633,4 +681,6 @@ void Init_parser()
     i_chr = rb_intern("chr");
     i_max_nesting = rb_intern("max_nesting");
     i_allow_nan = rb_intern("allow_nan");
+    i_object_class = rb_intern("object_class");
+    i_array_class = rb_intern("array_class");
 }

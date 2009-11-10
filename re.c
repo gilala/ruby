@@ -17,6 +17,7 @@
 #include <ctype.h>
 
 typedef char onig_errmsg_buffer[ONIG_MAX_ERROR_MESSAGE_LEN];
+#define errcpy(err, msg) strlcpy((err), (msg), ONIG_MAX_ERROR_MESSAGE_LEN)
 
 #define BEG(no) regs->beg[no]
 #define END(no) regs->end[no]
@@ -284,7 +285,7 @@ rb_char_to_option_kcode(int c, int *option, int *kcode)
 
     switch (c) {
       case 'n':
-        *kcode = -1;
+        *kcode = rb_ascii8bit_encindex();
         return (*option = ARG_ENCODING_NONE);
       case 'e':
 	*kcode = rb_enc_find_index("EUC-JP");
@@ -293,7 +294,7 @@ rb_char_to_option_kcode(int c, int *option, int *kcode)
 	*kcode = rb_enc_find_index("Windows-31J");
 	break;
       case 'u':
-	*kcode = rb_enc_find_index("UTF-8");
+	*kcode = rb_utf8_encindex();
 	break;
       default:
 	*kcode = -1;
@@ -363,7 +364,7 @@ rb_reg_expr_str(VALUE str, const char *s, long len)
 	    else if (!rb_enc_isspace(c, enc)) {
 		char b[8];
 
-		sprintf(b, "\\x%02X", c);
+		snprintf(b, sizeof(b), "\\x%02X", c);
 		rb_str_buf_cat(str, b, 4);
 	    }
 	    else {
@@ -525,7 +526,7 @@ rb_reg_to_s(VALUE re)
 	    if (r == 0) {
 		 ++ptr;
  		 len -= 2;
-		 err = (onig_compile(rp, ptr, ptr + len, NULL) != 0);
+		 err = (onig_compile(rp, ptr, ptr + len, NULL, NULL, 0) != 0);
 	    }
 	    onig_free(rp);
 	}
@@ -705,7 +706,7 @@ reg_named_captures_iter(const OnigUChar *name, const OnigUChar *name_end,
  * A key of the hash is a name of the named captures.
  * A value of the hash is an array which is list of indexes of corresponding
  * named captures.
- * 
+ *
  *    /(?<foo>.)(?<bar>.)/.named_captures
  *    #=> {"foo"=>[1], "bar"=>[2]}
  *
@@ -728,7 +729,8 @@ rb_reg_named_captures(VALUE re)
 }
 
 static Regexp*
-make_regexp(const char *s, long len, rb_encoding *enc, int flags, onig_errmsg_buffer err)
+make_regexp(const char *s, long len, rb_encoding *enc, int flags, onig_errmsg_buffer err,
+	const char *sourcefile, int sourceline)
 {
     Regexp *rp;
     int r;
@@ -748,7 +750,7 @@ make_regexp(const char *s, long len, rb_encoding *enc, int flags, onig_errmsg_bu
 	return 0;
     }
 
-    r = onig_compile(rp, (UChar*)s, (UChar*)(s + len), &einfo);
+    r = onig_compile(rp, (UChar*)s, (UChar*)(s + len), &einfo, sourcefile, sourceline);
 
     if (r != 0) {
 	onig_free(rp);
@@ -787,14 +789,19 @@ match_alloc(VALUE klass)
 }
 
 typedef struct {
-    int byte_pos;
-    int char_pos;
+    long byte_pos;
+    long char_pos;
 } pair_t;
 
 static int
 pair_byte_cmp(const void *pair1, const void *pair2)
 {
-    return ((pair_t*)pair1)->byte_pos - ((pair_t*)pair2)->byte_pos;
+    long diff = ((pair_t*)pair1)->byte_pos - ((pair_t*)pair2)->byte_pos;
+#if SIZEOF_LONG > SIZEOF_INT
+    return diff ? diff > 0 ? 1 : -1 : 0;
+#else
+    return (int)diff;
+#endif
 }
 
 static void
@@ -802,8 +809,8 @@ update_char_offset(VALUE match)
 {
     struct rmatch *rm = RMATCH(match)->rmatch;
     struct re_registers *regs;
-    int num_regs;
-    int i, num_pos, c;
+    int i, num_regs, num_pos;
+    long c;
     char *s, *p, *q, *e;
     rb_encoding *enc;
     pair_t *pairs;
@@ -1003,6 +1010,11 @@ match_backref_number(VALUE match, VALUE backref)
     return num;
 }
 
+int
+rb_reg_backref_number(VALUE match, VALUE backref)
+{
+    return match_backref_number(match, backref);
+}
 
 /*
  *  call-seq:
@@ -1164,9 +1176,9 @@ rb_reg_preprocess(const char *p, const char *end, rb_encoding *enc,
 static void
 reg_enc_error(VALUE re, VALUE str)
 {
-    rb_raise(rb_eArgError,
+    rb_raise(rb_eEncCompatError,
 	     "incompatible encoding regexp match (%s regexp with %s string)",
-	     rb_enc_name(RREGEXP(re)->ptr->enc),
+	     rb_enc_name(rb_enc_get(re)),
 	     rb_enc_name(rb_enc_get(str)));
 }
 
@@ -1177,7 +1189,7 @@ rb_reg_prepare_enc(VALUE re, VALUE str, int warn)
 
     if (rb_enc_str_coderange(str) == ENC_CODERANGE_BROKEN) {
         rb_raise(rb_eArgError,
-            "broken %s string",
+            "invalid byte sequence in %s",
             rb_enc_name(rb_enc_get(str)));
     }
 
@@ -1244,10 +1256,10 @@ rb_reg_prepare_re(VALUE re, VALUE str)
     return reg;
 }
 
-int
-rb_reg_adjust_startpos(VALUE re, VALUE str, int pos, int reverse)
+long
+rb_reg_adjust_startpos(VALUE re, VALUE str, long pos, int reverse)
 {
-    int range;
+    long range;
     rb_encoding *enc;
     UChar *p, *string;
 
@@ -1275,10 +1287,10 @@ rb_reg_adjust_startpos(VALUE re, VALUE str, int pos, int reverse)
     return pos;
 }
 
-int
-rb_reg_search(VALUE re, VALUE str, int pos, int reverse)
+long
+rb_reg_search(VALUE re, VALUE str, long pos, int reverse)
 {
-    int result;
+    long result;
     VALUE match;
     struct re_registers regi, *regs = &regi;
     char *range = RSTRING_PTR(str);
@@ -1334,7 +1346,7 @@ rb_reg_search(VALUE re, VALUE str, int pos, int reverse)
 	}
 	else {
 	    onig_errmsg_buffer err = "";
-	    onig_error_code_to_str((UChar*)err, result);
+	    onig_error_code_to_str((UChar*)err, (int)result);
 	    rb_reg_raise(RREGEXP_SRC_PTR(re), RREGEXP_SRC_LEN(re), err, 0);
 	}
     }
@@ -1513,13 +1525,17 @@ last_paren_match_getter(void)
 static VALUE
 match_array(VALUE match, int start)
 {
-    struct re_registers *regs = RMATCH_REGS(match);
-    VALUE ary = rb_ary_new2(regs->num_regs);
-    VALUE target = RMATCH(match)->str;
+    struct re_registers *regs;
+    VALUE ary;
+    VALUE target;
     int i;
     int taint = OBJ_TAINTED(match);
 
     match_check(match);
+    regs = RMATCH_REGS(match);
+    ary = rb_ary_new2(regs->num_regs);
+    target = RMATCH(match)->str;
+
     for (i=start; i<regs->num_regs; i++) {
 	if (regs->beg[i] == -1) {
 	    rb_ary_push(ary, Qnil);
@@ -1672,7 +1688,8 @@ match_aref(int argc, VALUE *argv, VALUE match)
 static VALUE
 match_entry(VALUE match, long n)
 {
-    return rb_reg_nth_match(n, match);
+    /* n should not exceed num_regs */
+    return rb_reg_nth_match((int)n, match);
 }
 
 
@@ -1692,8 +1709,10 @@ match_entry(VALUE match, long n)
 static VALUE
 match_values_at(int argc, VALUE *argv, VALUE match)
 {
-    struct re_registers *regs = RMATCH_REGS(match);
+    struct re_registers *regs;
+
     match_check(match);
+    regs = RMATCH_REGS(match);
     return rb_get_values_at(match, regs->num_regs, argc, argv, match_entry);
 }
 
@@ -1829,18 +1848,18 @@ read_escaped_byte(const char **pp, const char *end, onig_errmsg_buffer err)
     const char *p = *pp;
     int code;
     int meta_prefix = 0, ctrl_prefix = 0;
-    int len;
+    size_t len;
     int retbyte;
 
     retbyte = -1;
     if (p == end || *p++ != '\\') {
-        strcpy(err, "too short escaped multibyte character");
+        errcpy(err, "too short escaped multibyte character");
         return -1;
     }
 
 again:
     if (p == end) {
-        strcpy(err, "too short escape sequence");
+        errcpy(err, "too short escape sequence");
         return -1;
     }
     switch (*p++) {
@@ -1857,14 +1876,14 @@ again:
       case '0': case '1': case '2': case '3':
       case '4': case '5': case '6': case '7':
         p--;
-        code = ruby_scan_oct(p, end < p+3 ? end-p : 3, &len);
+        code = scan_oct(p, end < p+3 ? end-p : 3, &len);
         p += len;
         break;
 
       case 'x': /* \xHH */
-        code = ruby_scan_hex(p, end < p+2 ? end-p : 2, &len);
+        code = scan_hex(p, end < p+2 ? end-p : 2, &len);
         if (len < 1) {
-            strcpy(err, "invalid hex escape");
+            errcpy(err, "invalid hex escape");
             return -1;
         }
         p += len;
@@ -1872,7 +1891,7 @@ again:
 
       case 'M': /* \M-X, \M-\C-X, \M-\cX */
         if (meta_prefix) {
-            strcpy(err, "duplicate meta escape");
+            errcpy(err, "duplicate meta escape");
             return -1;
         }
         meta_prefix = 1;
@@ -1886,17 +1905,17 @@ again:
                 break;
             }
         }
-        strcpy(err, "too short meta escape");
+        errcpy(err, "too short meta escape");
         return -1;
 
       case 'C': /* \C-X, \C-\M-X */
         if (p == end || *p++ != '-') {
-            strcpy(err, "too short control escape");
+            errcpy(err, "too short control escape");
             return -1;
         }
       case 'c': /* \cX, \c\M-X */
         if (ctrl_prefix) {
-            strcpy(err, "duplicate control escape");
+            errcpy(err, "duplicate control escape");
             return -1;
         }
         ctrl_prefix = 1;
@@ -1910,15 +1929,15 @@ again:
                 break;
             }
         }
-        strcpy(err, "too short control escape");
+        errcpy(err, "too short control escape");
         return -1;
 
       default:
-        strcpy(err, "unexpected escape sequence");
+        errcpy(err, "unexpected escape sequence");
         return -1;
     }
     if (code < 0 || 0xff < code) {
-        strcpy(err, "invalid escape code");
+        errcpy(err, "invalid escape code");
         return -1;
     }
 
@@ -1961,7 +1980,7 @@ unescape_escaped_nonascii(const char **pp, const char *end, rb_encoding *enc,
 
     l = rb_enc_precise_mbclen(chbuf, chbuf+chlen, enc);
     if (MBCLEN_INVALID_P(l)) {
-        strcpy(err, "invalid multibyte escape");
+        errcpy(err, "invalid multibyte escape");
         return -1;
     }
     if (1 < chlen || (chbuf[0] & 0x80)) {
@@ -1970,7 +1989,7 @@ unescape_escaped_nonascii(const char **pp, const char *end, rb_encoding *enc,
         if (*encp == 0)
             *encp = enc;
         else if (*encp != enc) {
-            strcpy(err, "escaped non ASCII character in UTF-8 regexp");
+            errcpy(err, "escaped non ASCII character in UTF-8 regexp");
             return -1;
         }
     }
@@ -1988,7 +2007,7 @@ check_unicode_range(unsigned long code, onig_errmsg_buffer err)
 {
     if ((0xd800 <= code && code <= 0xdfff) || /* Surrogates */
         0x10ffff < code) {
-        strcpy(err, "invalid Unicode range");
+        errcpy(err, "invalid Unicode range");
         return -1;
     }
     return 0;
@@ -2014,7 +2033,7 @@ append_utf8(unsigned long uv,
         if (*encp == 0)
             *encp = rb_utf8_encoding();
         else if (*encp != rb_utf8_encoding()) {
-            strcpy(err, "UTF-8 character in non UTF-8 regexp");
+            errcpy(err, "UTF-8 character in non UTF-8 regexp");
             return -1;
         }
     }
@@ -2028,7 +2047,7 @@ unescape_unicode_list(const char **pp, const char *end,
     const char *p = *pp;
     int has_unicode = 0;
     unsigned long code;
-    int len;
+    size_t len;
 
     while (p < end && ISSPACE(*p)) p++;
 
@@ -2037,7 +2056,7 @@ unescape_unicode_list(const char **pp, const char *end,
         if (len == 0)
             break;
         if (6 < len) { /* max 10FFFF */
-            strcpy(err, "invalid Unicode range");
+            errcpy(err, "invalid Unicode range");
             return -1;
         }
         p += len;
@@ -2049,7 +2068,7 @@ unescape_unicode_list(const char **pp, const char *end,
     }
 
     if (has_unicode == 0) {
-        strcpy(err, "invalid Unicode list");
+        errcpy(err, "invalid Unicode list");
         return -1;
     }
 
@@ -2063,16 +2082,16 @@ unescape_unicode_bmp(const char **pp, const char *end,
         VALUE buf, rb_encoding **encp, onig_errmsg_buffer err)
 {
     const char *p = *pp;
-    int len;
+    size_t len;
     unsigned long code;
 
     if (end < p+4) {
-        strcpy(err, "invalid Unicode escape");
+        errcpy(err, "invalid Unicode escape");
         return -1;
     }
     code = ruby_scan_hex(p, 4, &len);
     if (len != 4) {
-        strcpy(err, "invalid Unicode escape");
+        errcpy(err, "invalid Unicode escape");
         return -1;
     }
     if (append_utf8(code, buf, encp, err) != 0)
@@ -2092,7 +2111,7 @@ unescape_nonascii(const char *p, const char *end, rb_encoding *enc,
     while (p < end) {
         int chlen = rb_enc_precise_mbclen(p, end, enc);
         if (!MBCLEN_CHARFOUND_P(chlen)) {
-            strcpy(err, "invalid multibyte character");
+            errcpy(err, "invalid multibyte character");
             return -1;
         }
         chlen = MBCLEN_CHARFOUND_LEN(chlen);
@@ -2102,7 +2121,7 @@ unescape_nonascii(const char *p, const char *end, rb_encoding *enc,
             if (*encp == 0)
                 *encp = enc;
             else if (*encp != enc) {
-                strcpy(err, "non ASCII character in UTF-8 regexp");
+                errcpy(err, "non ASCII character in UTF-8 regexp");
                 return -1;
             }
             continue;
@@ -2111,14 +2130,14 @@ unescape_nonascii(const char *p, const char *end, rb_encoding *enc,
         switch (c = *p++) {
           case '\\':
             if (p == end) {
-                strcpy(err, "too short escape sequence");
+                errcpy(err, "too short escape sequence");
                 return -1;
             }
             switch (c = *p++) {
               case '1': case '2': case '3':
               case '4': case '5': case '6': case '7': /* \O, \OO, \OOO or backref */
                 {
-                    int octlen;
+                    size_t octlen;
                     if (ruby_scan_oct(p-1, end-(p-1), &octlen) <= 0177) {
                         /* backref or 7bit octal.
                            no need to unescape anyway.
@@ -2126,7 +2145,7 @@ unescape_nonascii(const char *p, const char *end, rb_encoding *enc,
                         goto escape_asis;
                     }
                 }
-                /* xxx: How about more than 199 subexpressions? */ 
+                /* xxx: How about more than 199 subexpressions? */
 
               case '0': /* \0, \0O, \0OO */
 
@@ -2141,7 +2160,7 @@ unescape_nonascii(const char *p, const char *end, rb_encoding *enc,
 
               case 'u':
                 if (p == end) {
-                    strcpy(err, "too short escape sequence");
+                    errcpy(err, "too short escape sequence");
                     return -1;
                 }
                 if (*p == '{') {
@@ -2150,7 +2169,7 @@ unescape_nonascii(const char *p, const char *end, rb_encoding *enc,
                     if (unescape_unicode_list(&p, end, buf, encp, err) != 0)
                         return -1;
                     if (p == end || *p++ != '}') {
-                        strcpy(err, "invalid Unicode list");
+                        errcpy(err, "invalid Unicode list");
                         return -1;
                     }
                     break;
@@ -2240,13 +2259,14 @@ rb_reg_check_preprocess(VALUE str)
 }
 
 static VALUE
-rb_reg_preprocess_dregexp(VALUE ary)
+rb_reg_preprocess_dregexp(VALUE ary, int options)
 {
     rb_encoding *fixed_enc = 0;
     rb_encoding *regexp_enc = 0;
     onig_errmsg_buffer err = "";
     int i;
     VALUE result = 0;
+    rb_encoding *ascii8bit = rb_ascii8bit_encoding();
 
     if (RARRAY_LEN(ary) == 0) {
         rb_raise(rb_eArgError, "no arguments given");
@@ -2258,10 +2278,18 @@ rb_reg_preprocess_dregexp(VALUE ary)
         char *p, *end;
         rb_encoding *src_enc;
 
+	src_enc = rb_enc_get(str);
+	if (options & ARG_ENCODING_NONE &&
+		src_enc != ascii8bit) {
+	    if (rb_enc_str_coderange(str) != ENC_CODERANGE_7BIT)
+		rb_raise(rb_eRegexpError, "/.../n has a non escaped non ASCII character in non ASCII-8BIT script");
+	    else
+		src_enc = ascii8bit;
+	}
+
         StringValue(str);
         p = RSTRING_PTR(str);
         end = p + RSTRING_LEN(str);
-        src_enc = rb_enc_get(str);
 
         buf = rb_reg_preprocess(p, end, src_enc, &fixed_enc, err);
 
@@ -2270,7 +2298,7 @@ rb_reg_preprocess_dregexp(VALUE ary)
 
         if (fixed_enc != 0) {
             if (regexp_enc != 0 && regexp_enc != fixed_enc) {
-                rb_raise(rb_eArgError, "encoding mismatch in dynamic regexp : %s and %s",
+                rb_raise(rb_eRegexpError, "encoding mismatch in dynamic regexp : %s and %s",
                          rb_enc_name(regexp_enc), rb_enc_name(fixed_enc));
             }
             regexp_enc = fixed_enc;
@@ -2289,8 +2317,9 @@ rb_reg_preprocess_dregexp(VALUE ary)
 }
 
 static int
-rb_reg_initialize(VALUE obj, const char *s, int len, rb_encoding *enc,
-		  int options, onig_errmsg_buffer err)
+rb_reg_initialize(VALUE obj, const char *s, long len, rb_encoding *enc,
+		  int options, onig_errmsg_buffer err,
+		  const char *sourcefile, int sourceline)
 {
     struct RRegexp *re = RREGEXP(obj);
     VALUE unescaped;
@@ -2306,6 +2335,11 @@ rb_reg_initialize(VALUE obj, const char *s, int len, rb_encoding *enc,
         rb_raise(rb_eTypeError, "already initialized regexp");
     re->ptr = 0;
 
+    if (rb_enc_dummy_p(enc)) {
+	    errcpy(err, "can't make regexp with dummy encoding");
+	    return -1;
+    }
+
     unescaped = rb_reg_preprocess(s, s+len, enc, &fixed_enc, err);
     if (unescaped == Qnil)
         return -1;
@@ -2313,7 +2347,7 @@ rb_reg_initialize(VALUE obj, const char *s, int len, rb_encoding *enc,
     if (fixed_enc) {
 	if ((fixed_enc != enc && (options & ARG_ENCODING_FIXED)) ||
             (fixed_enc != a_enc && (options & ARG_ENCODING_NONE))) {
-	    strcpy(err, "incompatible character encoding");
+	    errcpy(err, "incompatible character encoding");
 	    return -1;
 	}
         if (fixed_enc != a_enc) {
@@ -2332,9 +2366,10 @@ rb_reg_initialize(VALUE obj, const char *s, int len, rb_encoding *enc,
     if (options & ARG_ENCODING_NONE) {
         re->basic.flags |= REG_ENCODING_NONE;
     }
-    
+
     re->ptr = make_regexp(RSTRING_PTR(unescaped), RSTRING_LEN(unescaped), enc,
-			  options & ARG_REG_OPTION_MASK, err);
+			  options & ARG_REG_OPTION_MASK, err,
+			  sourcefile, sourceline);
     if (!re->ptr) return -1;
     re->src = rb_enc_str_new(s, len, enc);
     OBJ_FREEZE(re->src);
@@ -2343,7 +2378,8 @@ rb_reg_initialize(VALUE obj, const char *s, int len, rb_encoding *enc,
 }
 
 static int
-rb_reg_initialize_str(VALUE obj, VALUE str, int options, onig_errmsg_buffer err)
+rb_reg_initialize_str(VALUE obj, VALUE str, int options, onig_errmsg_buffer err,
+	const char *sourcefile, int sourceline)
 {
     int ret;
     rb_encoding *enc = rb_enc_get(str);
@@ -2351,14 +2387,14 @@ rb_reg_initialize_str(VALUE obj, VALUE str, int options, onig_errmsg_buffer err)
         rb_encoding *ascii8bit = rb_ascii8bit_encoding();
         if (enc != ascii8bit) {
             if (rb_enc_str_coderange(str) != ENC_CODERANGE_7BIT) {
-                strcpy(err, "/.../n has a non escaped non ASCII character in non ASCII-8BIT script");
+                errcpy(err, "/.../n has a non escaped non ASCII character in non ASCII-8BIT script");
                 return -1;
             }
             enc = ascii8bit;
         }
     }
     ret = rb_reg_initialize(obj, RSTRING_PTR(str), RSTRING_LEN(str), enc,
-			    options, err);
+			    options, err, sourcefile, sourceline);
     RB_GC_GUARD(str);
     return ret;
 }
@@ -2382,7 +2418,7 @@ rb_reg_new_str(VALUE s, int options)
     VALUE re = rb_reg_s_alloc(rb_cRegexp);
     onig_errmsg_buffer err = "";
 
-    if (rb_reg_initialize_str(re, s, options, err) != 0) {
+    if (rb_reg_initialize_str(re, s, options, err, NULL, 0) != 0) {
 	rb_reg_raise_str(s, options, err);
     }
 
@@ -2392,7 +2428,7 @@ rb_reg_new_str(VALUE s, int options)
 VALUE
 rb_reg_new_ary(VALUE ary, int opt)
 {
-    return rb_reg_new_str(rb_reg_preprocess_dregexp(ary), opt);
+    return rb_reg_new_str(rb_reg_preprocess_dregexp(ary, opt), opt);
 }
 
 VALUE
@@ -2401,7 +2437,7 @@ rb_enc_reg_new(const char *s, long len, rb_encoding *enc, int options)
     VALUE re = rb_reg_s_alloc(rb_cRegexp);
     onig_errmsg_buffer err = "";
 
-    if (rb_reg_initialize(re, s, len, enc, options, err) != 0) {
+    if (rb_reg_initialize(re, s, len, enc, options, err, NULL, 0) != 0) {
 	rb_enc_reg_raise(s, len, enc, options, err);
     }
 
@@ -2415,13 +2451,13 @@ rb_reg_new(const char *s, long len, int options)
 }
 
 VALUE
-rb_reg_compile(VALUE str, int options)
+rb_reg_compile(VALUE str, int options, const char *sourcefile, int sourceline)
 {
     VALUE re = rb_reg_s_alloc(rb_cRegexp);
     onig_errmsg_buffer err = "";
 
     if (!str) str = rb_str_new(0,0);
-    if (rb_reg_initialize_str(re, str, options, err) != 0) {
+    if (rb_reg_initialize_str(re, str, options, err, sourcefile, sourceline) != 0) {
 	rb_set_errinfo(rb_reg_error_desc(str, options, err));
 	return Qnil;
     }
@@ -2445,6 +2481,7 @@ rb_reg_regcomp(VALUE str)
     return vm_reg_cache = rb_reg_new_str(save_str, 0);
 }
 
+static st_index_t reg_hash(VALUE re);
 /*
  * call-seq:
  *   rxp.hash   => fixnum
@@ -2455,19 +2492,19 @@ rb_reg_regcomp(VALUE str)
 static VALUE
 rb_reg_hash(VALUE re)
 {
-    int hashval, len;
-    char *p;
+    st_index_t hashval = reg_hash(re);
+    return LONG2FIX(hashval);
+}
+
+static st_index_t
+reg_hash(VALUE re)
+{
+    st_index_t hashval;
 
     rb_reg_check(re);
     hashval = RREGEXP(re)->ptr->options;
-    len = RREGEXP_SRC_LEN(re);
-    p  = RREGEXP_SRC_PTR(re);
-    while (len--) {
-	hashval = hashval * 33 + *p++;
-    }
-    hashval = hashval + (hashval>>5);
-
-    return INT2FIX(hashval);
+    hashval = rb_hash_uint(hashval, rb_memhash(RREGEXP_SRC_PTR(re), RREGEXP_SRC_LEN(re)));
+    return rb_hash_end(hashval);
 }
 
 
@@ -2502,6 +2539,53 @@ rb_reg_equal(VALUE re1, VALUE re2)
     return Qfalse;
 }
 
+/*
+ * call-seq:
+ *    mtch.hash   => integer
+ *
+ * Produce a hash based on the target string, regexp and matched
+ * positions of this matchdata.
+ */
+
+static VALUE
+match_hash(VALUE match)
+{
+    const struct re_registers *regs;
+    st_index_t hashval = rb_hash_start(rb_str_hash(RMATCH(match)->str));
+
+    rb_hash_uint(hashval, reg_hash(RMATCH(match)->regexp));
+    regs = RMATCH_REGS(match);
+    hashval = rb_hash_uint(hashval, regs->num_regs);
+    hashval = rb_hash_uint(hashval, rb_memhash(regs->beg, regs->num_regs * sizeof(*regs->beg)));
+    hashval = rb_hash_uint(hashval, rb_memhash(regs->end, regs->num_regs * sizeof(*regs->end)));
+    hashval = rb_hash_end(hashval);
+    return LONG2FIX(hashval);
+}
+
+/*
+ * call-seq:
+ *    mtch == mtch2   => true or false
+ *
+ *  Equality---Two matchdata are equal if their target strings,
+ *  patterns, and matched positions are identical.
+ */
+
+static VALUE
+match_equal(VALUE match1, VALUE match2)
+{
+    const struct re_registers *regs1, *regs2;
+    if (match1 == match2) return Qtrue;
+    if (TYPE(match2) != T_MATCH) return Qfalse;
+    if (!rb_str_equal(RMATCH(match1)->str, RMATCH(match2)->str)) return Qfalse;
+    if (!rb_reg_equal(RMATCH(match1)->regexp, RMATCH(match2)->regexp)) return Qfalse;
+    regs1 = RMATCH_REGS(match1);
+    regs2 = RMATCH_REGS(match2);
+    if (regs1->num_regs != regs2->num_regs) return Qfalse;
+    if (memcmp(regs1->beg, regs2->beg, regs1->num_regs * sizeof(*regs1->beg))) return Qfalse;
+    if (memcmp(regs1->end, regs2->end, regs1->num_regs * sizeof(*regs1->end))) return Qfalse;
+    return Qtrue;
+}
+
 static VALUE
 reg_operand(VALUE s, int check)
 {
@@ -2527,7 +2611,7 @@ reg_match_pos(VALUE re, VALUE *strp, long pos)
 	rb_backref_set(Qnil);
 	return -1;
     }
-    *strp = str = reg_operand(str, Qtrue);
+    *strp = str = reg_operand(str, TRUE);
     if (pos != 0) {
 	if (pos < 0) {
 	    VALUE l = rb_str_length(str);
@@ -2536,7 +2620,7 @@ reg_match_pos(VALUE re, VALUE *strp, long pos)
 		return pos;
 	    }
 	}
-	pos = rb_reg_adjust_startpos(re, str, pos, 0);
+	pos = rb_str_offset(str, pos);
     }
     return rb_reg_search(re, str, pos, 0);
 }
@@ -2560,7 +2644,7 @@ reg_match_pos(VALUE re, VALUE *strp, long pos)
  *
  *  If it is not matched, nil is assigned for the variables.
  *
- *     /(?<lhs>\w+)\s*=\s*(?<rhs>\w+)/ =~ "  x = "   
+ *     /(?<lhs>\w+)\s*=\s*(?<rhs>\w+)/ =~ "  x = "
  *     p lhs    #=> nil
  *     p rhs    #=> nil
  *
@@ -2621,7 +2705,7 @@ rb_reg_eqq(VALUE re, VALUE str)
 {
     long start;
 
-    str = reg_operand(str, Qfalse);
+    str = reg_operand(str, FALSE);
     if (NIL_P(str)) {
 	rb_backref_set(Qnil);
 	return Qfalse;
@@ -2678,18 +2762,18 @@ rb_reg_match2(VALUE re)
  *
  *     /(.)(.)(.)/.match("abc")[2]   #=> "b"
  *     /(.)(.)/.match("abc", 1)[2]   #=> "c"
- *     
+ *
  *  If a block is given, invoke the block with MatchData if match succeed, so
  *  that you can write
- *     
+ *
  *     pat.match(str) {|m| ...}
- *     
+ *
  *  instead of
- *      
+ *
  *     if m = pat.match(str)
  *       ...
  *     end
- *      
+ *
  *  The return value is a value from block execution in this case.
  */
 
@@ -2772,7 +2856,7 @@ rb_reg_initialize_m(int argc, VALUE *argv, VALUE self)
 	ptr = RREGEXP_SRC_PTR(re);
 	len = RREGEXP_SRC_LEN(re);
 	enc = rb_enc_get(re);
-	if (rb_reg_initialize(self, ptr, len, enc, flags, err)) {
+	if (rb_reg_initialize(self, ptr, len, enc, flags, err, NULL, 0)) {
 	    str = rb_enc_str_new(ptr, len, enc);
 	    rb_reg_raise_str(str, flags, err);
 	}
@@ -2796,8 +2880,8 @@ rb_reg_initialize_m(int argc, VALUE *argv, VALUE self)
 	str = argv[0];
 	ptr = StringValuePtr(str);
 	if (enc
-	    ? rb_reg_initialize(self, ptr, RSTRING_LEN(str), enc, flags, err)
-	    : rb_reg_initialize_str(self, str, flags, err)) {
+	    ? rb_reg_initialize(self, ptr, RSTRING_LEN(str), enc, flags, err, NULL, 0)
+	    : rb_reg_initialize_str(self, str, flags, err, NULL, 0)) {
 	    rb_reg_raise_str(str, flags, err);
 	}
     }
@@ -2919,7 +3003,7 @@ rb_reg_quote(VALUE str)
 static VALUE
 rb_reg_s_quote(VALUE c, VALUE str)
 {
-    return rb_reg_quote(reg_operand(str, Qtrue));
+    return rb_reg_quote(reg_operand(str, TRUE));
 }
 
 int
@@ -3122,7 +3206,8 @@ rb_reg_init_copy(VALUE copy, VALUE re)
     rb_reg_check(re);
     s = RREGEXP_SRC_PTR(re);
     len = RREGEXP_SRC_LEN(re);
-    if (rb_reg_initialize(copy, s, len, rb_enc_get(re), rb_reg_options(re), err) != 0) {
+    if (rb_reg_initialize(copy, s, len, rb_enc_get(re), rb_reg_options(re),
+		err, NULL, 0) != 0) {
 	rb_reg_raise(s, len, err, re);
     }
     return copy;
@@ -3184,7 +3269,7 @@ rb_reg_regsub(VALUE str, VALUE src, struct re_registers *regs, VALUE regexp)
           case 'k':
             if (s < e && ASCGET(s, e, &clen) == '<') {
                 char *name, *name_end;
-               
+
                 name_end = name = s + clen;
                 while (name_end < e) {
                     c = ASCGET(name_end, e, &clen);
@@ -3303,6 +3388,9 @@ match_setter(VALUE val)
  *  <code>MatchData</code> object.
  *  <em>n</em> can be a string or symbol to reference a named capture.
  *
+ *  Note that the <code>last_match</code> is local to the thread and method scope
+ *  of the method that did the pattern match.
+ *
  *     /c(.)t/ =~ 'cat'        #=> 0
  *     Regexp.last_match       #=> #<MatchData "cat" 1:"a">
  *     Regexp.last_match(0)    #=> "cat"
@@ -3343,6 +3431,9 @@ re_warn(const char *s)
  *  against strings. Regexps are created using the <code>/.../</code> and
  *  <code>%r{...}</code> literals, and by the <code>Regexp::new</code>
  *  constructor.
+ *
+ *  A comprehensive reference for regexp syntax and usage is available as
+ *  +Doc::Regexp+.
  *
  */
 
@@ -3403,6 +3494,7 @@ InitVM_Regexp(void)
     rb_define_const(rb_cRegexp, "IGNORECASE", INT2FIX(ONIG_OPTION_IGNORECASE));
     rb_define_const(rb_cRegexp, "EXTENDED", INT2FIX(ONIG_OPTION_EXTEND));
     rb_define_const(rb_cRegexp, "MULTILINE", INT2FIX(ONIG_OPTION_MULTILINE));
+    rb_define_const(rb_cRegexp, "FIXEDENCODING", INT2FIX(ARG_ENCODING_FIXED));
 
     rb_cMatch  = rb_define_class("MatchData", rb_cObject);
     rb_define_alloc_func(rb_cMatch, match_alloc);
@@ -3425,4 +3517,7 @@ InitVM_Regexp(void)
     rb_define_method(rb_cMatch, "to_s", match_to_s, 0);
     rb_define_method(rb_cMatch, "inspect", match_inspect, 0);
     rb_define_method(rb_cMatch, "string", match_string, 0);
+    rb_define_method(rb_cMatch, "hash", match_hash, 0);
+    rb_define_method(rb_cMatch, "eql?", match_equal, 1);
+    rb_define_method(rb_cMatch, "==", match_equal, 1);
 }

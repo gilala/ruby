@@ -1,12 +1,12 @@
 #
-#   irb/lc/error.rb - 
-#   	$Release Version: 0.9.5$
+#   irb/lc/error.rb -
+#   	$Release Version: 0.9.6$
 #   	$Revision$
 #   	by Keiju ISHITSUKA(keiju@ruby-lang.org)
 #
 # --
 #
-#   
+#
 #
 require "e2mmap"
 

@@ -37,16 +37,16 @@
 #     def initialize
 #       @source = SimpleDelegator.new([])
 #     end
-#     
+#
 #     def stats( records )
 #       @source.__setobj__(records)
-#       	
+#
 #       "Elements:  #{@source.size}\n" +
 #       " Non-Nil:  #{@source.compact.size}\n" +
 #       "  Unique:  #{@source.uniq.size}\n"
 #     end
 #   end
-#   
+#
 #   s = Stats.new
 #   puts s.stats(%w{James Edward Gray II})
 #   puts
@@ -57,7 +57,7 @@
 #   Elements:  4
 #    Non-Nil:  4
 #     Unique:  4
-# 
+#
 #   Elements:  8
 #    Non-Nil:  7
 #     Unique:  6
@@ -72,19 +72,19 @@
 #
 #   class Tempfile < DelegateClass(File)
 #     # constant and class member data initialization...
-#   
+#
 #     def initialize(basename, tmpdir=Dir::tmpdir)
 #       # build up file path/name in var tmpname...
-#     
+#
 #       @tmpfile = File.open(tmpname, File::RDWR|File::CREAT|File::EXCL, 0600)
-#     
+#
 #       # ...
-#     
+#
 #       super(@tmpfile)
-#     
+#
 #       # below this point, all methods of File are supported...
 #     end
-#   
+#
 #     # ...
 #   end
 #
@@ -97,15 +97,15 @@
 #        super             # pass obj to Delegator constructor, required
 #        @delegate_sd_obj = obj    # store obj for future use
 #      end
-# 
+#
 #      def __getobj__
 #        @delegate_sd_obj          # return object we are delegating to, required
 #      end
-# 
+#
 #      def __setobj__(obj)
 #        @delegate_sd_obj = obj    # change delegation object, a feature we're providing
 #      end
-# 
+#
 #      # ...
 #    end
 
@@ -115,7 +115,7 @@
 # implementation, see SimpleDelegator.
 #
 class Delegator
-  [:to_s,:inspect,:=~,:!~,:===].each do |m|
+  [:to_s,:inspect,:=~,:!~,:===,:<=>].each do |m|
     undef_method m
   end
 
@@ -137,23 +137,29 @@ class Delegator
         target.__send__(m, *args, &block)
       end
     rescue Exception
-      $@.delete_if{|s| %r"\A#{__FILE__}:\d+:in `method_missing'\z"o =~ s}
+      if i = $@.index{|s| %r"\A#{Regexp.quote(__FILE__)}:\d+:in `method_missing'\z"o =~ s}
+        $@[0..i] = []
+      end
       ::Kernel::raise
     end
   end
 
-  # 
-  # Checks for a method provided by this the delegate object by fowarding the 
+  #
+  # Checks for a method provided by this the delegate object by forwarding the
   # call through \_\_getobj\_\_.
-  # 
-  def respond_to?(m, include_private = false)
-    return true if super
-    return self.__getobj__.respond_to?(m, include_private)
+  #
+  def respond_to_missing?(m, include_private)
+    r = self.__getobj__.respond_to?(m, include_private)
+    if r && include_private && !self.__getobj__.respond_to?(m, false)
+      warn "#{caller(3)[0]}: delegator does not forward private method \##{m}"
+      return false
+    end
+    r
   end
 
-  # 
+  #
   # Returns true if two objects are considered same.
-  # 
+  #
   def ==(obj)
     return true if obj.equal?(self)
     self.__getobj__ == obj
@@ -196,6 +202,17 @@ class Delegator
     new.__setobj__(__getobj__.dup)
     new
   end
+
+  # Freeze self and target at once.
+  def freeze
+    __getobj__.freeze
+    super
+  end
+
+  @delegator_api = self.public_instance_methods
+  def self.public_api   # :nodoc:
+    @delegator_api
+  end
 end
 
 #
@@ -228,6 +245,17 @@ class SimpleDelegator<Delegator
     raise ArgumentError, "cannot delegate to self" if self.equal?(obj)
     @delegate_sd_obj = obj
   end
+
+  def initialize(obj)   # :nodoc:
+    (self.public_methods - Delegator.public_api).each do |m|
+      class << self
+        self
+      end.class_eval do
+        undef_method m
+      end
+    end
+    super
+  end
 end
 
 # :stopdoc:
@@ -257,7 +285,7 @@ end
 def DelegateClass(superclass)
   klass = Class.new(Delegator)
   methods = superclass.public_instance_methods(true)
-  methods -= ::Delegator.public_instance_methods
+  methods -= ::Delegator.public_api
   methods -= [:to_s,:inspect,:=~,:!~,:===]
   klass.module_eval {
     def __getobj__  # :nodoc:

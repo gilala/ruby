@@ -1,4 +1,5 @@
 class CGI
+  @@accept_charset="UTF-8" unless defined?(@@accept_charset)
   # URL-encode a string.
   #   url_encoded_string = CGI::escape("'Stop!' said Fred")
   #      # => "%27Stop%21%27+said+Fred"
@@ -9,14 +10,14 @@ class CGI
   end
 
 
-  # URL-decode a string.
+  # URL-decode a string with encoding(optional).
   #   string = CGI::unescape("%27Stop%21%27+said+Fred")
   #      # => "'Stop!' said Fred"
-  def CGI::unescape(string)
-    enc = string.encoding
-    string.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/) do
-      [$1.delete('%')].pack('H*').force_encoding(enc)
-    end
+  def CGI::unescape(string,encoding=@@accept_charset)
+    str=string.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/) do
+      [$1.delete('%')].pack('H*')
+    end.force_encoding(encoding)
+    str.valid_encoding? ? str : str.force_encoding(string.encoding)
   end
 
   TABLE_FOR_ESCAPE_HTML__ = {
@@ -119,7 +120,7 @@ class CGI
   #   print CGI::unescapeElement(
   #           CGI::escapeHTML('<BR><A HREF="url"></A>'), "A", "IMG")
   #     # "&lt;BR&gt;<A HREF="url"></A>"
-  # 
+  #
   #   print CGI::unescapeElement(
   #           CGI::escapeHTML('<BR><A HREF="url"></A>'), ["A", "IMG"])
   #     # "&lt;BR&gt;<A HREF="url"></A>"
@@ -161,7 +162,7 @@ class CGI
   #     #   <BODY>
   #     #   </BODY>
   #     # </HTML>
-  # 
+  #
   #   print CGI::pretty("<HTML><BODY></BODY></HTML>", "\t")
   #     # <HTML>
   #     #         <BODY>

@@ -74,7 +74,7 @@ module JSON
   end
   self.create_id = 'json_class'
 
-  NaN           = (-1.0) ** 0.5
+  NaN           = 0.0/0
 
   Infinity      = 1.0/0
 
@@ -160,7 +160,7 @@ module JSON
   # * *indent*: a string used to indent levels (default: ''),
   # * *space*: a string that is put after, a : or , delimiter (default: ''),
   # * *space_before*: a string that is put before a : pair delimiter (default: ''),
-  # * *object_nl*: a string that is put at the end of a JSON object (default: ''), 
+  # * *object_nl*: a string that is put at the end of a JSON object (default: ''),
   # * *array_nl*: a string that is put at the end of a JSON array (default: ''),
   # * *check_circular*: true if checking for circular data structures
   #   should be done (the default), false otherwise.
@@ -270,8 +270,6 @@ module JSON
       proc.call result
     end
   end
-  private :recurse_proc
-  module_function :recurse_proc
 
   alias restore load
   module_function :restore
@@ -310,6 +308,8 @@ module JSON
 end
 
 module ::Kernel
+  private
+
   # Outputs _objs_ to STDOUT as JSON strings in the shortest form, that is in
   # one line.
   def j(*objs)

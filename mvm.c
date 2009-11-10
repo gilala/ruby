@@ -16,7 +16,7 @@
 static void vmmgr_add(rb_vm_t *vm);
 static void vmmgr_del(rb_vm_t *vm);
 static rb_vm_t *vm_new(int argc, char *argv[]);
-static void vm_cleanup(rb_vm_t *vm);
+void rb_vm_free(rb_vm_t *vm);
 
 /* core API */
 
@@ -46,7 +46,7 @@ ruby_vm_join(rb_vm_t *vm)
 int
 ruby_vm_destruct(rb_vm_t *vm)
 {
-    vm_cleanup(vm);
+    rb_vm_free(vm);
     vmmgr_del(vm);
     return 0;
 }
@@ -182,7 +182,9 @@ ruby_vm_specific_ptr(rb_vm_t *vm, int key)
 VALUE *
 rb_vm_specific_ptr(int key)
 {
-    return ruby_vm_specific_ptr(GET_VM(), key);
+    rb_vm_t *vm = GET_VM();
+    if (!vm) return 0;
+    return ruby_vm_specific_ptr(vm, key);
 }
 
 /* VM management */
@@ -196,12 +198,11 @@ static struct {
     rb_vm_t *main;
 } vm_manager;
 
-static void
-vmmgr_initialize(rb_vm_t *vm)
+void
+Init_vmmgr(void)
 {
     /* vm_manager */
     ruby_native_thread_lock_initialize(&vm_manager.lock);
-    vm_manager.main = vm;
 
     /* specific_key */
     ruby_native_thread_lock_initialize(&specific_key.lock);
@@ -217,7 +218,7 @@ vmmgr_add(rb_vm_t *vm)
     entry->vm = vm;
 
     if (vm_manager.main == 0) {
-	vmmgr_initialize(vm);
+	vm_manager.main = vm;
     }
 
     MVM_CRITICAL(vm_manager.lock, {
@@ -276,24 +277,4 @@ vm_new(int argc, char *argv[])
     vm->argc = argc;
     vm->argv = argv;
     return vm;
-}
-
-static void
-vm_free(void *ptr)
-{
-    if (ptr) {
-	rb_vm_t *vmobj = ptr;
-
-	st_free_table(vmobj->living_threads);
-	vmobj->living_threads = 0;
-	ruby_native_thread_unlock(&vmobj->global_vm_lock);
-	ruby_native_thread_lock_destroy(&vmobj->global_vm_lock);
-	ruby_xfree(ptr);
-    }
-}
-
-static void
-vm_cleanup(rb_vm_t *vm)
-{
-    vm_free(vm);
 }

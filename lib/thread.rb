@@ -20,7 +20,7 @@ if $DEBUG
   Thread.abort_on_exception = true
 end
 
-# 
+#
 # ConditionVariable objects augment class Mutex. Using condition variables,
 # it is possible to suspend while in the middle of a critical section until a
 # resource becomes available.
@@ -31,7 +31,7 @@ end
 #
 #   mutex = Mutex.new
 #   resource = ConditionVariable.new
-#   
+#
 #   a = Thread.new {
 #     mutex.synchronize {
 #       # Thread 'a' now needs the resource
@@ -39,7 +39,7 @@ end
 #       # 'a' can now have the resource
 #     }
 #   }
-#   
+#
 #   b = Thread.new {
 #     mutex.synchronize {
 #       # Thread 'b' has finished using the resource
@@ -55,20 +55,23 @@ class ConditionVariable
     @waiters = []
     @waiters_mutex = Mutex.new
   end
-  
+
   #
   # Releases the lock held in +mutex+ and waits; reacquires the lock on wakeup.
   #
-  def wait(mutex)
+  # If +timeout+ is given, this method returns after +timeout+ seconds passed,
+  # even if no other thread doesn't signal.
+  #
+  def wait(mutex, timeout=nil)
     begin
       # TODO: mutex should not be used
       @waiters_mutex.synchronize do
         @waiters.push(Thread.current)
       end
-      mutex.sleep
+      mutex.sleep timeout
     end
   end
-  
+
   #
   # Wakes up the first thread in line waiting for this lock.
   #
@@ -80,7 +83,7 @@ class ConditionVariable
       retry
     end
   end
-    
+
   #
   # Wakes up all threads waiting for this lock.
   #
@@ -106,9 +109,9 @@ end
 # Example:
 #
 #   require 'thread'
-#   
+#
 #   queue = Queue.new
-#   
+#
 #   producer = Thread.new do
 #     5.times do |i|
 #       sleep rand(i) # simulate expense
@@ -116,7 +119,7 @@ end
 #       puts "#{i} produced"
 #     end
 #   end
-#   
+#
 #   consumer = Thread.new do
 #     5.times do |i|
 #       value = queue.pop
@@ -124,7 +127,7 @@ end
 #       puts "consumed #{value}"
 #     end
 #   end
-#   
+#
 #   consumer.join
 #
 class Queue
@@ -292,11 +295,11 @@ class SizedQueue < Queue
     t = nil
     @mutex.synchronize{
       while true
-        break if @que.length <= @max
+        break if @que.length < @max
         @queue_wait.push Thread.current
         @mutex.sleep
       end
-    
+
       @que.push obj
       begin
         t = @waiting.shift
@@ -305,7 +308,7 @@ class SizedQueue < Queue
         retry
       end
     }
-    
+
     begin
       t.run if t
     rescue ThreadError

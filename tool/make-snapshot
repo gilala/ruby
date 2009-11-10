@@ -19,7 +19,9 @@ YACC = ENV["YACC"] ||= "bison"
 ENV["BASERUBY"] ||= "ruby"
 ENV["RUBY"] ||= "ruby"
 ENV["MV"] ||= "mv"
+ENV["RM"] ||= "rm -f"
 ENV["MINIRUBY"] ||= "ruby"
+ENV["PROGRAM"] ||= "ruby"
 
 class String
   # for older ruby
@@ -106,6 +108,7 @@ def package(rev, destdir)
     v = v[0]
   end
   open("#{v}/revision.h", "wb") {|f| f.puts "#define RUBY_REVISION #{revision}"}
+  open("#{v}/.revision.time", "wb") {}
   version ||= (versionhdr = IO.read("#{v}/version.h"))[RUBY_VERSION_PATTERN, 1]
   version or return
   if patchlevel
@@ -157,19 +160,11 @@ def package(rev, destdir)
       FileUtils.mkpath(hdrdir = "#{extout}/include/ruby")
       File.open("#{hdrdir}/config.h", "w") {}
       miniruby = ENV['MINIRUBY'] + " -rcross"
-      IO.popen("make -f - prereq srcdir=. IFCHANGE=tool/ifchange 'MINIRUBY=#{miniruby}'", "w") do |f|
-        f.puts(IO.read("Makefile.in")[/^lex\.c.*?^$/m])
+      IO.popen("make -f - prereq srcdir=. CHDIR=cd IFCHANGE=tool/ifchange 'MINIRUBY=#{miniruby}' 'RUBY=#{ENV["RUBY"]}'", "w") do |f|
+        f.puts(IO.read("Makefile.in").gsub(/^@.*\n/, '').gsub(/@([A-Za-z_]\w*)@/) {ENV[$1]})
         f.puts(commonmk.gsub(/\{[^{}]*\}/, ""))
       end
-      File.open("enc.mk", "r+b") do |f|
-        data = f.read
-        data.gsub!(/^((?:ENC|TRANS)(?:OBJ|SO)(?:S|DIR)\s*=)(?:.*\\\n)*.*/, '\1')
-        data.sub!(/^(clean:.*)(?:\n\t.*)+/, '\1')
-        f.rewind
-        f.truncate(0)
-        f.print data
-      end
-      clean.push("rbconfig.rb", ".rbconfig.time")
+      clean.push("rbconfig.rb", ".rbconfig.time", "enc.mk")
       print "prerequisites"
     else
       system("#{YACC} -o parse.c parse.y")
@@ -185,6 +180,9 @@ def package(rev, destdir)
   if v == "."
     v = File.basename(Dir.pwd)
     Dir.chdir ".."
+  else
+    Dir.chdir(File.dirname(v))
+    v = File.basename(v)
   end
 
   return [["bzip tarball", ".tar.bz2", %w"tar cjf"],

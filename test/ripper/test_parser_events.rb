@@ -1,7 +1,10 @@
 begin
-
-require 'dummyparser'
-require 'test/unit'
+  require_relative 'dummyparser'
+  require_relative '../ruby/envutil'
+  require 'test/unit'
+  ripper_test = true
+rescue LoadError
+end
 
 class TestRipper_ParserEvents < Test::Unit::TestCase
 
@@ -16,15 +19,16 @@ class TestRipper_ParserEvents < Test::Unit::TestCase
   end
 =end
 
-  def parse(str)
-    DummyParser.new(str).parse.to_s
+  def parse(str, nm = nil, &bl)
+    dp = DummyParser.new(str)
+    dp.hook(nm, &bl) if nm
+    dp.parse.to_s
   end
 
-  $thru_program = false
-
   def test_program
-    assert_equal '[void()]', parse('')
-    assert_equal true, $thru_program
+    thru_program = false
+    assert_equal '[void()]', parse('', :on_program) {thru_program = true}
+    assert_equal true, thru_program
   end
 
   def test_stmts_new
@@ -104,11 +108,11 @@ class TestRipper_ParserEvents < Test::Unit::TestCase
     assert_equal '[assign(aref_field(ref(a),[1]),2)]', parse('a[1]=2')
   end
 
-=begin
   def test_arg_ambiguous
-    assert_equal true, $thru__arg_ambiguous
+    thru_arg_ambiguous = false
+    parse('m //', :on_arg_ambiguous) {thru_arg_ambiguous = true}
+    assert_equal true, thru_arg_ambiguous
   end
-=end
 
   def test_array   # array literal
     assert_equal '[array([1,2,3])]', parse('[1,2,3]')
@@ -118,37 +122,167 @@ class TestRipper_ParserEvents < Test::Unit::TestCase
     assert_equal '[assign(var_field(v),1)]', parse('v=1')
   end
 
-=begin
   def test_assign_error
-    assert_equal true, $thru__assign_error
+    thru_assign_error = false
+    parse('$` = 1', :on_assign_error) {thru_assign_error = true}
+    assert_equal true, thru_assign_error
+    thru_assign_error = false
+    parse('$`, _ = 1', :on_assign_error) {thru_assign_error = true}
+    assert_equal true, thru_assign_error
+
+    thru_assign_error = false
+    parse('self::X = 1', :on_assign_error) {thru_assign_error = true}
+    assert_equal false, thru_assign_error
+    parse('def m\n self::X = 1\nend', :on_assign_error) {thru_assign_error = true}
+    assert_equal true, thru_assign_error
+
+    thru_assign_error = false
+    parse('X = 1', :on_assign_error) {thru_assign_error = true}
+    assert_equal false, thru_assign_error
+    parse('def m\n X = 1\nend', :on_assign_error) {thru_assign_error = true}
+    assert_equal true, thru_assign_error
+
+    thru_assign_error = false
+    parse('::X = 1', :on_assign_error) {thru_assign_error = true}
+    assert_equal false, thru_assign_error
+    parse('def m\n ::X = 1\nend', :on_assign_error) {thru_assign_error = true}
+    assert_equal true, thru_assign_error
   end
 
   def test_begin
-    assert_equal true, $thru__begin
+    thru_begin = false
+    parse('begin end', :on_begin) {thru_begin = true}
+    assert_equal true, thru_begin
   end
 
   def test_binary
-    assert_equal true, $thru__binary
+    thru_binary = nil
+    %w"and or + - * / % ** | ^ & <=> > >= < <= == === != =~ !~ << >> && ||".each do |op|
+      thru_binary = false
+      parse("a #{op} b", :on_binary) {thru_binary = true}
+      assert_equal true, thru_binary
+    end
   end
 
   def test_block_var
-    assert_equal true, $thru__block_var
+    thru_block_var = false
+    parse("proc{||}", :on_block_var) {thru_block_var = true}
+    assert_equal true, thru_block_var
+    thru_block_var = false
+    parse("proc{| |}", :on_block_var) {thru_block_var = true}
+    assert_equal true, thru_block_var
+    thru_block_var = false
+    parse("proc{|x|}", :on_block_var) {thru_block_var = true}
+    assert_equal true, thru_block_var
+    thru_block_var = false
+    parse("proc{|;y|}", :on_block_var) {thru_block_var = true}
+    assert_equal true, thru_block_var
+    thru_block_var = false
+    parse("proc{|x;y|}", :on_block_var) {thru_block_var = true}
+    assert_equal true, thru_block_var
+
+    thru_block_var = false
+    parse("proc do || end", :on_block_var) {thru_block_var = true}
+    assert_equal true, thru_block_var
+    thru_block_var = false
+    parse("proc do | | end", :on_block_var) {thru_block_var = true}
+    assert_equal true, thru_block_var
+    thru_block_var = false
+    parse("proc do |x| end", :on_block_var) {thru_block_var = true}
+    assert_equal true, thru_block_var
+    thru_block_var = false
+    parse("proc do |;y| end", :on_block_var) {thru_block_var = true}
+    assert_equal true, thru_block_var
+    thru_block_var = false
+    parse("proc do |x;y| end", :on_block_var) {thru_block_var = true}
+    assert_equal true, thru_block_var
   end
 
   def test_bodystmt
-    assert_equal true, $thru__bodystmt
+    thru_bodystmt = false
+    parse("class X\nend", :on_bodystmt) {thru_bodystmt = true}
+    assert_equal true, thru_bodystmt
   end
 
+  def test_call
+    bug2233 = '[ruby-core:26165]'
+    tree = nil
+
+    thru_call = false
+    assert_nothing_raised {
+      tree = parse("self.foo", :on_call) {thru_call = true}
+    }
+    assert_equal true, thru_call
+    assert_equal "[call(ref(self),.,foo)]", tree
+    thru_call = false
+    assert_nothing_raised(bug2233) {
+      tree = parse("foo.()", :on_call) {thru_call = true}
+    }
+    assert_equal true, thru_call
+    assert_equal "[call(ref(foo),.,call,[])]", tree
+  end
+
+  def test_heredoc
+    bug1921 = '[ruby-core:24855]'
+    thru_heredoc_beg = false
+    tree = parse("<<EOS\nheredoc\nEOS\n", :on_heredoc_beg) {thru_heredoc_beg = true}
+    assert_equal true, thru_heredoc_beg
+    assert_match(/string_content\(\),heredoc\n/, tree, bug1921)
+    heredoc = nil
+    parse("<<EOS\nheredoc1\nheredoc2\nEOS\n", :on_string_add) {|n, s| heredoc = s}
+    assert_equal("heredoc1\nheredoc2\n", heredoc, bug1921)
+    heredoc = nil
+    parse("<<-EOS\nheredoc1\nheredoc2\n\tEOS\n", :on_string_add) {|n, s| heredoc = s}
+    assert_equal("heredoc1\nheredoc2\n", heredoc, bug1921)
+  end
+
+  def test_massign
+    thru_massign = false
+    parse("a, b = 1, 2", :on_massign) {thru_massign = true}
+    assert_equal true, thru_massign
+  end
+
+  def test_mlhs_add
+    thru_mlhs_add = false
+    parse("a, b = 1, 2", :on_mlhs_add) {thru_mlhs_add = true}
+    assert_equal true, thru_mlhs_add
+  end
+
+  def test_mlhs_add_star
+    bug2232 = '[ruby-core:26163]'
+
+    thru_mlhs_add_star = false
+    tree = parse("a, *b = 1, 2", :on_mlhs_add_star) {thru_mlhs_add_star = true}
+    assert_equal true, thru_mlhs_add_star
+    assert_match /mlhs_add_star\(mlhs_add\(mlhs_new\(\),a\),b\)/, tree
+    thru_mlhs_add_star = false
+    tree = parse("a, *b, c = 1, 2", :on_mlhs_add_star) {thru_mlhs_add_star = true}
+    assert_equal true, thru_mlhs_add_star
+    assert_match /mlhs_add\(mlhs_add_star\(mlhs_add\(mlhs_new\(\),a\),b\),mlhs_add\(mlhs_new\(\),c\)\)/, tree, bug2232
+  end
+
+  def test_mlhs_new
+    thru_mlhs_new = false
+    parse("a, b = 1, 2", :on_mlhs_new) {thru_mlhs_new = true}
+    assert_equal true, thru_mlhs_new
+  end
+
+  def test_mlhs_paren
+    thru_mlhs_paren = false
+    parse("a, b = 1, 2", :on_mlhs_paren) {thru_mlhs_paren = true}
+    assert_equal false, thru_mlhs_paren
+    thru_mlhs_paren = false
+    parse("(a, b) = 1, 2", :on_mlhs_paren) {thru_mlhs_paren = true}
+    assert_equal true, thru_mlhs_paren
+  end
+
+=begin
   def test_brace_block
     assert_equal true, $thru__brace_block
   end
 
   def test_break
     assert_equal true, $thru__break
-  end
-
-  def test_call
-    assert_equal true, $thru__call
   end
 
   def test_case
@@ -255,28 +389,8 @@ class TestRipper_ParserEvents < Test::Unit::TestCase
     assert_equal true, $thru__iter_block
   end
 
-  def test_massign
-    assert_equal true, $thru__massign
-  end
-
   def test_method_add_arg
     assert_equal true, $thru__method_add_arg
-  end
-
-  def test_mlhs_add
-    assert_equal true, $thru__mlhs_add
-  end
-
-  def test_mlhs_add_star
-    assert_equal true, $thru__mlhs_add_star
-  end
-
-  def test_mlhs_new
-    assert_equal true, $thru__mlhs_new
-  end
-
-  def test_mlhs_paren
-    assert_equal true, $thru__mlhs_paren
   end
 
   def test_module
@@ -492,7 +606,24 @@ class TestRipper_ParserEvents < Test::Unit::TestCase
   end
 =end
 
-end
+  def test_local_variables
+    cmd = 'command(w,[regexp_literal(xstring_add(xstring_new(),25 # ),/)])'
+    div = 'binary(ref(w),/,25)'
+    var = '[w]'
+    bug1939 = '[ruby-core:24923]'
 
-rescue LoadError
-end
+    assert_equal("[#{cmd}]", parse('w /25 # /'), bug1939)
+    assert_equal("[assign(var_field(w),1),#{div}]", parse("w = 1; w /25 # /"), bug1939)
+    assert_equal("[fcall(p,[],&block([w],[#{div}]))]", parse("p{|w|w /25 # /\n}"), bug1939)
+    assert_equal("[def(p,[w],bodystmt([#{div}]))]", parse("def p(w)\nw /25 # /\nend"), bug1939)
+  end
+
+  def test_block_variables
+    assert_equal("[fcall(proc,[],&block([],[void()]))]", parse("proc{|;y|}"))
+    if defined?(Process::RLIMIT_AS)
+      assert_in_out_err(["-I#{File.dirname(__FILE__)}", "-rdummyparser"],
+                        'Process.setrlimit(Process::RLIMIT_AS,102400); puts DummyParser.new("proc{|;y|}").parse',
+                        ["[fcall(proc,[],&block([],[void()]))]"], [], '[ruby-dev:39423]')
+    end
+  end
+end if ripper_test

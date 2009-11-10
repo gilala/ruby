@@ -11,14 +11,13 @@
 
 #include "ruby/ruby.h"
 
+static ID id_members;
+
 static VALUE struct_alloc(VALUE);
 
-VALUE
-rb_struct_iv_get(VALUE c, const char *name)
+static inline VALUE
+struct_ivar_get(VALUE c, ID id)
 {
-    ID id;
-
-    id = rb_intern(name);
     for (;;) {
 	if (rb_ivar_defined(c, id))
 	    return rb_ivar_get(c, id);
@@ -29,9 +28,15 @@ rb_struct_iv_get(VALUE c, const char *name)
 }
 
 VALUE
+rb_struct_iv_get(VALUE c, const char *name)
+{
+    return struct_ivar_get(c, rb_intern(name));
+}
+
+VALUE
 rb_struct_s_members(VALUE klass)
 {
-    VALUE members = rb_struct_iv_get(klass, "__members__");
+    VALUE members = struct_ivar_get(klass, id_members);
 
     if (NIL_P(members)) {
 	rb_raise(rb_eTypeError, "uninitialized struct");
@@ -74,10 +79,10 @@ rb_struct_s_members_m(VALUE klass)
 /*
  *  call-seq:
  *     struct.members    => array
- *  
+ *
  *  Returns an array of strings representing the names of the instance
  *  variables.
- *     
+ *
  *     Customer = Struct.new(:name, :address, :zip)
  *     joe = Customer.new("Joe Smith", "123 Maple, Anytown NC", 12345)
  *     joe.members   #=> [:name, :address, :zip]
@@ -92,14 +97,17 @@ rb_struct_members_m(VALUE obj)
 VALUE
 rb_struct_getmember(VALUE obj, ID id)
 {
-    VALUE members, slot;
-    long i;
+    VALUE members, slot, *ptr, *ptr_members;
+    long i, len;
 
+    ptr = RSTRUCT_PTR(obj);
     members = rb_struct_members(obj);
+    ptr_members = RARRAY_PTR(members);
     slot = ID2SYM(id);
-    for (i=0; i<RARRAY_LEN(members); i++) {
-	if (RARRAY_PTR(members)[i] == slot) {
-	    return RSTRUCT_PTR(obj)[i];
+    len = RARRAY_LEN(members);
+    for (i=0; i<len; i++) {
+	if (ptr_members[i] == slot) {
+	    return ptr[i];
 	}
     }
     rb_name_error(id, "%s is not struct member", rb_id2name(id));
@@ -123,7 +131,8 @@ static VALUE rb_struct_ref7(VALUE obj) {return RSTRUCT_PTR(obj)[7];}
 static VALUE rb_struct_ref8(VALUE obj) {return RSTRUCT_PTR(obj)[8];}
 static VALUE rb_struct_ref9(VALUE obj) {return RSTRUCT_PTR(obj)[9];}
 
-#define N_REF_FUNC (sizeof(ref_func) / sizeof(ref_func[0]))
+#define numberof(array) (int)(sizeof(array) / sizeof((array)[0]))
+#define N_REF_FUNC numberof(ref_func)
 
 static VALUE (*const ref_func[])(VALUE) = {
     rb_struct_ref0,
@@ -149,15 +158,18 @@ rb_struct_modify(VALUE s)
 static VALUE
 rb_struct_set(VALUE obj, VALUE val)
 {
-    VALUE members, slot;
-    long i;
+    VALUE members, slot, *ptr, *ptr_members;
+    long i, len;
 
     members = rb_struct_members(obj);
+    ptr_members = RARRAY_PTR(members);
+    len = RARRAY_LEN(members);
     rb_struct_modify(obj);
-    for (i=0; i<RARRAY_LEN(members); i++) {
-	slot = RARRAY_PTR(members)[i];
+    ptr = RSTRUCT_PTR(obj);
+    for (i=0; i<len; i++) {
+	slot = ptr_members[i];
 	if (rb_id_attrset(SYM2ID(slot)) == rb_frame_this_func()) {
-	    return RSTRUCT_PTR(obj)[i] = val;
+	    return ptr[i] = val;
 	}
     }
     rb_name_error(rb_frame_this_func(), "`%s' is not a struct member",
@@ -168,9 +180,9 @@ rb_struct_set(VALUE obj, VALUE val)
 static VALUE
 make_struct(VALUE name, VALUE members, VALUE klass)
 {
-    VALUE nstr;
+    VALUE nstr, *ptr_members;
     ID id;
-    long i;
+    long i, len;
 
     OBJ_FREEZE(members);
     if (NIL_P(name)) {
@@ -189,16 +201,18 @@ make_struct(VALUE name, VALUE members, VALUE klass)
 	    rb_warn("redefining constant Struct::%s", StringValuePtr(name));
 	    rb_mod_remove_const(klass, ID2SYM(id));
 	}
-	nstr = rb_define_class_under(klass, rb_id2name(id), klass);
+	nstr = rb_define_class_id_under(klass, id, klass);
     }
-    rb_iv_set(nstr, "__members__", members);
+    rb_ivar_set(nstr, id_members, members);
 
     rb_define_alloc_func(nstr, struct_alloc);
     rb_define_singleton_method(nstr, "new", rb_class_new_instance, -1);
     rb_define_singleton_method(nstr, "[]", rb_class_new_instance, -1);
     rb_define_singleton_method(nstr, "members", rb_struct_s_members_m, 0);
-    for (i=0; i< RARRAY_LEN(members); i++) {
-	ID id = SYM2ID(RARRAY_PTR(members)[i]);
+    ptr_members = RARRAY_PTR(members);
+    len = RARRAY_LEN(members);
+    for (i=0; i< len; i++) {
+	ID id = SYM2ID(ptr_members[i]);
 	if (rb_is_local_id(id) || rb_is_const_id(id)) {
 	    if (i < N_REF_FUNC) {
 		rb_define_method_id(nstr, id, ref_func[i], 0);
@@ -246,7 +260,7 @@ rb_struct_define_without_accessor(const char *class_name, VALUE super, rb_alloc_
 	rb_class_inherited(super, klass);
     }
 
-    rb_iv_set(klass, "__members__", members);
+    rb_ivar_set(klass, id_members, members);
 
     if (alloc)
         rb_define_alloc_func(klass, alloc);
@@ -291,21 +305,21 @@ rb_struct_define(const char *name, ...)
  *  <code>Struct</code>s in the system and should start with a capital
  *  letter. Assigning a structure class to a constant effectively gives
  *  the class the name of the constant.
- *     
+ *
  *  <code>Struct::new</code> returns a new <code>Class</code> object,
  *  which can then be used to create specific instances of the new
  *  structure. The number of actual parameters must be
  *  less than or equal to the number of attributes defined for this
- *  class; unset parameters default to \nil{}.  Passing too many
- *  parameters will raise an \E{ArgumentError}.
+ *  class; unset parameters default to <code>nil</code>.  Passing too many
+ *  parameters will raise an <code>ArgumentError</code>.
  *
  *  The remaining methods listed in this section (class and instance)
- *  are defined for this generated class. 
- *     
+ *  are defined for this generated class.
+ *
  *     # Create a structure with a name in Struct
  *     Struct.new("Customer", :name, :address)    #=> Struct::Customer
  *     Struct::Customer.new("Dave", "123 Main")   #=> #<struct Struct::Customer name="Dave", address="123 Main">
- *     
+ *
  *     # Create a structure named by its constant
  *     Customer = Struct.new(:name, :address)     #=> Customer
  *     Customer.new("Dave", "123 Main")           #=> #<struct Customer name="Dave", address="123 Main">
@@ -336,11 +350,11 @@ rb_struct_s_def(int argc, VALUE *argv, VALUE klass)
     return st;
 }
 
-static size_t
+static long
 num_members(VALUE klass)
 {
     VALUE members;
-    members = rb_struct_iv_get(klass, "__members__");
+    members = struct_ivar_get(klass, id_members);
     if (TYPE(members) != T_ARRAY) {
 	rb_raise(rb_eTypeError, "broken members");
     }
@@ -371,7 +385,7 @@ rb_struct_initialize_m(int argc, VALUE *argv, VALUE self)
 VALUE
 rb_struct_initialize(VALUE self, VALUE values)
 {
-    return rb_struct_initialize_m(RARRAY_LEN(values), RARRAY_PTR(values), self);
+    return rb_struct_initialize_m(RARRAY_LENINT(values), RARRAY_PTR(values), self);
 }
 
 static VALUE
@@ -400,18 +414,21 @@ struct_alloc(VALUE klass)
 VALUE
 rb_struct_alloc(VALUE klass, VALUE values)
 {
-    return rb_class_new_instance(RARRAY_LEN(values), RARRAY_PTR(values), klass);
+    return rb_class_new_instance(RARRAY_LENINT(values), RARRAY_PTR(values), klass);
 }
 
 VALUE
 rb_struct_new(VALUE klass, ...)
 {
-    VALUE *mem;
-    long size, i;
+    VALUE tmpargs[N_REF_FUNC], *mem = tmpargs;
+    int size, i;
     va_list args;
 
-    size = num_members(klass);
-    mem = ALLOCA_N(VALUE, size);
+    size = rb_long2int(num_members(klass));
+    if (size > numberof(tmpargs)) {
+	tmpargs[0] = rb_ary_tmp_new(size);
+	mem = RARRAY_PTR(tmpargs[0]);
+    }
     va_start(args, klass);
     for (i=0; i<size; i++) {
 	mem[i] = va_arg(args, VALUE);
@@ -424,16 +441,16 @@ rb_struct_new(VALUE klass, ...)
 /*
  *  call-seq:
  *     struct.each {|obj| block }  => struct
- *  
+ *
  *  Calls <i>block</i> once for each instance variable, passing the
  *  value as a parameter.
- *     
+ *
  *     Customer = Struct.new(:name, :address, :zip)
  *     joe = Customer.new("Joe Smith", "123 Maple, Anytown NC", 12345)
  *     joe.each {|x| puts(x) }
- *     
+ *
  *  <em>produces:</em>
- *     
+ *
  *     Joe Smith
  *     123 Maple, Anytown NC
  *     12345
@@ -454,16 +471,16 @@ rb_struct_each(VALUE s)
 /*
  *  call-seq:
  *     struct.each_pair {|sym, obj| block }     => struct
- *  
+ *
  *  Calls <i>block</i> once for each instance variable, passing the name
  *  (as a symbol) and the value as parameters.
- *     
+ *
  *     Customer = Struct.new(:name, :address, :zip)
  *     joe = Customer.new("Joe Smith", "123 Maple, Anytown NC", 12345)
  *     joe.each_pair {|name, value| puts("#{name} => #{value}") }
- *     
+ *
  *  <em>produces:</em>
- *     
+ *
  *     name => Joe Smith
  *     address => 123 Maple, Anytown NC
  *     zip => 12345
@@ -486,29 +503,34 @@ rb_struct_each_pair(VALUE s)
 static VALUE
 inspect_struct(VALUE s, VALUE dummy, int recur)
 {
-    const char *cname = rb_class2name(rb_obj_class(s));
-    VALUE str, members;
-    long i;
+    VALUE cname = rb_class_name(rb_obj_class(s));
+    VALUE members, str = rb_str_new2("#<struct ");
+    VALUE *ptr, *ptr_members;
+    long i, len;
+    char first = RSTRING_PTR(cname)[0];
 
+    if (recur || first != '#') {
+	rb_str_append(str, cname);
+    }
     if (recur) {
-	return rb_sprintf("#<struct %s:...>", cname);
+	return rb_str_cat2(str, ":...>");
     }
 
     members = rb_struct_members(s);
-    if (cname[0] == '#') {
-	str = rb_str_new2("#<struct ");
-    }
-    else {
-	str = rb_sprintf("#<struct %s ", cname);
-    }
-    for (i=0; i<RSTRUCT_LEN(s); i++) {
+    ptr_members = RARRAY_PTR(members);
+    ptr = RSTRUCT_PTR(s);
+    len = RSTRUCT_LEN(s);
+    for (i=0; i<len; i++) {
 	VALUE slot;
 	ID id;
 
 	if (i > 0) {
 	    rb_str_cat2(str, ", ");
 	}
-	slot = RARRAY_PTR(members)[i];
+	else if (first != '#') {
+	    rb_str_cat2(str, " ");
+	}
+	slot = ptr_members[i];
 	id = SYM2ID(slot);
 	if (rb_is_local_id(id) || rb_is_const_id(id)) {
 	    rb_str_append(str, rb_id2str(id));
@@ -517,7 +539,7 @@ inspect_struct(VALUE s, VALUE dummy, int recur)
 	    rb_str_append(str, rb_inspect(slot));
 	}
 	rb_str_cat2(str, "=");
-	rb_str_append(str, rb_inspect(RSTRUCT_PTR(s)[i]));
+	rb_str_append(str, rb_inspect(ptr[i]));
     }
     rb_str_cat2(str, ">");
     OBJ_INFECT(str, s);
@@ -543,9 +565,9 @@ rb_struct_inspect(VALUE s)
  *  call-seq:
  *     struct.to_a     => array
  *     struct.values   => array
- *  
+ *
  *  Returns the values for this instance as an array.
- *     
+ *
  *     Customer = Struct.new(:name, :address, :zip)
  *     joe = Customer.new("Joe Smith", "123 Maple, Anytown NC", 12345)
  *     joe.to_a[1]   #=> "123 Maple, Anytown NC"
@@ -577,14 +599,16 @@ rb_struct_init_copy(VALUE copy, VALUE s)
 static VALUE
 rb_struct_aref_id(VALUE s, ID id)
 {
-    VALUE members;
+    VALUE *ptr, members, *ptr_members;
     long i, len;
 
+    ptr = RSTRUCT_PTR(s);
     members = rb_struct_members(s);
+    ptr_members = RARRAY_PTR(members);
     len = RARRAY_LEN(members);
     for (i=0; i<len; i++) {
-	if (SYM2ID(RARRAY_PTR(members)[i]) == id) {
-	    return RSTRUCT_PTR(s)[i];
+	if (SYM2ID(ptr_members[i]) == id) {
+	    return ptr[i];
 	}
     }
     rb_name_error(id, "no member '%s' in struct", rb_id2name(id));
@@ -594,17 +618,17 @@ rb_struct_aref_id(VALUE s, ID id)
 /*
  *  call-seq:
  *     struct[symbol]    => anObject
- *     struct[fixnum]    => anObject 
- *  
+ *     struct[fixnum]    => anObject
+ *
  *  Attribute Reference---Returns the value of the instance variable
  *  named by <i>symbol</i>, or indexed (0..length-1) by
  *  <i>fixnum</i>. Will raise <code>NameError</code> if the named
  *  variable does not exist, or <code>IndexError</code> if the index is
  *  out of range.
- *     
+ *
  *     Customer = Struct.new(:name, :address, :zip)
  *     joe = Customer.new("Joe Smith", "123 Maple, Anytown NC", 12345)
- *     
+ *
  *     joe["name"]   #=> "Joe Smith"
  *     joe[:name]    #=> "Joe Smith"
  *     joe[0]        #=> "Joe Smith"
@@ -633,19 +657,21 @@ rb_struct_aref(VALUE s, VALUE idx)
 static VALUE
 rb_struct_aset_id(VALUE s, ID id, VALUE val)
 {
-    VALUE members;
+    VALUE members, *ptr, *ptr_members;
     long i, len;
 
     members = rb_struct_members(s);
-    rb_struct_modify(s);
     len = RARRAY_LEN(members);
-    if (RSTRUCT_LEN(s) != RARRAY_LEN(members)) {
+    rb_struct_modify(s);
+    if (RSTRUCT_LEN(s) != len) {
 	rb_raise(rb_eTypeError, "struct size differs (%ld required %ld given)",
-		 RARRAY_LEN(members), RSTRUCT_LEN(s));
+		 len, RSTRUCT_LEN(s));
     }
+    ptr = RSTRUCT_PTR(s);
+    ptr_members = RARRAY_PTR(members);
     for (i=0; i<len; i++) {
-	if (SYM2ID(RARRAY_PTR(members)[i]) == id) {
-	    RSTRUCT_PTR(s)[i] = val;
+	if (SYM2ID(ptr_members[i]) == id) {
+	    ptr[i] = val;
 	    return val;
 	}
     }
@@ -656,19 +682,19 @@ rb_struct_aset_id(VALUE s, ID id, VALUE val)
  *  call-seq:
  *     struct[symbol] = obj    => obj
  *     struct[fixnum] = obj    => obj
- *  
+ *
  *  Attribute Assignment---Assigns to the instance variable named by
  *  <i>symbol</i> or <i>fixnum</i> the value <i>obj</i> and
  *  returns it. Will raise a <code>NameError</code> if the named
  *  variable does not exist, or an <code>IndexError</code> if the index
  *  is out of range.
- *     
+ *
  *     Customer = Struct.new(:name, :address, :zip)
  *     joe = Customer.new("Joe Smith", "123 Maple, Anytown NC", 12345)
- *     
+ *
  *     joe["name"] = "Luke"
  *     joe[:zip]   = "90210"
- *     
+ *
  *     joe.name   #=> "Luke"
  *     joe.zip    #=> "90210"
  */
@@ -702,15 +728,15 @@ struct_entry(VALUE s, long n)
     return rb_struct_aref(s, LONG2NUM(n));
 }
 
-/* 
+/*
  * call-seq:
  *   struct.values_at(selector,... )  => an_array
  *
  *   Returns an array containing the elements in
  *   _self_ corresponding to the given selector(s). The selectors
- *   may be either integer indices or ranges. 
+ *   may be either integer indices or ranges.
  *   See also </code>.select<code>.
- * 
+ *
  *      a = %w{ a b c d e f }
  *      a.values_at(1, 3, 5)
  *      a.values_at(1, 3, 5, 7)
@@ -727,12 +753,12 @@ rb_struct_values_at(int argc, VALUE *argv, VALUE s)
 /*
  *  call-seq:
  *     struct.select {|i| block }    => array
- *  
+ *
  *  Invokes the block passing in successive elements from
  *  <i>struct</i>, returning an array containing those elements
  *  for which the block returns a true value (equivalent to
  *  <code>Enumerable#select</code>).
- *     
+ *
  *     Lots = Struct.new(:a, :b, :c, :d, :e, :f)
  *     l = Lots.new(11, 22, 33, 44, 55, 66)
  *     l.select {|v| (v % 2).zero? }   #=> [22, 44, 66]
@@ -747,6 +773,7 @@ rb_struct_select(int argc, VALUE *argv, VALUE s)
     if (argc > 0) {
 	rb_raise(rb_eArgError, "wrong number of arguments (%d for 0)", argc);
     }
+    RETURN_ENUMERATOR(s, 0, 0);
     result = rb_ary_new();
     for (i = 0; i < RSTRUCT_LEN(s); i++) {
 	if (RTEST(rb_yield(RSTRUCT_PTR(s)[i]))) {
@@ -757,15 +784,31 @@ rb_struct_select(int argc, VALUE *argv, VALUE s)
     return result;
 }
 
+static VALUE
+recursive_equal(VALUE s, VALUE s2, int recur)
+{
+    VALUE *ptr, *ptr2;
+    long i, len;
+
+    if (recur) return Qtrue; /* Subtle! */
+    ptr = RSTRUCT_PTR(s);
+    ptr2 = RSTRUCT_PTR(s2);
+    len = RSTRUCT_LEN(s);
+    for (i=0; i<len; i++) {
+	if (!rb_equal(ptr[i], ptr2[i])) return Qfalse;
+    }
+    return Qtrue;
+}
+
 /*
  *  call-seq:
  *     struct == other_struct     => true or false
- *  
+ *
  *  Equality---Returns <code>true</code> if <i>other_struct</i> is
  *  equal to this one: they must be of the same class as generated by
  *  <code>Struct::new</code>, and the values of all instance variables
  *  must be equal (according to <code>Object#==</code>).
- *     
+ *
  *     Customer = Struct.new(:name, :address, :zip)
  *     joe   = Customer.new("Joe Smith", "123 Maple, Anytown NC", 12345)
  *     joejr = Customer.new("Joe Smith", "123 Maple, Anytown NC", 12345)
@@ -777,8 +820,6 @@ rb_struct_select(int argc, VALUE *argv, VALUE s)
 static VALUE
 rb_struct_equal(VALUE s, VALUE s2)
 {
-    long i;
-
     if (s == s2) return Qtrue;
     if (TYPE(s2) != T_STRUCT) return Qfalse;
     if (rb_obj_class(s) != rb_obj_class(s2)) return Qfalse;
@@ -786,10 +827,27 @@ rb_struct_equal(VALUE s, VALUE s2)
 	rb_bug("inconsistent struct"); /* should never happen */
     }
 
-    for (i=0; i<RSTRUCT_LEN(s); i++) {
-	if (!rb_equal(RSTRUCT_PTR(s)[i], RSTRUCT_PTR(s2)[i])) return Qfalse;
+    return rb_exec_recursive_paired(recursive_equal, s, s2, s2);
+}
+
+static VALUE
+recursive_hash(VALUE s, VALUE dummy, int recur)
+{
+    long i, len;
+    st_index_t h;
+    VALUE n, *ptr;
+
+    h = rb_hash_start(rb_hash(rb_obj_class(s)));
+    if (!recur) {
+	ptr = RSTRUCT_PTR(s);
+	len = RSTRUCT_LEN(s);
+	for (i = 0; i < len; i++) {
+	    n = rb_hash(ptr[i]);
+	    h = rb_hash_uint(h, NUM2LONG(n));
+	}
     }
-    return Qtrue;
+    h = rb_hash_end(h);
+    return INT2FIX(h);
 }
 
 /*
@@ -802,16 +860,23 @@ rb_struct_equal(VALUE s, VALUE s2)
 static VALUE
 rb_struct_hash(VALUE s)
 {
-    long i, h;
-    VALUE n;
+    return rb_exec_recursive_outer(recursive_hash, s, 0);
+}
 
-    h = rb_hash(rb_obj_class(s));
-    for (i = 0; i < RSTRUCT_LEN(s); i++) {
-	h = (h << 1) | (h<0 ? 1 : 0);
-	n = rb_hash(RSTRUCT_PTR(s)[i]);
-	h ^= NUM2LONG(n);
+static VALUE
+recursive_eql(VALUE s, VALUE s2, int recur)
+{
+    VALUE *ptr, *ptr2;
+    long i, len;
+
+    if (recur) return Qtrue; /* Subtle! */
+    ptr = RSTRUCT_PTR(s);
+    ptr2 = RSTRUCT_PTR(s2);
+    len = RSTRUCT_LEN(s);
+    for (i=0; i<len; i++) {
+	if (!rb_eql(ptr[i], ptr2[i])) return Qfalse;
     }
-    return LONG2FIX(h);
+    return Qtrue;
 }
 
 /*
@@ -825,8 +890,6 @@ rb_struct_hash(VALUE s)
 static VALUE
 rb_struct_eql(VALUE s, VALUE s2)
 {
-    long i;
-
     if (s == s2) return Qtrue;
     if (TYPE(s2) != T_STRUCT) return Qfalse;
     if (rb_obj_class(s) != rb_obj_class(s2)) return Qfalse;
@@ -834,19 +897,16 @@ rb_struct_eql(VALUE s, VALUE s2)
 	rb_bug("inconsistent struct"); /* should never happen */
     }
 
-    for (i=0; i<RSTRUCT_LEN(s); i++) {
-	if (!rb_eql(RSTRUCT_PTR(s)[i], RSTRUCT_PTR(s2)[i])) return Qfalse;
-    }
-    return Qtrue;
+    return rb_exec_recursive_paired(recursive_eql, s, s2, s2);
 }
 
 /*
  *  call-seq:
  *     struct.length    => fixnum
  *     struct.size      => fixnum
- *  
+ *
  *  Returns the number of instance variables.
- *     
+ *
  *     Customer = Struct.new(:name, :address, :zip)
  *     joe = Customer.new("Joe Smith", "123 Maple, Anytown NC", 12345)
  *     joe.length   #=> 3
@@ -862,13 +922,13 @@ rb_struct_size(VALUE s)
  *  A <code>Struct</code> is a convenient way to bundle a number of
  *  attributes together, using accessor methods, without having to write
  *  an explicit class.
- *     
+ *
  *  The <code>Struct</code> class is a generator of specific classes,
  *  each one of which is defined to hold a set of variables and their
  *  accessors. In these examples, we'll call the generated class
  *  ``<i>Customer</i>Class,'' and we'll show an example instance of that
  *  class as ``<i>Customer</i>Inst.''
- *     
+ *
  *  In the descriptions that follow, the parameter <i>symbol</i> refers
  *  to a symbol, which is either a quoted string or a
  *  <code>Symbol</code> (such as <code>:name</code>).
@@ -876,6 +936,7 @@ rb_struct_size(VALUE s)
 void
 Init_Struct(void)
 {
+    id_members = rb_intern("__members__");
 }
 
 void
@@ -894,8 +955,8 @@ InitVM_Struct(void)
     rb_define_method(rb_cStruct, "eql?", rb_struct_eql, 1);
     rb_define_method(rb_cStruct, "hash", rb_struct_hash, 0);
 
-    rb_define_method(rb_cStruct, "to_s", rb_struct_inspect, 0);
     rb_define_method(rb_cStruct, "inspect", rb_struct_inspect, 0);
+    rb_define_alias(rb_cStruct,  "to_s", "inspect");
     rb_define_method(rb_cStruct, "to_a", rb_struct_to_a, 0);
     rb_define_method(rb_cStruct, "values", rb_struct_to_a, 0);
     rb_define_method(rb_cStruct, "size", rb_struct_size, 0);

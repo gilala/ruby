@@ -2,6 +2,7 @@ require 'test/unit'
 require 'tmpdir'
 require 'pathname'
 require_relative 'envutil'
+require 'rbconfig'
 
 class TestProcess < Test::Unit::TestCase
   RUBY = EnvUtil.rubybin
@@ -57,10 +58,9 @@ class TestProcess < Test::Unit::TestCase
     return unless rlimit_exist?
     with_tmpchdir {
       write_file 's', <<-"End"
-	cur_nofile, max_nofile = Process.getrlimit(Process::RLIMIT_NOFILE)
 	result = 1
 	begin
-	  Process.setrlimit(Process::RLIMIT_NOFILE, 0, max_nofile)
+	  Process.setrlimit(Process::RLIMIT_NOFILE, 0)
 	rescue Errno::EINVAL
 	  result = 0
 	end
@@ -71,7 +71,6 @@ class TestProcess < Test::Unit::TestCase
 	   result = 0
 	  end
 	end
-	Process.setrlimit(Process::RLIMIT_NOFILE, cur_nofile, max_nofile)
 	exit result
       End
       pid = spawn RUBY, "s"
@@ -108,8 +107,28 @@ class TestProcess < Test::Unit::TestCase
   def test_rlimit_value
     return unless rlimit_exist?
     assert_raise(ArgumentError) { Process.setrlimit(:CORE, :FOO) }
-    assert_raise(Errno::EPERM, Errno::EINVAL) { Process.setrlimit(:NOFILE, :INFINITY) }
-    assert_raise(Errno::EPERM, Errno::EINVAL) { Process.setrlimit(:NOFILE, "INFINITY") }
+    with_tmpchdir do
+      s = run_in_child(<<-'End')
+        cur, max = Process.getrlimit(:NOFILE)
+        Process.setrlimit(:NOFILE, [max-10, cur].min)
+        begin
+          Process.setrlimit(:NOFILE, :INFINITY)
+        rescue Errno::EPERM
+          exit false
+        end
+      End
+      assert_not_equal(0, s.exitstatus)
+      s = run_in_child(<<-'End')
+        cur, max = Process.getrlimit(:NOFILE)
+        Process.setrlimit(:NOFILE, [max-10, cur].min)
+        begin
+          Process.setrlimit(:NOFILE, "INFINITY")
+        rescue Errno::EPERM
+          exit false
+        end
+      End
+      assert_not_equal(0, s.exitstatus)
+    end
   end
 
   TRUECOMMAND = [RUBY, '-e', '']
@@ -198,7 +217,19 @@ class TestProcess < Test::Unit::TestCase
     }
   end
 
-  ENVCOMMAND = [RUBY, '-e', 'ENV.each {|k,v| puts "#{k}=#{v}" }']
+  MANDATORY_ENVS = %w[RUBYLIB]
+  case RbConfig::CONFIG['target_os']
+  when /linux/
+    MANDATORY_ENVS << 'LD_PRELOAD'
+  when /mswin|mingw/
+    MANDATORY_ENVS.concat(%w[HOME USER TMPDIR])
+  end
+  if e = RbConfig::CONFIG['LIBPATHENV']
+    MANDATORY_ENVS << e
+  end
+  PREENVARG = ['-e', "%w[#{MANDATORY_ENVS.join(' ')}].each{|e|ENV.delete(e)}"]
+  ENVARG = ['-e', 'ENV.each {|k,v| puts "#{k}=#{v}" }']
+  ENVCOMMAND = [RUBY].concat(PREENVARG).concat(ENVARG)
 
   def test_execopts_env
     assert_raise(ArgumentError) {
@@ -206,8 +237,18 @@ class TestProcess < Test::Unit::TestCase
     }
 
     h = {}
-    ENV.each {|k,v| h[k] = nil unless k.upcase == "PATH" }
-    IO.popen([h, RUBY, '-e', 'puts ENV.keys.map{|e|e.upcase}']) {|io|
+    cmd = [h, RUBY]
+    ENV.each do |k,v|
+      case k
+      when /\APATH\z/i
+      when *MANDATORY_ENVS
+        cmd << '-e' << "ENV.delete('#{k}')"
+      else
+        h[k] = nil
+      end
+    end
+    cmd << '-e' << 'puts ENV.keys.map{|e|e.upcase}'
+    IO.popen(cmd) {|io|
       assert_equal("PATH\n", io.read)
     }
 
@@ -222,10 +263,12 @@ class TestProcess < Test::Unit::TestCase
   end
 
   def test_execopts_unsetenv_others
-    IO.popen([*ENVCOMMAND, :unsetenv_others=>true]) {|io|
+    h = {}
+    MANDATORY_ENVS.each {|k| e = ENV[k] and h[k] = e}
+    IO.popen([h, *ENVCOMMAND, :unsetenv_others=>true]) {|io|
       assert_equal("", io.read)
     }
-    IO.popen([{"A"=>"B"}, *ENVCOMMAND, :unsetenv_others=>true]) {|io|
+    IO.popen([h.merge("A"=>"B"), *ENVCOMMAND, :unsetenv_others=>true]) {|io|
       assert_equal("A=B\n", io.read)
     }
   end
@@ -246,6 +289,7 @@ class TestProcess < Test::Unit::TestCase
   UMASK = [RUBY, '-e', 'printf "%04o\n", File.umask']
 
   def test_execopts_umask
+    skip "umask is not supported" if /mswin|bccwin|mingw/ =~ RUBY_PLATFORM
     IO.popen([*UMASK, :umask => 0]) {|io|
       assert_equal("0000", io.read.chomp)
     }
@@ -368,7 +412,7 @@ class TestProcess < Test::Unit::TestCase
         wios = pipes.map {|r, w| w }
         child_wfds = wios.map {|w| h2[w].fileno }
         pid = spawn(RUBY, "-e",
-                "[#{child_wfds.join(',')}].each {|fd| IO.new(fd).puts fd }", h)
+                "[#{child_wfds.join(',')}].each {|fd| IO.new(fd, 'w').puts fd }", h)
         pipes.each {|r, w|
           assert_equal("#{h2[w].fileno}\n", r.gets)
         }
@@ -384,7 +428,7 @@ class TestProcess < Test::Unit::TestCase
         wios = pipes.map {|r, w| w }
         child_wfds = wios.map {|w| h2[w].fileno }
         pid = spawn(RUBY, "-e",
-                "[#{child_wfds.join(',')}].each {|fd| IO.new(fd).puts fd }", h)
+                "[#{child_wfds.join(',')}].each {|fd| IO.new(fd, 'w').puts fd }", h)
         pipes.each {|r, w|
           assert_equal("#{h2[w].fileno}\n", r.gets)
         }
@@ -400,7 +444,7 @@ class TestProcess < Test::Unit::TestCase
 
       with_pipe {|r, w|
         w.close_on_exec = true
-        pid = spawn(RUBY, "-e", "IO.new(#{w.fileno}).print 'a'", w=>w)
+        pid = spawn(RUBY, "-e", "IO.new(#{w.fileno}, 'w').print 'a'", w=>w)
         w.close
         assert_equal("a", r.read)
         Process.wait pid
@@ -426,10 +470,13 @@ class TestProcess < Test::Unit::TestCase
                          STDERR=>"out", STDOUT=>[:child, STDERR])
       assert_equal("errout", File.read("out"))
 
+      if /mswin|bccwin|mingw/ =~ RUBY_PLATFORM
+        skip "inheritance of fd other than stdin,stdout and stderr is not supported"
+      end
       Process.wait spawn(RUBY, "-e", "STDERR.print 'err'; STDOUT.print 'out'",
-                         STDOUT=>"out", 
+                         STDOUT=>"out",
                          STDERR=>[:child, 3],
-                         3=>[:child, 4], 
+                         3=>[:child, 4],
                          4=>[:child, STDOUT]
                         )
       assert_equal("errout", File.read("out"))
@@ -468,14 +515,17 @@ class TestProcess < Test::Unit::TestCase
       assert_raise(ArgumentError) {
         IO.popen([*ECHO["fuga"], STDOUT=>"out"]) {|io| }
       }
+      if /mswin|bccwin|mingw/ =~ RUBY_PLATFORM
+        skip "inheritance of fd other than stdin,stdout and stderr is not supported"
+      end
       with_pipe {|r, w|
-        IO.popen([RUBY, '-e', 'IO.new(3).puts("a"); puts "b"', 3=>w]) {|io|
+        IO.popen([RUBY, '-e', 'IO.new(3, "w").puts("a"); puts "b"', 3=>w]) {|io|
           assert_equal("b\n", io.read)
         }
         w.close
         assert_equal("a\n", r.read)
       }
-      IO.popen([RUBY, '-e', "IO.new(9).puts(:b)",
+      IO.popen([RUBY, '-e', "IO.new(9, 'w').puts(:b)",
                9=>["out2", File::WRONLY|File::CREAT|File::TRUNC]]) {|io|
         assert_equal("", io.read)
       }
@@ -496,15 +546,17 @@ class TestProcess < Test::Unit::TestCase
   end
 
   def test_fd_inheritance
-    skip "inheritance of fd>=3 is not supported" if /mswin|bccwin|mingw/ =~ RUBY_PLATFORM
+    if /mswin|bccwin|mingw/ =~ RUBY_PLATFORM
+      skip "inheritance of fd other than stdin,stdout and stderr is not supported"
+    end
     with_pipe {|r, w|
-      system(RUBY, '-e', 'IO.new(ARGV[0].to_i).puts(:ba)', w.fileno.to_s)
+      system(RUBY, '-e', 'IO.new(ARGV[0].to_i, "w").puts(:ba)', w.fileno.to_s)
       w.close
       assert_equal("ba\n", r.read)
     }
     with_pipe {|r, w|
       Process.wait spawn(RUBY, '-e',
-                         'IO.new(ARGV[0].to_i).puts("bi") rescue nil',
+                         'IO.new(ARGV[0].to_i, "w").puts("bi") rescue nil',
                          w.fileno.to_s)
       w.close
       assert_equal("", r.read)
@@ -513,7 +565,7 @@ class TestProcess < Test::Unit::TestCase
       with_tmpchdir {|d|
 	write_file("s", <<-"End")
 	  exec(#{RUBY.dump}, '-e',
-	       'IO.new(ARGV[0].to_i).puts("bu") rescue nil',
+	       'IO.new(ARGV[0].to_i, "w").puts("bu") rescue nil',
 	       #{w.fileno.to_s.dump})
 	End
 	Process.wait spawn(RUBY, "s", :close_others=>false)
@@ -522,7 +574,7 @@ class TestProcess < Test::Unit::TestCase
       }
     }
     with_pipe {|r, w|
-      io = IO.popen([RUBY, "-e", "STDERR.reopen(STDOUT); IO.new(#{w.fileno}).puts('me')"])
+      io = IO.popen([RUBY, "-e", "STDERR.reopen(STDOUT); IO.new(#{w.fileno}, 'w').puts('me')"])
       w.close
       errmsg = io.read
       assert_equal("", r.read)
@@ -530,7 +582,7 @@ class TestProcess < Test::Unit::TestCase
       Process.wait
     }
     with_pipe {|r, w|
-      errmsg = `#{RUBY} -e "STDERR.reopen(STDOUT); IO.new(#{w.fileno}).puts(123)"`
+      errmsg = `#{RUBY} -e "STDERR.reopen(STDOUT); IO.new(#{w.fileno}, 'w').puts(123)"`
       w.close
       assert_equal("", r.read)
       assert_not_equal("", errmsg)
@@ -538,30 +590,33 @@ class TestProcess < Test::Unit::TestCase
   end
 
   def test_execopts_close_others
+    if /mswin|bccwin|mingw/ =~ RUBY_PLATFORM
+      skip "inheritance of fd other than stdin,stdout and stderr is not supported"
+    end
     with_tmpchdir {|d|
       with_pipe {|r, w|
-        system(RUBY, '-e', 'STDERR.reopen("err", "w"); IO.new(ARGV[0].to_i).puts("ma")', w.fileno.to_s, :close_others=>true)
+        system(RUBY, '-e', 'STDERR.reopen("err", "w"); IO.new(ARGV[0].to_i, "w").puts("ma")', w.fileno.to_s, :close_others=>true)
         w.close
         assert_equal("", r.read)
         assert_not_equal("", File.read("err"))
         File.unlink("err")
       }
       with_pipe {|r, w|
-        Process.wait spawn(RUBY, '-e', 'STDERR.reopen("err", "w"); IO.new(ARGV[0].to_i).puts("mi")', w.fileno.to_s, :close_others=>true)
+        Process.wait spawn(RUBY, '-e', 'STDERR.reopen("err", "w"); IO.new(ARGV[0].to_i, "w").puts("mi")', w.fileno.to_s, :close_others=>true)
         w.close
         assert_equal("", r.read)
         assert_not_equal("", File.read("err"))
         File.unlink("err")
       }
       with_pipe {|r, w|
-        Process.wait spawn(RUBY, '-e', 'IO.new(ARGV[0].to_i).puts("bi")', w.fileno.to_s, :close_others=>false)
+        Process.wait spawn(RUBY, '-e', 'IO.new(ARGV[0].to_i, "w").puts("bi")', w.fileno.to_s, :close_others=>false)
         w.close
         assert_equal("bi\n", r.read)
       }
       with_pipe {|r, w|
 	write_file("s", <<-"End")
 	  exec(#{RUBY.dump}, '-e',
-	       'STDERR.reopen("err", "w"); IO.new(ARGV[0].to_i).puts("mu")',
+	       'STDERR.reopen("err", "w"); IO.new(ARGV[0].to_i, "w").puts("mu")',
 	       #{w.fileno.to_s.dump},
 	       :close_others=>true)
 	End
@@ -572,7 +627,7 @@ class TestProcess < Test::Unit::TestCase
         File.unlink("err")
       }
       with_pipe {|r, w|
-        io = IO.popen([RUBY, "-e", "STDERR.reopen(STDOUT); IO.new(#{w.fileno}).puts('me')", :close_others=>true])
+        io = IO.popen([RUBY, "-e", "STDERR.reopen(STDOUT); IO.new(#{w.fileno}, 'w').puts('me')", :close_others=>true])
         w.close
         errmsg = io.read
         assert_equal("", r.read)
@@ -580,7 +635,7 @@ class TestProcess < Test::Unit::TestCase
         Process.wait
       }
       with_pipe {|r, w|
-        io = IO.popen([RUBY, "-e", "STDERR.reopen(STDOUT); IO.new(#{w.fileno}).puts('mo')", :close_others=>false])
+        io = IO.popen([RUBY, "-e", "STDERR.reopen(STDOUT); IO.new(#{w.fileno}, 'w').puts('mo')", :close_others=>false])
         w.close
         errmsg = io.read
         assert_equal("mo\n", r.read)
@@ -588,7 +643,7 @@ class TestProcess < Test::Unit::TestCase
         Process.wait
       }
       with_pipe {|r, w|
-        io = IO.popen([RUBY, "-e", "STDERR.reopen(STDOUT); IO.new(#{w.fileno}).puts('mo')", :close_others=>nil])
+        io = IO.popen([RUBY, "-e", "STDERR.reopen(STDOUT); IO.new(#{w.fileno}, 'w').puts('mo')", :close_others=>nil])
         w.close
         errmsg = io.read
         assert_equal("mo\n", r.read)
@@ -605,7 +660,7 @@ class TestProcess < Test::Unit::TestCase
         w << "haha\n"
         w.close
         r.close_on_exec = true
-        IO.popen([RUBY, "-e", "print IO.new(#{r.fileno}).read", r.fileno=>r.fileno, :close_others=>false]) {|io|
+        IO.popen([RUBY, "-e", "print IO.new(#{r.fileno}, 'r').read", r.fileno=>r.fileno, :close_others=>false]) {|io|
           assert_equal("haha\n", io.read)
         }
       }
@@ -653,22 +708,17 @@ class TestProcess < Test::Unit::TestCase
 
   def test_exec_noshell
     with_tmpchdir {|d|
-      with_pipe {|r, w|
-	write_file("s", <<-"End")
+      write_file("s", <<-"End")
 	  str = "echo non existing command name which contains spaces"
-	  w = IO.new(#{w.fileno})
-	  STDOUT.reopen(w)
-	  STDERR.reopen(w)
+	  STDERR.reopen(STDOUT)
 	  begin
 	    exec [str, str]
 	  rescue Errno::ENOENT
-	    w.write "Errno::ENOENT success"
+	    print "Errno::ENOENT success"
 	  end
 	End
-	system(RUBY, "s", :close_others=>false)
-	w.close
-	assert_equal("Errno::ENOENT success", r.read)
-      }
+      r = IO.popen([RUBY, "s", :close_others=>false], "r") {|f| f.read}
+      assert_equal("Errno::ENOENT success", r)
     }
   end
 
@@ -774,6 +824,15 @@ class TestProcess < Test::Unit::TestCase
       assert_match(/\Ataka pid=\d+ ppid=\d+\z/, result1)
       assert_match(/\Ataki pid=\d+ ppid=\d+\z/, result2)
       assert_not_equal(result1[/\d+/].to_i, status.pid)
+
+      if /mswin|bccwin|mingw/ =~ RUBY_PLATFORM
+        Dir.mkdir(path = "path with space")
+        write_file(bat = path + "/bat test.bat", "@echo %1>out")
+        system(bat, "foo 'bar'")
+        assert_equal(%["foo 'bar'"\n], File.read("out"), '[ruby-core:22960]')
+        system(%[#{bat.dump} "foo 'bar'"])
+        assert_equal(%["foo 'bar'"\n], File.read("out"), '[ruby-core:22960]')
+      end
     }
   end
 
@@ -797,6 +856,23 @@ class TestProcess < Test::Unit::TestCase
       assert_match(/\Ataku pid=\d+ ppid=\d+\z/, result1)
       assert_match(/\Atake pid=\d+ ppid=\d+\z/, result2)
       assert_not_equal(result1[/\d+/].to_i, status.pid)
+
+      if /mswin|bccwin|mingw/ =~ RUBY_PLATFORM
+        Dir.mkdir(path = "path with space")
+        write_file(bat = path + "/bat test.bat", "@echo %1>out")
+        pid = spawn(bat, "foo 'bar'")
+        Process.wait pid
+        status = $?
+        assert(status.exited?)
+        assert(status.success?)
+        assert_equal(%["foo 'bar'"\n], File.read("out"), '[ruby-core:22960]')
+        pid = spawn(%[#{bat.dump} "foo 'bar'"])
+        Process.wait pid
+        status = $?
+        assert(status.exited?)
+        assert(status.success?)
+        assert_equal(%["foo 'bar'"\n], File.read("out"), '[ruby-core:22960]')
+      end
     }
   end
 
@@ -818,6 +894,15 @@ class TestProcess < Test::Unit::TestCase
       assert(!status.success?)
       assert_match(/\Atako pid=\d+ ppid=\d+\ntika pid=\d+ ppid=\d+\n\z/, result)
       assert_not_equal(result[/\d+/].to_i, status.pid)
+
+      if /mswin|bccwin|mingw/ =~ RUBY_PLATFORM
+        Dir.mkdir(path = "path with space")
+        write_file(bat = path + "/bat test.bat", "@echo %1")
+        r = IO.popen([bat, "foo 'bar'"]) {|f| f.read}
+        assert_equal(%["foo 'bar'"\n], r, '[ruby-core:22960]')
+        r = IO.popen(%[#{bat.dump} "foo 'bar'"]) {|f| f.read}
+        assert_equal(%["foo 'bar'"\n], r, '[ruby-core:22960]')
+      end
     }
   end
 
@@ -1043,5 +1128,24 @@ class TestProcess < Test::Unit::TestCase
 
   def test_pst_inspect
     assert_nothing_raised { Process::Status.allocate.inspect }
+  end
+
+  def test_wait_and_sigchild
+    signal_received = []
+    Signal.trap(:CHLD)  { signal_received << true }
+    pid = fork { sleep 1; exit }
+    Thread.start { raise }
+    Process.wait pid
+    5.times do
+      sleep 1
+      break unless signal_received.empty?
+    end
+    assert_equal [true], signal_received, " [ruby-core:19744]"
+  rescue NotImplementedError, ArgumentError
+  ensure
+    begin
+      Signal.trap(:CHLD, 'DEFAULT')
+    rescue ArgumentError
+    end
   end
 end

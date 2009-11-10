@@ -59,3 +59,20 @@ assert_equal 'okok', %q{
   [t1.value, t2.value].join
 }
 
+assert_finish 5, %q{
+  autoload :ZZZ, File.expand_path(__FILE__)
+  begin
+    ZZZ
+  rescue NameError
+  end
+}, '[ruby-core:21696]'
+
+assert_equal 'A::C', %q{
+  open("zzz.rb", "w") {}
+  class A
+    autoload :C, "./zzz"
+    class C
+    end
+    C
+  end
+}

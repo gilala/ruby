@@ -1,4 +1,5 @@
 #! /usr/bin/env ruby
+# -*- coding: us-ascii -*-
 
 $testnum=0
 $ntest=0
@@ -660,10 +661,12 @@ begin
     raise $string
   end
   test_ok(false)
-rescue
-  test_ok(true) if $! == $string
+rescue => e
+  test_ok($! == e)
+  test_ok(e.message == $string)
+  test_ok(e != $string)
 end
-  
+
 # exception in ensure clause
 begin
   begin
@@ -1927,11 +1930,12 @@ end
 
 def valid_syntax?(code, fname)
   p fname
-  code.force_encoding("ascii-8bit")
-  code = code.sub(/\A(?:\s*\#.*$)*(\n)?/n) {
-    "#$&#{"\n" if $1 && !$2}BEGIN{return true}\n"
+  code = code.dup.force_encoding("ascii-8bit")
+  code.sub!(/\A(?:\xef\xbb\xbf)?(\s*\#.*$)*(\n)?/n) {
+    "#$&#{"\n" if $1 && !$2}BEGIN{throw tag, :ok}\n"
   }
-  eval(code, nil, fname, 0)
+  code.force_encoding("us-ascii")
+  catch {|tag| eval(code, binding, fname, 0)}
 rescue Exception
   STDERR.puts $!.message
   false

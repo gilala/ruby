@@ -96,6 +96,8 @@ module MiniTest
 
     def assert_includes collection, obj, msg = nil
       msg = message(msg) { "Expected #{mu_pp(collection)} to include #{mu_pp(obj)}" }
+      flip = (obj.respond_to? :include?) && ! (collection.respond_to? :include?) # HACK for specs
+      obj, collection = collection, obj if flip
       assert_respond_to collection, :include?
       assert collection.include?(obj), msg
     end
@@ -104,7 +106,7 @@ module MiniTest
       msg = message(msg) { "Expected #{mu_pp(obj)} to be an instance of #{cls}, not #{obj.class}" }
       flip = (Module === obj) && ! (Module === cls) # HACK for specs
       obj, cls = cls, obj if flip
-      assert cls === obj, msg
+      assert obj.instance_of?(cls), msg
     end
 
     def assert_kind_of cls, obj, msg = nil # TODO: merge with instance_of
@@ -116,10 +118,10 @@ module MiniTest
     end
 
     def assert_match exp, act, msg = nil
-      msg = message(msg) { "Expected #{mu_pp(act)} to match #{mu_pp(exp)}" }
+      msg = message(msg) { "Expected #{mu_pp(exp)} to match #{mu_pp(act)}" }
       assert_respond_to act, :"=~"
-      (exp = /#{exp}/) if String === exp && String === act
-      assert act =~ exp, msg
+      exp = /#{Regexp.escape(exp)}/ if String === exp && String === act
+      assert exp =~ act, msg
     end
 
     def assert_nil obj, msg = nil
@@ -261,6 +263,8 @@ module MiniTest
 
     def refute_includes collection, obj, msg = nil
       msg = message(msg) { "Expected #{mu_pp(collection)} to not include #{mu_pp(obj)}" }
+      flip = (obj.respond_to? :include?) && ! (collection.respond_to? :include?) # HACK for specs
+      obj, collection = collection, obj if flip
       assert_respond_to collection, :include?
       refute collection.include?(obj), msg
     end
@@ -269,7 +273,7 @@ module MiniTest
       msg = message(msg) { "Expected #{mu_pp(obj)} to not be an instance of #{cls}" }
       flip = (Module === obj) && ! (Module === cls) # HACK for specs
       obj, cls = cls, obj if flip
-      refute cls === obj, msg
+      refute obj.instance_of?(cls), msg
     end
 
     def refute_kind_of cls, obj, msg = nil # TODO: merge with instance_of
@@ -280,8 +284,10 @@ module MiniTest
     end
 
     def refute_match exp, act, msg = nil
-      msg = message(msg) { "Expected #{mu_pp(act)} to not match #{mu_pp(exp)}" }
-      refute act =~ exp, msg
+      msg = message(msg) { "Expected #{mu_pp(exp)} to not match #{mu_pp(act)}" }
+      assert_respond_to act, :"=~"
+      exp = /#{Regexp.escape(exp)}/ if String === exp && String === act
+      refute exp =~ act, msg
     end
 
     def refute_nil obj, msg = nil
@@ -313,24 +319,22 @@ module MiniTest
   end
 
   class Unit
-    VERSION = "1.3.1"
+    VERSION = "1.4.2"
 
     attr_accessor :report, :failures, :errors, :skips
     attr_accessor :test_count, :assertion_count
+    attr_accessor :start_time
 
     @@installed_at_exit ||= false
     @@out = $stdout
 
-    def self.disable_autorun
-      @@installed_at_exit = true
-    end
-
     def self.autorun
       at_exit {
+        next if $! # don't run if there was an exception
         exit_code = MiniTest::Unit.new.run(ARGV)
         exit false if exit_code && exit_code != 0
       } unless @@installed_at_exit
-      disable_autorun
+      @@installed_at_exit = true
     end
 
     def self.output= stream
@@ -338,9 +342,12 @@ module MiniTest
     end
 
     def location e
-      e.backtrace.find { |s|
-        s !~ /in .(assert|refute|flunk|pass|fail|raise)/
-      }.sub(/:in .*$/, '')
+      last_before_assertion = ""
+      e.backtrace.reverse_each do |s|
+        break if s =~ /in .(assert|refute|flunk|pass|fail|raise|must|wont)/
+        last_before_assertion = s
+      end
+      last_before_assertion.sub(/:in .*$/, '')
     end
 
     def puke klass, meth, e
@@ -394,10 +401,16 @@ module MiniTest
 
       @@out.puts
 
-      format = "%d tests, %d assertions, %d failures, %d errors, %d skips"
-      @@out.puts format % [test_count, assertion_count, failures, errors, skips]
+      status
 
       return failures + errors if @test_count > 0 # or return nil...
+    rescue Interrupt
+      abort 'Interrupted'
+    end
+
+    def status io = @@out
+      format = "%d tests, %d assertions, %d failures, %d errors, %d skips"
+      io.puts format % [test_count, assertion_count, failures, errors, skips]
     end
 
     def run_test_suites filter = /./
@@ -409,10 +422,10 @@ module MiniTest
           inst._assertions = 0
           @@out.print "#{suite}##{test}: " if @verbose
 
-          t = Time.now if @verbose
+          @start_time = Time.now
           result = inst.run(self)
 
-          @@out.print "%.2f s: " % (Time.now - t) if @verbose
+          @@out.print "%.2f s: " % (Time.now - @start_time) if @verbose
           @@out.print result
           @@out.puts if @verbose
           @test_count += 1
@@ -424,30 +437,46 @@ module MiniTest
     end
 
     class TestCase
-      attr_reader :name
+      attr_reader :__name__
+
+      PASSTHROUGH_EXCEPTIONS = [NoMemoryError, SignalException, Interrupt,
+        SystemExit]
+
+      SUPPORTS_INFO_SIGNAL = Signal.list['INFO']
 
       def run runner
+        trap 'INFO' do
+          warn '%s#%s %.2fs' % [self.class, self.__name__,
+            (Time.now - runner.start_time)]
+          runner.status $stderr
+        end if SUPPORTS_INFO_SIGNAL
+
         result = '.'
         begin
           @passed = nil
           self.setup
-          self.__send__ self.name
+          self.__send__ self.__name__
           @passed = true
+        rescue *PASSTHROUGH_EXCEPTIONS
+          raise
         rescue Exception => e
           @passed = false
-          result = runner.puke(self.class, self.name, e)
+          result = runner.puke(self.class, self.__name__, e)
         ensure
           begin
             self.teardown
+          rescue *PASSTHROUGH_EXCEPTIONS
+            raise
           rescue Exception => e
-            result = runner.puke(self.class, self.name, e)
+            result = runner.puke(self.class, self.__name__, e)
           end
+          trap 'INFO', 'DEFAULT' if SUPPORTS_INFO_SIGNAL
         end
         result
       end
 
       def initialize name
-        @name = name
+        @__name__ = name
         @passed = nil
       end
 
@@ -493,3 +522,15 @@ module MiniTest
     end # class TestCase
   end # class Test
 end # module Mini
+
+if $DEBUG then
+  # this helps me ferret out porting issues
+  module Test; end
+  module Test::Unit; end
+  class Test::Unit::TestCase
+    def self.inherited x
+      raise "You're running minitest and test/unit in the same process: #{x}"
+    end
+  end
+end
+

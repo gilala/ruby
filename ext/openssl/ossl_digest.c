@@ -38,7 +38,7 @@ GetDigestPtr(VALUE obj)
     const EVP_MD *md;
 
     if (TYPE(obj) == T_STRING) {
-    	const char *name = STR2CSTR(obj);
+    	const char *name = StringValueCStr(obj);
 
         md = EVP_get_digestbyname(name);
         if (!md)
@@ -233,7 +233,6 @@ ossl_digest_block_length(VALUE self)
 void
 Init_ossl_digest()
 {
-    rb_require("openssl");
     rb_require("digest");
 
 #if 0 /* let rdoc know about mOSSL */

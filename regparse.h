@@ -306,6 +306,9 @@ typedef struct {
   int curr_max_regnum;
   int has_recursion;
 #endif
+  int warnings_flag;
+  const char* sourcefile;
+  int sourceline;
 } ScanEnv;
 
 

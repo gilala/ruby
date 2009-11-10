@@ -9,338 +9,478 @@
 
 VALUE rb_cDLCPtr;
 
+static inline freefunc_t
+get_freefunc(VALUE func)
+{
+    if (NIL_P(func)) {
+	return NULL;
+    }
+    if (rb_dlcfunc_kind_p(func)) {
+	return RCFUNC_DATA(func)->ptr;
+    }
+    return NUM2PTR(rb_Integer(func));
+}
+
 static ID id_to_ptr;
 
 static void
-dlptr_free(struct ptr_data *data)
+dlptr_free(void *ptr)
 {
-  if (data->ptr) {
-      if (data->free) {
-	  (*(data->free))(data->ptr);
-      }
-  }
+    struct ptr_data *data = ptr;
+    if (data->ptr) {
+	if (data->free) {
+	    (*(data->free))(data->ptr);
+	}
+    }
 }
 
-static void
-dlptr_mark(struct ptr_data *data)
+static size_t
+dlptr_memsize(const void *ptr)
 {
+    const struct ptr_data *data = ptr;
+    return data ? sizeof(*data) + data->size : 0;
 }
+
+static const rb_data_type_t dlptr_data_type = {
+    "dl/ptr",
+    0, dlptr_free, dlptr_memsize,
+};
 
 void
 dlptr_init(VALUE val)
 {
-  struct ptr_data *data;
+    struct ptr_data *data;
 
-  Data_Get_Struct(val, struct ptr_data, data);
-  OBJ_TAINT(val);
+    TypedData_Get_Struct(val, struct ptr_data, &dlptr_data_type, data);
+    OBJ_TAINT(val);
 }
 
 VALUE
 rb_dlptr_new2(VALUE klass, void *ptr, long size, freefunc_t func)
 {
-  struct ptr_data *data;
-  VALUE val;
+    struct ptr_data *data;
+    VALUE val;
 
-  rb_secure(4);
-  val = Data_Make_Struct(klass, struct ptr_data,
-			 0, dlptr_free, data);
-  data->ptr = ptr;
-  data->free = func;
-  data->size = size;
-  dlptr_init(val);
+    rb_secure(4);
+    val = TypedData_Make_Struct(klass, struct ptr_data, &dlptr_data_type, data);
+    data->ptr = ptr;
+    data->free = func;
+    data->size = size;
+    dlptr_init(val);
 
-  return val;
+    return val;
 }
 
 VALUE
 rb_dlptr_new(void *ptr, long size, freefunc_t func)
 {
-  return rb_dlptr_new2(rb_cDLCPtr, ptr, size, func);
+    return rb_dlptr_new2(rb_cDLCPtr, ptr, size, func);
 }
 
 VALUE
 rb_dlptr_malloc(long size, freefunc_t func)
 {
-  void *ptr;
+    void *ptr;
 
-  rb_secure(4);
-  ptr = ruby_xmalloc((size_t)size);
-  memset(ptr,0,(size_t)size);
-  return rb_dlptr_new(ptr, size, func);
+    rb_secure(4);
+    ptr = ruby_xmalloc((size_t)size);
+    memset(ptr,0,(size_t)size);
+    return rb_dlptr_new(ptr, size, func);
 }
 
 void *
 rb_dlptr2cptr(VALUE val)
 {
-  struct ptr_data *data;
-  void *ptr;
+    struct ptr_data *data;
+    void *ptr;
 
-  if (rb_obj_is_kind_of(val, rb_cDLCPtr)) {
-    Data_Get_Struct(val, struct ptr_data, data);
-    ptr = data->ptr;
-  }
-  else if (val == Qnil) {
-    ptr = NULL;
-  }
-  else{
-    rb_raise(rb_eTypeError, "DL::PtrData was expected");
-  }
+    if (rb_obj_is_kind_of(val, rb_cDLCPtr)) {
+	TypedData_Get_Struct(val, struct ptr_data, &dlptr_data_type, data);
+	ptr = data->ptr;
+    }
+    else if (val == Qnil) {
+	ptr = NULL;
+    }
+    else{
+	rb_raise(rb_eTypeError, "DL::PtrData was expected");
+    }
     
-  return ptr;
+    return ptr;
 }
 
 static VALUE
 rb_dlptr_s_allocate(VALUE klass)
 {
-  VALUE obj;
-  struct ptr_data *data;
+    VALUE obj;
+    struct ptr_data *data;
 
-  rb_secure(4);
-  obj = Data_Make_Struct(klass, struct ptr_data, dlptr_mark, dlptr_free, data);
-  data->ptr = 0;
-  data->size = 0;
-  data->free = 0;
+    rb_secure(4);
+    obj = TypedData_Make_Struct(klass, struct ptr_data, &dlptr_data_type, data);
+    data->ptr = 0;
+    data->size = 0;
+    data->free = 0;
 
-  return obj;
+    return obj;
 }
 
+/*
+ * call-seq:
+ *    DL::CPtr.new(address)                   => dl_cptr
+ *    DL::CPtr.new(address, size)             => dl_cptr
+ *    DL::CPtr.new(address, size, freefunc)   => dl_cptr
+ *
+ * Create a new pointer to +address+ with an optional +size+ and +freefunc+.
+ * +freefunc+ will be called when the instance is garbage collected.
+ */
 static VALUE
 rb_dlptr_initialize(int argc, VALUE argv[], VALUE self)
 {
-  VALUE ptr, sym, size;
-  struct ptr_data *data;
-  void *p = NULL;
-  freefunc_t f = NULL;
-  long s = 0;
+    VALUE ptr, sym, size;
+    struct ptr_data *data;
+    void *p = NULL;
+    freefunc_t f = NULL;
+    long s = 0;
 
-  switch (rb_scan_args(argc, argv, "12", &ptr, &size, &sym)) {
-  case 1:
-    p = (void*)(NUM2PTR(rb_Integer(ptr)));
-    break;
-  case 2:
-    p = (void*)(NUM2PTR(rb_Integer(ptr)));
-    s = NUM2LONG(size);
-    break;
-  case 3:
-    p = (void*)(NUM2PTR(rb_Integer(ptr)));
-    s = NUM2LONG(size);
-    f = NIL_P(sym) ? NULL : RCFUNC_DATA(sym)->ptr;
-    break;
-  default:
-    rb_bug("rb_dlptr_initialize");
-  }
-
-  if (p) {
-    Data_Get_Struct(self, struct ptr_data, data);
-    if (data->ptr && data->free) {
-      /* Free previous memory. Use of inappropriate initialize may cause SEGV. */
-      (*(data->free))(data->ptr);
+    switch (rb_scan_args(argc, argv, "12", &ptr, &size, &sym)) {
+      case 1:
+	p = (void*)(NUM2PTR(rb_Integer(ptr)));
+	break;
+      case 2:
+	p = (void*)(NUM2PTR(rb_Integer(ptr)));
+	s = NUM2LONG(size);
+	break;
+      case 3:
+	p = (void*)(NUM2PTR(rb_Integer(ptr)));
+	s = NUM2LONG(size);
+	f = get_freefunc(sym);
+	break;
+      default:
+	rb_bug("rb_dlptr_initialize");
     }
-    data->ptr  = p;
-    data->size = s;
-    data->free = f;
-  }
 
-  return Qnil;
+    if (p) {
+	TypedData_Get_Struct(self, struct ptr_data, &dlptr_data_type, data);
+	if (data->ptr && data->free) {
+	    /* Free previous memory. Use of inappropriate initialize may cause SEGV. */
+	    (*(data->free))(data->ptr);
+	}
+	data->ptr  = p;
+	data->size = s;
+	data->free = f;
+    }
+
+    return Qnil;
 }
 
+/*
+ * call-seq:
+ *
+ *    DL::CPtr.malloc(size, freefunc = nil)  => dl cptr instance
+ *
+ * Allocate +size+ bytes of memory and associate it with an optional
+ * +freefunc+ that will be called when the pointer is garbage collected.
+ * +freefunc+ must be an address pointing to a function or an instance of
+ * DL::CFunc
+ */
 static VALUE
 rb_dlptr_s_malloc(int argc, VALUE argv[], VALUE klass)
 {
-  VALUE size, sym, obj;
-  int   s;
-  freefunc_t f;
+    VALUE size, sym, obj;
+    int   s;
+    freefunc_t f;
 
-  switch (rb_scan_args(argc, argv, "11", &size, &sym)) {
-  case 1:
-    s = NUM2LONG(size);
-    f = NULL;
-    break;
-  case 2:
-    s = NUM2LONG(size);
-    f = RCFUNC_DATA(sym)->ptr;
-    break;
-  default:
-    rb_bug("rb_dlptr_s_malloc");
-  }
+    switch (rb_scan_args(argc, argv, "11", &size, &sym)) {
+      case 1:
+	s = NUM2LONG(size);
+	f = NULL;
+	break;
+      case 2:
+	s = NUM2LONG(size);
+	f = get_freefunc(sym);
+	break;
+      default:
+	rb_bug("rb_dlptr_s_malloc");
+    }
 
-  obj = rb_dlptr_malloc(s,f);
+    obj = rb_dlptr_malloc(s,f);
 
-  return obj;
+    return obj;
 }
 
-VALUE
+/*
+ * call-seq: to_i
+ *
+ * Returns the integer memory location of this DL::CPtr.
+ */
+static VALUE
 rb_dlptr_to_i(VALUE self)
 {
-  struct ptr_data *data;
+    struct ptr_data *data;
 
-  Data_Get_Struct(self, struct ptr_data, data);
-  return PTR2NUM(data->ptr);
+    TypedData_Get_Struct(self, struct ptr_data, &dlptr_data_type, data);
+    return PTR2NUM(data->ptr);
 }
 
-VALUE
+/*
+ * call-seq: to_value
+ *
+ * Cast this CPtr to a ruby object.
+ */
+static VALUE
 rb_dlptr_to_value(VALUE self)
 {
     struct ptr_data *data;
-    Data_Get_Struct(self, struct ptr_data, data);
+    TypedData_Get_Struct(self, struct ptr_data, &dlptr_data_type, data);
     return (VALUE)(data->ptr);
 }
 
+/*
+ * call-seq: ptr
+ *
+ * Returns a DL::CPtr that is a dereferenced pointer for this DL::CPtr.
+ * Analogous to the star operator in C.
+ */
 VALUE
 rb_dlptr_ptr(VALUE self)
 {
-  struct ptr_data *data;
+    struct ptr_data *data;
 
-  Data_Get_Struct(self, struct ptr_data, data);
-  return rb_dlptr_new(*((void**)(data->ptr)),0,0);
+    TypedData_Get_Struct(self, struct ptr_data, &dlptr_data_type, data);
+    return rb_dlptr_new(*((void**)(data->ptr)),0,0);
 }
 
+/*
+ * call-seq: ref
+ *
+ * Returns a DL::CPtr that is a reference pointer for this DL::CPtr.
+ * Analogous to the ampersand operator in C.
+ */
 VALUE
 rb_dlptr_ref(VALUE self)
 {
-  struct ptr_data *data;
+    struct ptr_data *data;
 
-  Data_Get_Struct(self, struct ptr_data, data);
-  return rb_dlptr_new(&(data->ptr),0,0);
+    TypedData_Get_Struct(self, struct ptr_data, &dlptr_data_type, data);
+    return rb_dlptr_new(&(data->ptr),0,0);
 }
 
+/*
+ * call-seq: null?
+ *
+ * Returns true if this is a null pointer.
+ */
 VALUE
 rb_dlptr_null_p(VALUE self)
 {
-  struct ptr_data *data;
+    struct ptr_data *data;
 
-  Data_Get_Struct(self, struct ptr_data, data);
-  return data->ptr ? Qfalse : Qtrue;
+    TypedData_Get_Struct(self, struct ptr_data, &dlptr_data_type, data);
+    return data->ptr ? Qfalse : Qtrue;
 }
 
-VALUE
+/*
+ * call-seq: free=(function)
+ *
+ * Set the free function for this pointer to the DL::CFunc in +function+.
+ */
+static VALUE
 rb_dlptr_free_set(VALUE self, VALUE val)
 {
-  struct ptr_data *data;
-  extern VALUE rb_cDLCFunc;
+    struct ptr_data *data;
 
-  Data_Get_Struct(self, struct ptr_data, data);
-  if( rb_obj_is_kind_of(val, rb_cDLCFunc) == Qtrue ){
-      data->free = RCFUNC_DATA(val)->ptr;
-  }
-  else{
-      data->free = NUM2PTR(rb_Integer(val));
-  }
+    TypedData_Get_Struct(self, struct ptr_data, &dlptr_data_type, data);
+    data->free = get_freefunc(val);
 
-  return Qnil;
+    return Qnil;
 }
 
-VALUE
+/*
+ * call-seq: free
+ *
+ * Get the free function for this pointer.  Returns  DL::CFunc or nil.
+ */
+static VALUE
 rb_dlptr_free_get(VALUE self)
 {
-  struct ptr_data *pdata;
+    struct ptr_data *pdata;
 
-  Data_Get_Struct(self, struct ptr_data, pdata);
+    TypedData_Get_Struct(self, struct ptr_data, &dlptr_data_type, pdata);
 
-  return rb_dlcfunc_new(pdata->free, DLTYPE_VOID, "free<anonymous>", CFUNC_CDECL);
+    return rb_dlcfunc_new(pdata->free, DLTYPE_VOID, "free<anonymous>", CFUNC_CDECL);
 }
 
-VALUE
+/*
+ * call-seq:
+ *
+ *    ptr.to_s        => string
+ *    ptr.to_s(len)   => string
+ *
+ * Returns the pointer contents as a string.  When called with no arguments,
+ * this method will return the contents until the first NULL byte.  When
+ * called with +len+, a string of +len+ bytes will be returned.
+ */
+static VALUE
 rb_dlptr_to_s(int argc, VALUE argv[], VALUE self)
 {
-  struct ptr_data *data;
-  VALUE arg1, val;
-  int len;
+    struct ptr_data *data;
+    VALUE arg1, val;
+    int len;
 
-  Data_Get_Struct(self, struct ptr_data, data);
-  switch (rb_scan_args(argc, argv, "01", &arg1)) {
-  case 0:
-    val = rb_tainted_str_new2((char*)(data->ptr));
-    break;
-  case 1:
-    len = NUM2INT(arg1);
-    val = rb_tainted_str_new((char*)(data->ptr), len);
-    break;
-  default:
-    rb_bug("rb_dlptr_to_s");
-  }
+    TypedData_Get_Struct(self, struct ptr_data, &dlptr_data_type, data);
+    switch (rb_scan_args(argc, argv, "01", &arg1)) {
+      case 0:
+	val = rb_tainted_str_new2((char*)(data->ptr));
+	break;
+      case 1:
+	len = NUM2INT(arg1);
+	val = rb_tainted_str_new((char*)(data->ptr), len);
+	break;
+      default:
+	rb_bug("rb_dlptr_to_s");
+    }
 
-  return val;
+    return val;
 }
 
-VALUE
+/*
+ * call-seq:
+ *
+ *    ptr.to_str        => string
+ *    ptr.to_str(len)   => string
+ *
+ * Returns the pointer contents as a string.  When called with no arguments,
+ * this method will return the contents with the length of this pointer's
+ * +size+. When called with +len+, a string of +len+ bytes will be returned.
+ */
+static VALUE
 rb_dlptr_to_str(int argc, VALUE argv[], VALUE self)
 {
-  struct ptr_data *data;
-  VALUE arg1, val;
-  int len;
+    struct ptr_data *data;
+    VALUE arg1, val;
+    int len;
 
-  Data_Get_Struct(self, struct ptr_data, data);
-  switch (rb_scan_args(argc, argv, "01", &arg1)) {
-  case 0:
-    val = rb_tainted_str_new((char*)(data->ptr),data->size);
-    break;
-  case 1:
-    len = NUM2INT(arg1);
-    val = rb_tainted_str_new((char*)(data->ptr), len);
-    break;
-  default:
-    rb_bug("rb_dlptr_to_str");
-  }
+    TypedData_Get_Struct(self, struct ptr_data, &dlptr_data_type, data);
+    switch (rb_scan_args(argc, argv, "01", &arg1)) {
+      case 0:
+	val = rb_tainted_str_new((char*)(data->ptr),data->size);
+	break;
+      case 1:
+	len = NUM2INT(arg1);
+	val = rb_tainted_str_new((char*)(data->ptr), len);
+	break;
+      default:
+	rb_bug("rb_dlptr_to_str");
+    }
 
-  return val;
+    return val;
 }
 
-VALUE
+/*
+ * call-seq: inspect
+ *
+ * Returns a string formatted with an easily readable representation of the
+ * internal state of the DL::CPtr
+ */
+static VALUE
 rb_dlptr_inspect(VALUE self)
 {
-  struct ptr_data *data;
-  char str[1024];
+    struct ptr_data *data;
+    char str[1024];
 
-  Data_Get_Struct(self, struct ptr_data, data);
-  snprintf(str, 1023, "#<%s:%p ptr=%p size=%ld free=%p>",
-	   rb_class2name(CLASS_OF(self)), data, data->ptr, data->size, data->free);
-  return rb_str_new2(str);
+    TypedData_Get_Struct(self, struct ptr_data, &dlptr_data_type, data);
+    snprintf(str, 1023, "#<%s:%p ptr=%#lx size=%ld free=%#lx>",
+	     rb_class2name(CLASS_OF(self)), data, data->ptr, data->size, data->free);
+    return rb_str_new2(str);
 }
 
+/*
+ *  call-seq:
+ *    ptr == other    => true or false
+ *    ptr.eql?(other) => true or false
+ *
+ * Returns true if +other+ wraps the same pointer, otherwise returns
+ * false.
+ */
 VALUE
 rb_dlptr_eql(VALUE self, VALUE other)
 {
-  void *ptr1, *ptr2;
-  ptr1 = rb_dlptr2cptr(self);
-  ptr2 = rb_dlptr2cptr(other);
+    void *ptr1, *ptr2;
 
-  return ptr1 == ptr2 ? Qtrue : Qfalse;
+    if(!rb_obj_is_kind_of(other, rb_cDLCPtr)) return Qfalse;
+
+    ptr1 = rb_dlptr2cptr(self);
+    ptr2 = rb_dlptr2cptr(other);
+
+    return ptr1 == ptr2 ? Qtrue : Qfalse;
 }
 
-VALUE
+/*
+ *  call-seq:
+ *    ptr <=> other   => -1, 0, 1, or nil
+ *
+ * Returns -1 if less than, 0 if equal to, 1 if greater than +other+.  Returns
+ * nil if +ptr+ cannot be compared to +other+.
+ */
+static VALUE
 rb_dlptr_cmp(VALUE self, VALUE other)
 {
-  void *ptr1, *ptr2;
-  ptr1 = rb_dlptr2cptr(self);
-  ptr2 = rb_dlptr2cptr(other);
-  return PTR2NUM((long)ptr1 - (long)ptr2);
+    void *ptr1, *ptr2;
+    SIGNED_VALUE diff;
+
+    if(!rb_obj_is_kind_of(other, rb_cDLCPtr)) return Qnil;
+
+    ptr1 = rb_dlptr2cptr(self);
+    ptr2 = rb_dlptr2cptr(other);
+    diff = (SIGNED_VALUE)ptr1 - (SIGNED_VALUE)ptr2;
+    if (!diff) return INT2FIX(0);
+    return diff > 0 ? INT2NUM(1) : INT2NUM(-1);
 }
 
-VALUE
+/*
+ * call-seq:
+ *    ptr + n   => new cptr
+ *
+ * Returns a new DL::CPtr that has been advanced +n+ bytes.
+ */
+static VALUE
 rb_dlptr_plus(VALUE self, VALUE other)
 {
-  void *ptr;
-  long num, size;
+    void *ptr;
+    long num, size;
 
-  ptr = rb_dlptr2cptr(self);
-  size = RPTR_DATA(self)->size;
-  num = NUM2LONG(other);
-  return rb_dlptr_new((char *)ptr + num, size - num, 0);
+    ptr = rb_dlptr2cptr(self);
+    size = RPTR_DATA(self)->size;
+    num = NUM2LONG(other);
+    return rb_dlptr_new((char *)ptr + num, size - num, 0);
 }
 
-VALUE
+/*
+ * call-seq:
+ *    ptr - n   => new cptr
+ *
+ * Returns a new DL::CPtr that has been moved back +n+ bytes.
+ */
+static VALUE
 rb_dlptr_minus(VALUE self, VALUE other)
 {
-  void *ptr;
-  long num, size;
+    void *ptr;
+    long num, size;
 
-  ptr = rb_dlptr2cptr(self);
-  size = RPTR_DATA(self)->size;
-  num = NUM2LONG(other);
-  return rb_dlptr_new((char *)ptr - num, size + num, 0);
+    ptr = rb_dlptr2cptr(self);
+    size = RPTR_DATA(self)->size;
+    num = NUM2LONG(other);
+    return rb_dlptr_new((char *)ptr - num, size + num, 0);
 }
 
+/*
+ *  call-seq:
+ *     ptr[index]                -> an_integer
+ *     ptr[start, length]        -> a_string
+ *
+ * Returns integer stored at _index_.  If _start_ and _length_ are given,
+ * a string containing the bytes from _start_ of length _length_ will be
+ * returned.
+ */
 VALUE
 rb_dlptr_aref(int argc, VALUE argv[], VALUE self)
 {
@@ -349,21 +489,30 @@ rb_dlptr_aref(int argc, VALUE argv[], VALUE self)
     size_t offset, len;
 
     switch( rb_scan_args(argc, argv, "11", &arg0, &arg1) ){
-    case 1:
+      case 1:
 	offset = NUM2ULONG(arg0);
 	retval = INT2NUM(*((char*)RPTR_DATA(self)->ptr + offset));
 	break;
-    case 2:
+      case 2:
 	offset = NUM2ULONG(arg0);
 	len    = NUM2ULONG(arg1);
 	retval = rb_tainted_str_new((char *)RPTR_DATA(self)->ptr + offset, len);
 	break;
-    default:
+      default:
 	rb_bug("rb_dlptr_aref()");
     }
     return retval;
 }
 
+/*
+ *  call-seq:
+ *     ptr[index]         = int                    ->  int
+ *     ptr[start, length] = string or cptr or addr ->  string or dl_cptr or addr
+ *
+ * Set the value at +index+ to +int+.  Or, set the memory at +start+ until
+ * +length+ with the contents of +string+, the memory from +dl_cptr+, or the
+ * memory pointed at by the memory address +addr+.
+ */
 VALUE
 rb_dlptr_aset(int argc, VALUE argv[], VALUE self)
 {
@@ -373,12 +522,12 @@ rb_dlptr_aset(int argc, VALUE argv[], VALUE self)
     void *mem;
 
     switch( rb_scan_args(argc, argv, "21", &arg0, &arg1, &arg2) ){
-    case 2:
+      case 2:
 	offset = NUM2ULONG(arg0);
 	((char*)RPTR_DATA(self)->ptr)[offset] = NUM2UINT(arg1);
 	retval = arg1;
 	break;
-    case 3:
+      case 3:
 	offset = NUM2ULONG(arg0);
 	len    = NUM2ULONG(arg1);
 	if( TYPE(arg2) == T_STRING ){
@@ -393,41 +542,58 @@ rb_dlptr_aset(int argc, VALUE argv[], VALUE self)
 	memcpy((char *)RPTR_DATA(self)->ptr + offset, mem, len);
 	retval = arg2;
 	break;
-    default:
+      default:
 	rb_bug("rb_dlptr_aset()");
     }
     return retval;
 }
 
-VALUE
-rb_dlptr_size(int argc, VALUE argv[], VALUE self)
+/*
+ * call-seq: size=(size)
+ *
+ * Set the size of this pointer to +size+
+ */
+static VALUE
+rb_dlptr_size_set(VALUE self, VALUE size)
 {
-  VALUE size;
-
-  if (rb_scan_args(argc, argv, "01", &size) == 0){
-    return LONG2NUM(RPTR_DATA(self)->size);
-  }
-  else{
     RPTR_DATA(self)->size = NUM2LONG(size);
     return size;
-  }
 }
 
-VALUE
+/*
+ * call-seq: size
+ *
+ * Get the size of this pointer.
+ */
+static VALUE
+rb_dlptr_size_get(VALUE self)
+{
+    return LONG2NUM(RPTR_DATA(self)->size);
+}
+
+/*
+ * call-seq:
+ *    DL::CPtr.to_ptr(val)  => cptr
+ *    DL::CPtr[val]         => cptr
+ *
+ * Get the underlying pointer for ruby object +val+ and return it as a
+ * DL::CPtr object.
+ */
+static VALUE
 rb_dlptr_s_to_ptr(VALUE self, VALUE val)
 {
     VALUE ptr;
 
-    if (rb_obj_is_kind_of(val, rb_cIO) == Qtrue){
+    if (RTEST(rb_obj_is_kind_of(val, rb_cIO))){
 	rb_io_t *fptr;
 	FILE *fp;
 	GetOpenFile(val, fptr);
 	fp = rb_io_stdio_file(fptr);
 	ptr = rb_dlptr_new(fp, 0, NULL);
     }
-    else if (rb_obj_is_kind_of(val, rb_cString) == Qtrue){
-        char *str = StringValuePtr(val);
-        ptr = rb_dlptr_new(str, RSTRING_LEN(val), NULL); 
+    else if (RTEST(rb_obj_is_kind_of(val, rb_cString))){
+	char *str = StringValuePtr(val);
+	ptr = rb_dlptr_new(str, RSTRING_LEN(val), NULL);
     }
     else if (rb_respond_to(val, id_to_ptr)){
 	VALUE vptr = rb_funcall(val, id_to_ptr, 0);
@@ -446,7 +612,7 @@ rb_dlptr_s_to_ptr(VALUE self, VALUE val)
 }
 
 void
-Init_dlptr()
+Init_dlptr(void)
 {
     id_to_ptr = rb_intern("to_ptr");
 
@@ -475,8 +641,8 @@ Init_dlptr()
     rb_define_method(rb_cDLCPtr, "-", rb_dlptr_minus, 1);
     rb_define_method(rb_cDLCPtr, "[]", rb_dlptr_aref, -1);
     rb_define_method(rb_cDLCPtr, "[]=", rb_dlptr_aset, -1);
-    rb_define_method(rb_cDLCPtr, "size", rb_dlptr_size, -1);
-    rb_define_method(rb_cDLCPtr, "size=", rb_dlptr_size, -1);
+    rb_define_method(rb_cDLCPtr, "size", rb_dlptr_size_get, 0);
+    rb_define_method(rb_cDLCPtr, "size=", rb_dlptr_size_set, 1);
 
     rb_define_const(rb_mDL, "NULL", rb_dlptr_new(0, 0, 0));
 }

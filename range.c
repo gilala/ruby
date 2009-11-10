@@ -43,7 +43,7 @@ range_init(VALUE range, VALUE beg, VALUE end, int exclude_end)
 
     args[0] = beg;
     args[1] = end;
-    
+
     if (!FIXNUM_P(beg) || !FIXNUM_P(end)) {
 	VALUE v;
 
@@ -69,7 +69,7 @@ rb_range_new(VALUE beg, VALUE end, int exclude_end)
 /*
  *  call-seq:
  *     Range.new(start, end, exclusive=false)    => range
- *  
+ *
  *  Constructs a range using the given <i>start</i> and <i>end</i>. If the third
  *  parameter is omitted or is <code>false</code>, the <i>range</i> will include
  *  the end object; otherwise, it will be excluded.
@@ -79,7 +79,7 @@ static VALUE
 range_initialize(int argc, VALUE *argv, VALUE range)
 {
     VALUE beg, end, flags;
-    
+
     rb_scan_args(argc, argv, "21", &beg, &end, &flags);
     /* Ranges are immutable, so that they should be initialized only once. */
     if (RANGE_EXCL(range) != Qnil) {
@@ -94,7 +94,7 @@ range_initialize(int argc, VALUE *argv, VALUE range)
 /*
  *  call-seq:
  *     rng.exclude_end?    => true or false
- *  
+ *
  *  Returns <code>true</code> if <i>rng</i> excludes its end value.
  */
 
@@ -104,29 +104,10 @@ range_exclude_end_p(VALUE range)
     return EXCL(range) ? Qtrue : Qfalse;
 }
 
-
-/*
- *  call-seq:
- *     rng == obj    => true or false
- *  
- *  Returns <code>true</code> only if <i>obj</i> is a Range, has equivalent
- *  beginning and end items (by comparing them with <code>==</code>), and has
- *  the same #exclude_end? setting as <i>rng</t>.
- *     
- *    (0..2) == (0..2)            #=> true
- *    (0..2) == Range.new(0,2)    #=> true
- *    (0..2) == (0...2)           #=> false
- *     
- */
-
 static VALUE
-range_eq(VALUE range, VALUE obj)
+recursive_equal(VALUE range, VALUE obj, int recur)
 {
-    if (range == obj)
-	return Qtrue;
-    if (!rb_obj_is_instance_of(obj, rb_obj_class(range)))
-	return Qfalse;
-
+    if (recur) return Qtrue; /* Subtle! */
     if (!rb_equal(RANGE_BEG(range), RANGE_BEG(obj)))
 	return Qfalse;
     if (!rb_equal(RANGE_END(range), RANGE_END(obj)))
@@ -134,8 +115,33 @@ range_eq(VALUE range, VALUE obj)
 
     if (EXCL(range) != EXCL(obj))
 	return Qfalse;
-
     return Qtrue;
+}
+
+
+/*
+ *  call-seq:
+ *     rng == obj    => true or false
+ *
+ *  Returns <code>true</code> only if <i>obj</i> is a Range, has equivalent
+ *  beginning and end items (by comparing them with <code>==</code>), and has
+ *  the same <code>exclude_end?</code> setting as <i>rng</i>.
+ *
+ *    (0..2) == (0..2)            #=> true
+ *    (0..2) == Range.new(0,2)    #=> true
+ *    (0..2) == (0...2)           #=> false
+ *
+ */
+
+static VALUE
+range_eq(VALUE range, VALUE obj)
+{
+    if (range == obj)
+	return Qtrue;
+    if (!rb_obj_is_kind_of(obj, rb_cRange))
+	return Qfalse;
+
+    return rb_exec_recursive_paired(recursive_equal, range, obj, obj);
 }
 
 static int
@@ -144,10 +150,10 @@ r_lt(VALUE a, VALUE b)
     VALUE r = rb_funcall(a, id_cmp, 1, b);
 
     if (NIL_P(r))
-	return Qfalse;
+	return (int)Qfalse;
     if (rb_cmpint(r, a, b) < 0)
-	return Qtrue;
-    return Qfalse;
+	return (int)Qtrue;
+    return (int)Qfalse;
 }
 
 static int
@@ -157,38 +163,20 @@ r_le(VALUE a, VALUE b)
     VALUE r = rb_funcall(a, id_cmp, 1, b);
 
     if (NIL_P(r))
-	return Qfalse;
+	return (int)Qfalse;
     c = rb_cmpint(r, a, b);
     if (c == 0)
-	return INT2FIX(0);
+	return (int)INT2FIX(0);
     if (c < 0)
-	return Qtrue;
-    return Qfalse;
+	return (int)Qtrue;
+    return (int)Qfalse;
 }
 
 
-/*
- *  call-seq:
- *     rng.eql?(obj)    => true or false
- *  
- *  Returns <code>true</code> only if <i>obj</i> is a Range, has equivalent
- *  beginning and end items (by comparing them with #eql?), and has the same
- *  #exclude_end? setting as <i>rng</i>.
- *     
- *    (0..2) == (0..2)            #=> true
- *    (0..2) == Range.new(0,2)    #=> true
- *    (0..2) == (0...2)           #=> false
- *     
- */
-
 static VALUE
-range_eql(VALUE range, VALUE obj)
+recursive_eql(VALUE range, VALUE obj, int recur)
 {
-    if (range == obj)
-	return Qtrue;
-    if (!rb_obj_is_instance_of(obj, rb_obj_class(range)))
-	return Qfalse;
-
+    if (recur) return Qtrue; /* Subtle! */
     if (!rb_eql(RANGE_BEG(range), RANGE_BEG(obj)))
 	return Qfalse;
     if (!rb_eql(RANGE_END(range), RANGE_END(obj)))
@@ -196,8 +184,50 @@ range_eql(VALUE range, VALUE obj)
 
     if (EXCL(range) != EXCL(obj))
 	return Qfalse;
-
     return Qtrue;
+}
+
+/*
+ *  call-seq:
+ *     rng.eql?(obj)    => true or false
+ *
+ *  Returns <code>true</code> only if <i>obj</i> is a Range, has equivalent
+ *  beginning and end items (by comparing them with #eql?), and has the same
+ *  #exclude_end? setting as <i>rng</i>.
+ *
+ *    (0..2).eql?(0..2)            #=> true
+ *    (0..2).eql?(Range.new(0,2))  #=> true
+ *    (0..2).eql?(0...2)           #=> false
+ *
+ */
+
+static VALUE
+range_eql(VALUE range, VALUE obj)
+{
+    if (range == obj)
+	return Qtrue;
+    if (!rb_obj_is_kind_of(obj, rb_cRange))
+	return Qfalse;
+    return rb_exec_recursive_paired(recursive_eql, range, obj, obj);
+}
+
+static VALUE
+recursive_hash(VALUE range, VALUE dummy, int recur)
+{
+    st_index_t hash = EXCL(range);
+    VALUE v;
+
+    hash = rb_hash_start(hash);
+    if (!recur) {
+	v = rb_hash(RANGE_BEG(range));
+	hash = rb_hash_uint(hash, NUM2LONG(v));
+	v = rb_hash(RANGE_END(range));
+	hash = rb_hash_uint(hash, NUM2LONG(v));
+    }
+    hash = rb_hash_uint(hash, EXCL(range) << 24);
+    hash = rb_hash_end(hash);
+
+    return LONG2FIX(hash);
 }
 
 /*
@@ -212,16 +242,7 @@ range_eql(VALUE range, VALUE obj)
 static VALUE
 range_hash(VALUE range)
 {
-    long hash = EXCL(range);
-    VALUE v;
-
-    v = rb_hash(RANGE_BEG(range));
-    hash ^= v << 1;
-    v = rb_hash(RANGE_END(range));
-    hash ^= v << 9;
-    hash ^= EXCL(range) << 24;
-
-    return LONG2FIX(hash);
+    return rb_exec_recursive_outer(recursive_hash, range, 0);
 }
 
 static void
@@ -239,13 +260,31 @@ range_each_func(VALUE range, VALUE (*func) (VALUE, void *), void *arg)
 	}
     }
     else {
-	while (RTEST(c = r_le(v, e))) {
+	while ((c = r_le(v, e)) != Qfalse) {
 	    (*func) (v, arg);
-	    if (c == INT2FIX(0))
+	    if (c == (int)INT2FIX(0))
 		break;
 	    v = rb_funcall(v, id_succ, 0, 0);
 	}
     }
+}
+
+static VALUE
+sym_step_i(VALUE i, void *arg)
+{
+    VALUE *iter = arg;
+
+    if (FIXNUM_P(iter[0])) {
+	iter[0] -= INT2FIX(1) & ~FIXNUM_FLAG;
+    }
+    else {
+	iter[0] = rb_funcall(iter[0], '-', 1, INT2FIX(1));
+    }
+    if (iter[0] == INT2FIX(0)) {
+	rb_yield(rb_str_intern(i));
+	iter[0] = iter[1];
+    }
+    return Qnil;
 }
 
 static VALUE
@@ -266,22 +305,32 @@ step_i(VALUE i, void *arg)
     return Qnil;
 }
 
+extern int ruby_float_step(VALUE from, VALUE to, VALUE step, int excl);
+
+static int
+discrete_object_p(VALUE obj)
+{
+    if (rb_obj_is_kind_of(obj, rb_cTime)) return FALSE; /* until Time#succ removed */
+    return rb_respond_to(obj, id_succ);
+}
+
+
 /*
  *  call-seq:
  *     rng.step(n=1) {| obj | block }    => rng
- *  
+ *
  *  Iterates over <i>rng</i>, passing each <i>n</i>th element to the block. If
  *  the range contains numbers, <i>n</i> is added for each iteration.  Otherwise
  *  <code>step</code> invokes <code>succ</code> to iterate through range
  *  elements. The following code uses class <code>Xs</code>, which is defined
  *  in the class-level documentation.
- *     
+ *
  *     range = Xs.new(1)..Xs.new(10)
  *     range.step(2) {|x| puts x}
  *     range.step(3) {|x| puts x}
- *     
+ *
  *  <em>produces:</em>
- *     
+ *
  *      1 x
  *      3 xxx
  *      5 xxxxx
@@ -325,7 +374,7 @@ range_step(int argc, VALUE *argv, VALUE range)
 
 	if (!EXCL(range))
 	    end += 1;
-	i = FIX2LONG(b);	
+	i = FIX2LONG(b);
 	while (i < end) {
 	    rb_yield(LONG2NUM(i));
 	    if (i + unit < i) break;
@@ -333,14 +382,29 @@ range_step(int argc, VALUE *argv, VALUE range)
 	}
 
     }
+    else if (SYMBOL_P(b) && SYMBOL_P(e)) { /* symbols are special */
+	VALUE args[2], iter[2];
+
+	args[0] = rb_sym_to_s(e);
+	args[1] = EXCL(range) ? Qtrue : Qfalse;
+	iter[0] = INT2FIX(1);
+	iter[1] = step;
+	rb_block_call(rb_sym_to_s(b), rb_intern("upto"), 2, args, sym_step_i, (VALUE)iter);
+    }
+    else if (ruby_float_step(b, e, step, EXCL(range))) {
+	/* done */
+    }
     else if (rb_obj_is_kind_of(b, rb_cNumeric) ||
 	     !NIL_P(rb_check_to_integer(b, "to_int")) ||
 	     !NIL_P(rb_check_to_integer(e, "to_int"))) {
 	ID op = EXCL(range) ? '<' : rb_intern("<=");
+	VALUE v = b;
+	int i = 0;
 
-	while (RTEST(rb_funcall(b, op, 1, e))) {
-	    rb_yield(b);
-	    b = rb_funcall(b, '+', 1, step);
+	while (RTEST(rb_funcall(v, op, 1, e))) {
+	    rb_yield(v);
+	    i++;
+	    v = rb_funcall(b, '+', 1, rb_funcall(INT2NUM(i), '*', 1, step));
 	}
     }
     else {
@@ -359,7 +423,7 @@ range_step(int argc, VALUE *argv, VALUE range)
 	else {
 	    VALUE args[2];
 
-	    if (!rb_respond_to(b, id_succ)) {
+	    if (!discrete_object_p(b)) {
 		rb_raise(rb_eTypeError, "can't iterate from %s",
 			 rb_obj_classname(b));
 	    }
@@ -378,21 +442,28 @@ each_i(VALUE v, void *arg)
     return Qnil;
 }
 
+static VALUE
+sym_each_i(VALUE v, void *arg)
+{
+    rb_yield(rb_str_intern(v));
+    return Qnil;
+}
+
 /*
  *  call-seq:
  *     rng.each {| i | block } => rng
- *  
+ *
  *  Iterates over the elements <i>rng</i>, passing each in turn to the
  *  block. You can only iterate if the start object of the range
  *  supports the +succ+ method (which means that you can't iterate over
  *  ranges of +Float+ objects).
- *     
+ *
  *     (10..15).each do |n|
  *        print n, ' '
  *     end
- *     
+ *
  *  <em>produces:</em>
- *     
+ *
  *     10 11 12 13 14 15
  */
 
@@ -406,10 +477,6 @@ range_each(VALUE range)
     beg = RANGE_BEG(range);
     end = RANGE_END(range);
 
-    if (!rb_respond_to(beg, id_succ)) {
-	rb_raise(rb_eTypeError, "can't iterate from %s",
-		 rb_obj_classname(beg));
-    }
     if (FIXNUM_P(beg) && FIXNUM_P(end)) { /* fixnums are special */
 	long lim = FIX2LONG(end);
 	long i;
@@ -420,15 +487,30 @@ range_each(VALUE range)
 	    rb_yield(LONG2FIX(i));
 	}
     }
-    else if (TYPE(beg) == T_STRING) {
+    else if (SYMBOL_P(beg) && SYMBOL_P(end)) { /* symbols are special */
 	VALUE args[2];
 
-	args[0] = end;
+	args[0] = rb_sym_to_s(end);
 	args[1] = EXCL(range) ? Qtrue : Qfalse;
-	rb_block_call(beg, rb_intern("upto"), 2, args, rb_yield, 0);
+	rb_block_call(rb_sym_to_s(beg), rb_intern("upto"), 2, args, sym_each_i, 0);
     }
     else {
-	range_each_func(range, each_i, NULL);
+	VALUE tmp = rb_check_string_type(beg);
+
+	if (!NIL_P(tmp)) {
+	    VALUE args[2];
+
+	    args[0] = end;
+	    args[1] = EXCL(range) ? Qtrue : Qfalse;
+	    rb_block_call(tmp, rb_intern("upto"), 2, args, rb_yield, 0);
+	}
+	else {
+	    if (!discrete_object_p(beg)) {
+		rb_raise(rb_eTypeError, "can't iterate from %s",
+			 rb_obj_classname(beg));
+	    }
+	    range_each_func(range, each_i, NULL);
+	}
     }
     return range;
 }
@@ -436,7 +518,7 @@ range_each(VALUE range)
 /*
  *  call-seq:
  *     rng.begin    => obj
- *  
+ *
  *  Returns the first object in <i>rng</i>.
  */
 
@@ -450,9 +532,9 @@ range_begin(VALUE range)
 /*
  *  call-seq:
  *     rng.end    => obj
- *  
+ *
  *  Returns the object that defines the end of <i>rng</i>.
- *     
+ *
  *     (1..10).end    #=> 10
  *     (1...10).end   #=> 10
  */
@@ -483,7 +565,7 @@ first_i(VALUE i, VALUE *ary)
  *  call-seq:
  *     rng.first    => obj
  *     rng.first(n) => an_array
- *  
+ *
  *  Returns the first object in <i>rng</i>, or the first +n+ elements.
  */
 
@@ -507,7 +589,7 @@ range_first(int argc, VALUE *argv, VALUE range)
  *  call-seq:
  *     rng.last    => obj
  *     rng.last(n) => an_array
- *  
+ *
  *  Returns the last object in <i>rng</i>, or the last +n+ elements.
  */
 
@@ -517,7 +599,7 @@ range_last(int argc, VALUE *argv, VALUE range)
     VALUE rb_ary_last(int, VALUE *, VALUE);
 
     if (argc == 0) return RANGE_END(range);
-    return rb_ary_last(argc, argv, rb_Array(range)); 
+    return rb_ary_last(argc, argv, rb_Array(range));
 }
 
 
@@ -525,11 +607,11 @@ range_last(int argc, VALUE *argv, VALUE range)
  *  call-seq:
  *     rng.min                    => obj
  *     rng.min {| a,b | block }   => obj
- *  
+ *
  *  Returns the minimum value in <i>rng</i>. The second uses
  *  the block to compare values.  Returns nil if the first
  *  value in range is larger than the last value.
- *     
+ *
  */
 
 
@@ -554,21 +636,20 @@ range_min(VALUE range)
  *  call-seq:
  *     rng.max                    => obj
  *     rng.max {| a,b | block }   => obj
- *  
+ *
  *  Returns the maximum value in <i>rng</i>. The second uses
  *  the block to compare values.  Returns nil if the first
  *  value in range is larger than the last value.
- *     
+ *
  */
-
 
 static VALUE
 range_max(VALUE range)
 {
     VALUE e = RANGE_END(range);
-    int ip = FIXNUM_P(e) || rb_obj_is_kind_of(e, rb_cInteger);
+    int nm = FIXNUM_P(e) || rb_obj_is_kind_of(e, rb_cNumeric);
 
-    if (rb_block_given_p() || (EXCL(range) && !ip)) {
+    if (rb_block_given_p() || (EXCL(range) && !nm)) {
 	return rb_call_super(0, 0);
     }
     else {
@@ -578,6 +659,9 @@ range_max(VALUE range)
 	if (c > 0)
 	    return Qnil;
 	if (EXCL(range)) {
+	    if (!FIXNUM_P(e) && !rb_obj_is_kind_of(e, rb_cInteger)) {
+		rb_raise(rb_eTypeError, "cannot exclude non Integer end value");
+	    }
 	    if (c == 0) return Qnil;
 	    if (FIXNUM_P(e)) {
 		return LONG2NUM(FIX2LONG(e) - 1);
@@ -588,11 +672,11 @@ range_max(VALUE range)
     }
 }
 
-VALUE
-rb_range_beg_len(VALUE range, long *begp, long *lenp, long len, int err)
+int
+rb_range_values(VALUE range, VALUE *begp, VALUE *endp, int *exclp)
 {
     VALUE b, e;
-    long beg, end, excl;
+    int excl;
 
     if (rb_obj_is_kind_of(range, rb_cRange)) {
 	b = RANGE_BEG(range);
@@ -600,15 +684,31 @@ rb_range_beg_len(VALUE range, long *begp, long *lenp, long len, int err)
 	excl = EXCL(range);
     }
     else {
-	if (!rb_respond_to(range, id_beg)) return Qfalse;
-	if (!rb_respond_to(range, id_end)) return Qfalse;
+	if (!rb_respond_to(range, id_beg)) return (int)Qfalse;
+	if (!rb_respond_to(range, id_end)) return (int)Qfalse;
 	b = rb_funcall(range, id_beg, 0);
 	e = rb_funcall(range, id_end, 0);
 	excl = RTEST(rb_funcall(range, rb_intern("exclude_end?"), 0));
     }
+    *begp = b;
+    *endp = e;
+    *exclp = excl;
+    return (int)Qtrue;
+}
+
+VALUE
+rb_range_beg_len(VALUE range, long *begp, long *lenp, long len, int err)
+{
+    long beg, end, origbeg, origend;
+    VALUE b, e;
+    int excl;
+
+    if (!rb_range_values(range, &b, &e, &excl))
+	return Qfalse;
     beg = NUM2LONG(b);
     end = NUM2LONG(e);
-
+    origbeg = beg;
+    origend = end;
     if (beg < 0) {
 	beg += len;
 	if (beg < 0)
@@ -635,7 +735,7 @@ rb_range_beg_len(VALUE range, long *begp, long *lenp, long len, int err)
   out_of_range:
     if (err) {
 	rb_raise(rb_eRangeError, "%ld..%s%ld out of range",
-		 NUM2LONG(b), excl ? "." : "", NUM2LONG(e));
+		 origbeg, excl ? "." : "", origend);
     }
     return Qnil;
 }
@@ -684,7 +784,7 @@ inspect_range(VALUE range, VALUE dummy, int recur)
  * call-seq:
  *   rng.inspect  => string
  *
- * Convert this range object to a printable form (using 
+ * Convert this range object to a printable form (using
  * <code>inspect</code> to convert the start and end
  * objects).
  */
@@ -699,20 +799,20 @@ range_inspect(VALUE range)
 /*
  *  call-seq:
  *     rng === obj       =>  true or false
- *  
+ *
  *  Returns <code>true</code> if <i>obj</i> is an element of
  *  <i>rng</i>, <code>false</code> otherwise. Conveniently,
  *  <code>===</code> is the comparison operator used by
  *  <code>case</code> statements.
- *     
+ *
  *     case 79
  *     when 1..50   then   print "low\n"
  *     when 51..75  then   print "medium\n"
  *     when 76..100 then   print "high\n"
  *     end
- *     
+ *
  *  <em>produces:</em>
- *     
+ *
  *     high
  */
 
@@ -727,11 +827,11 @@ range_eqq(VALUE range, VALUE val)
  *  call-seq:
  *     rng.member?(val)  =>  true or false
  *     rng.include?(val) =>  true or false
- *  
+ *
  *  Returns <code>true</code> if <i>obj</i> is an element of
  *  <i>rng</i>, <code>false</code> otherwise.  If beg and end are
  *  numeric, comparison is done according magnitude of values.
- *     
+ *
  *     ("a".."z").include?("g")  # => true
  *     ("a".."z").include?("A")  # => false
  */
@@ -787,11 +887,11 @@ range_include(VALUE range, VALUE val)
 /*
  *  call-seq:
  *     rng.cover?(val)  =>  true or false
- *  
+ *
  *  Returns <code>true</code> if <i>obj</i> is between beg and end,
  *  i.e <code>beg <= obj <= end</code> (or <i>end</i> exclusive when
  *  <code>exclude_end?</code> is true).
- *     
+ *
  *     ("a".."z").cover?("c")    #=> true
  *     ("a".."z").cover?("5")    #=> false
  */
@@ -860,17 +960,17 @@ range_alloc(VALUE klass)
  *  run from the start to the end inclusively. Those created using
  *  <code>...</code> exclude the end value. When used as an iterator,
  *  ranges return each value in the sequence.
- *     
+ *
  *     (-1..-5).to_a      #=> []
  *     (-5..-1).to_a      #=> [-5, -4, -3, -2, -1]
  *     ('a'..'e').to_a    #=> ["a", "b", "c", "d", "e"]
  *     ('a'...'e').to_a   #=> ["a", "b", "c", "d"]
- *     
+ *
  *  Ranges can be constructed using objects of any type, as long as the
  *  objects can be compared using their <code><=></code> operator and
  *  they support the <code>succ</code> method to return the next object
  *  in sequence.
- *     
+ *
  *     class Xs                # represent a string of 'x's
  *       include Comparable
  *       attr :length
@@ -890,18 +990,18 @@ range_alloc(VALUE klass)
  *         'x' * @length
  *       end
  *     end
- *     
+ *
  *     r = Xs.new(3)..Xs.new(6)   #=> xxx..xxxxxx
  *     r.to_a                     #=> [xxx, xxxx, xxxxx, xxxxxx]
  *     r.member?(Xs.new(5))       #=> true
- *     
+ *
  *  In the previous code example, class <code>Xs</code> includes the
  *  <code>Comparable</code> module. This is because
  *  <code>Enumerable#member?</code> checks for equality using
  *  <code>==</code>. Including <code>Comparable</code> ensures that the
  *  <code>==</code> method is defined in terms of the <code><=></code>
  *  method implemented in <code>Xs</code>.
- *     
+ *
  */
 
 void

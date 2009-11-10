@@ -15,6 +15,8 @@ module DL
       if( @cfunc.ctype < 0 )
         @cfunc.ctype = @cfunc.ctype.abs
         @unsigned = true
+      else
+        @unsigned = false
       end
       if( proc )
         bind(&proc)
@@ -23,6 +25,10 @@ module DL
 
     def to_i()
       @cfunc.to_i
+    end
+
+    def name
+      @cfunc.name
     end
 
     def call(*args, &block)
@@ -87,6 +93,10 @@ module DL
         end
         @cfunc.ptr = 0
       end
+    end
+
+    def bound?()
+      @cfunc.ptr != 0
     end
 
     def bind_at_call(&block)

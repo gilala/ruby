@@ -1,6 +1,6 @@
 /**********************************************************************
 
-  id.c - 
+  id.c -
 
   $Author$
   created at: Thu Jul 12 04:37:51 2007
@@ -18,23 +18,23 @@ Init_id(void)
 {
 #undef rb_intern
 #define rb_intern(str) rb_intern_const(str)
-    rb_encoding *enc = rb_usascii_encoding();
+    int enc = rb_usascii_encindex();
 
     REGISTER_SYMID(idNULL, "");
-    REGISTER_SYMID(idIFUNC, "<IFUNC>"),
-    REGISTER_SYMID(idCFUNC, "<CFUNC>"),
-    REGISTER_SYMID(idRespond_to, "respond_to?"),
-    REGISTER_SYMID(idThrowState, "#__ThrowState__"),
+    REGISTER_SYMID(idIFUNC, "<IFUNC>");
+    REGISTER_SYMID(idCFUNC, "<CFUNC>");
+    REGISTER_SYMID(idRespond_to, "respond_to?");
 
-    REGISTER_SYMID(id_core_set_method_alias,   	    "core#set_method_alias"),
-    REGISTER_SYMID(id_core_set_variable_alias, 	    "core#set_variable_alias"),
-    REGISTER_SYMID(id_core_undef_method,       	    "core#undef_method"),
-    REGISTER_SYMID(id_core_define_method,      	    "core#define_method"),
-    REGISTER_SYMID(id_core_define_singleton_method, "core#define_singleton_method"),
-    REGISTER_SYMID(id_core_set_postexe,             "core#set_postexe"),
+    REGISTER_SYMID(id_core_set_method_alias,   	    "core#set_method_alias");
+    REGISTER_SYMID(id_core_set_variable_alias, 	    "core#set_variable_alias");
+    REGISTER_SYMID(id_core_undef_method,       	    "core#undef_method");
+    REGISTER_SYMID(id_core_define_method,      	    "core#define_method");
+    REGISTER_SYMID(id_core_define_singleton_method, "core#define_singleton_method");
+    REGISTER_SYMID(id_core_set_postexe,             "core#set_postexe");
 
     REGISTER_SYMID(idEach, "each");
     REGISTER_SYMID(idLength, "length");
+    REGISTER_SYMID(idSize, "size");
     REGISTER_SYMID(idLambda, "lambda");
     REGISTER_SYMID(idIntern, "intern");
     REGISTER_SYMID(idGets, "gets");

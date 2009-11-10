@@ -6,8 +6,33 @@
 
 #include "ruby.h"
 #include "stubs.h"
+
+#if !defined(RSTRING_PTR)
+#define RSTRING_PTR(s) (RSTRING(s)->ptr)
+#define RSTRING_LEN(s) (RSTRING(s)->len)
+#endif
+
 #include <tcl.h>
 #include <tk.h>
+
+/*------------------------------*/
+
+#ifdef __MACOS__
+# include <tkMac.h>
+# include <Quickdraw.h>
+
+static int call_macinit = 0;
+
+static void
+_macinit()
+{
+    if (!call_macinit) {
+        tcl_macQdPtr = &qd; /* setup QuickDraw globals */
+        Tcl_MacSetEventProc(TkMacConvertEvent); /* setup event handler */
+        call_macinit = 1;
+    }
+}
+#endif
 
 /*------------------------------*/
 
@@ -301,6 +326,10 @@ ruby_tk_stubs_init(tcl_ip)
 
         if (!Tk_InitStubs(tcl_ip, (char *)"8.1", 0))
             return FAIL_Tk_InitStubs;
+
+#ifdef __MACOS__
+        _macinit();
+#endif
     }
 
     return TCLTK_STUBS_OK;
@@ -336,6 +365,10 @@ ruby_tk_stubs_safeinit(tcl_ip)
 
         if (!Tk_InitStubs(tcl_ip, (char *)"8.1", 0))
             return FAIL_Tk_InitStubs;
+
+#ifdef __MACOS__
+        _macinit();
+#endif
     }
 
     return TCLTK_STUBS_OK;
@@ -490,6 +523,9 @@ ruby_tk_stubs_init(tcl_ip)
         return FAIL_Tk_Init;
 
     if (!call_tk_stubs_init) {
+#ifdef __MACOS__
+        _macinit();
+#endif
         call_tk_stubs_init = 1;
     }
 
@@ -509,6 +545,9 @@ ruby_tk_stubs_safeinit(tcl_ip)
         return FAIL_Tk_Init;
 
     if (!call_tk_stubs_init) {
+#ifdef __MACOS__
+        _macinit();
+#endif
         call_tk_stubs_init = 1;
     }
 

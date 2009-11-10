@@ -60,9 +60,9 @@ BASERUBY = $(BASERUBY)
 	@for %I in (ruby.exe) do @echo BASERUBY = %~s$$PATH:I >> $(MAKEFILE)
 !endif
 
--system-vars-: -runtime-
+-system-vars-: -runtime- -unicows-
 
--system-vars32-: -osname32- -runtime-
+-system-vars32-: -osname32- -runtime- -unicows-
 
 -system-vars64-: -osname64- -runtime-
 
@@ -73,12 +73,13 @@ BASERUBY = $(BASERUBY)
 	@echo TARGET_OS = mswin64 >>$(MAKEFILE)
 
 -runtime-: nul
-	@$(CC) -MD <<rtname.c user32.lib > nul
+	$(CC) -MD <<rtname.c user32.lib -link > nul
 #include <windows.h>
 #include <memory.h>
 #include <string.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #ifndef MAXPATHLEN
 # define MAXPATHLEN 1024
 #endif
@@ -127,8 +128,10 @@ runtime_name()
     }
     else {
 	printf("PLATFORM = $$(TARGET_OS)\n");
+	ver = "60";
     }
     printf("RT = %s\n", base);
+    printf("RT_VER = %s\n", ver);
     return 1;
 }
 
@@ -141,9 +144,24 @@ int main(int argc, char **argv)
 	@.\rtname >>$(MAKEFILE)
 	@del rtname.*
 
+-unicows-: nul
+!if "$(ENABLE_WIN95)" == ""
+	@echo Checking unicows.lib
+	@$(CC) -MD <<conftest.c unicows.lib user32.lib > nul && echo>>$(MAKEFILE) ENABLE_WIN95 = yes || rem
+#include <windows.h>
+int main()
+{
+    return GetEnvironmentVariableW(0, 0, 0) == 0;
+}
+<<
+	@del conftest.*
+!else if "$(ENABLE_WIN95)" == "yes"
+	@echo>>$(MAKEFILE) ENABLE_WIN95 = yes
+!endif
+
 -version-: nul
 	@$(APPEND)
-	@$(CPP) -I$(srcdir) <<"Creating $(MAKEFILE)" | find "=" >>$(MAKEFILE)
+	@$(CPP) -I$(srcdir) -I$(srcdir)/include <<"Creating $(MAKEFILE)" | find "=" >>$(MAKEFILE)
 #define RUBY_REVISION 0
 #include "version.h"
 MAJOR = RUBY_VERSION_MAJOR
@@ -213,7 +231,7 @@ $(CPU) = $(PROCESSOR_LEVEL)
 -epilogue-: nul
 !if exist(confargs.c)
 	@$(APPEND)
-	@$(CPP) confargs.c | find "=" >> $(MAKEFILE)
+	@$(CPP) confargs.c 2>&1 | findstr "! =" >> $(MAKEFILE)
 	@del confargs.c
 !endif
 	@type << >>$(MAKEFILE)
@@ -231,4 +249,4 @@ $(CPU) = $(PROCESSOR_LEVEL)
 $(BANG)include $$(srcdir)/win32/Makefile.sub
 <<
 	@$(COMSPEC) /C $(srcdir:/=\)\win32\rm.bat config.h config.status
-	@echo type `$(MAKE)' to make ruby.
+	@echo "type `nmake' to make ruby."

@@ -53,16 +53,22 @@ end
 #define symIFUNC ID2SYM(idIFUNC)
 #define symCFUNC ID2SYM(idCFUNC)
 
+#if !defined tLAST_TOKEN && defined YYTOKENTYPE
+#define tLAST_TOKEN tLAST_TOKEN
+#endif
+
 enum ruby_method_ids {
 #ifndef tLAST_TOKEN
 % tokens.each do |token, value|
     <%=token%> = <%=value%>,
 % end
-% tokens.map do |token, value|
-#elif <%=token%> != <%=value%>
-#error <%=token%> differs
-% end
 #endif
+    idDot2 = tDOT2,
+    idDot3 = tDOT3,
+    idUPlus = tUPLUS,
+    idUMinus = tUMINUS,
+    idPow = tPOW,
+    idCmp = tCMP,
     idPLUS = '+',
     idMINUS = '-',
     idMULT = '*',
@@ -79,12 +85,14 @@ enum ruby_method_ids {
     idNot = '!',
     idBackquote = '`',
     idEqTilde = tMATCH,
+    idNeqTilde = tNMATCH,
     idAREF = tAREF,
     idASET = tASET,
     idLAST_TOKEN = tLAST_TOKEN >> ID_SCOPE_SHIFT,
     tIntern,
     tMethodMissing,
     tLength,
+    tSize,
     tGets,
     tSucc,
     tEach,
@@ -105,6 +113,7 @@ enum ruby_method_ids {
     TOKEN2ID(Intern),
     TOKEN2ID(MethodMissing),
     TOKEN2ID(Length),
+    TOKEN2ID(Size),
     TOKEN2ID(Gets),
     TOKEN2ID(Succ),
     TOKEN2ID(Each),
@@ -113,5 +122,15 @@ enum ruby_method_ids {
     TOKEN2ID(__send__),
     TOKEN2ID(Initialize)
 };
+
+#ifdef tLAST_TOKEN
+struct ruby_method_ids_check {
+#define ruby_method_id_check_for(name, value) \
+    int checking_for_##name[name == value ? 1 : -1]
+% tokens.map do |token, value|
+ruby_method_id_check_for(<%=token%>, <%=value%>);
+% end
+};
+#endif
 
 #endif /* RUBY_ID_H */

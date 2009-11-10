@@ -26,7 +26,7 @@
 #ifdef NATINT_PACK
 # define OFF16B(p) ((char*)(p) + (natint?0:(sizeof(short) - SIZE16)))
 # define OFF32B(p) ((char*)(p) + (natint?0:(sizeof(long) - SIZE32)))
-# define NATINT_LEN(type,len) (natint?sizeof(type):(len))
+# define NATINT_LEN(type,len) (natint?(int)sizeof(type):(int)(len))
 # ifdef WORDS_BIGENDIAN
 #   define OFF16(p) OFF16B(p)
 #   define OFF32(p) OFF32B(p)
@@ -36,7 +36,7 @@
 # define NATINT_HTONS(x) (natint?htons(x):hton16(x))
 # define NATINT_HTONL(x) (natint?htonl(x):hton32(x))
 #else
-# define NATINT_LEN(type,len) sizeof(type)
+# define NATINT_LEN(type,len) ((int)sizeof(type))
 # define NATINT_HTOVS(x) htovs(x)
 # define NATINT_HTOVL(x) htovl(x)
 # define NATINT_HTONS(x) htons(x)
@@ -167,7 +167,7 @@ swapd(const double d)
     memcpy(&dtmp,utmp,sizeof(double));
     return dtmp;
 }
-#else	/* SIZEOF_DOUBLE == 8 but undivied by known size of int */
+#else	/* SIZEOF_DOUBLE == 8 but undivide by known size of int */
 define_swapx(d, double)
 #endif	/* #if SIZEOF_SHORT == 4 */
 #endif	/* #if SIZEOF_LONG == 4 */
@@ -429,7 +429,7 @@ static unsigned long utf8_to_uv(const char*,long*);
  *       u     |  UU-encoded string
  *       V     |  Long, little-endian byte order
  *       v     |  Short, little-endian byte order
- *       w     |  BER-compressed integer\fnm
+ *       w     |  BER-compressed integer
  *       X     |  Back up a byte
  *       x     |  Null byte
  *       Z     |  Same as ``a'', except that null is added with *
@@ -445,7 +445,7 @@ pack_pack(VALUE ary, VALUE fmt)
     char type;
     long items, len, idx, plen;
     const char *ptr;
-    rb_encoding *enc;
+    int enc_info = 1;		/* 0 - BINARY, 1 - US-ASCII, 2 - UTF-8 */
 #ifdef NATINT_PACK
     int natint;		/* native integer */
 #endif
@@ -509,6 +509,19 @@ pack_pack(VALUE ary, VALUE fmt)
 	}
 
 	switch (type) {
+	  case 'U':
+	    /* if encoding is US-ASCII, upgrade to UTF-8 */
+	    if (enc_info == 1) enc_info = 2;
+	    break;
+	  case 'm': case 'M': case 'u':
+	    /* keep US-ASCII (do nothing) */
+	    break;
+	  default:
+	    /* fall back to BINARY */
+	    enc_info = 0;
+	    break;
+	}
+	switch (type) {
 	  case 'A': case 'a': case 'Z':
 	  case 'B': case 'b':
 	  case 'H': case 'h':
@@ -522,15 +535,6 @@ pack_pack(VALUE ary, VALUE fmt)
 		ptr = RSTRING_PTR(from);
 		plen = RSTRING_LEN(from);
 		OBJ_INFECT(res, from);
-		switch (type) {
-		  case 'a': case 'A': case 'Z':
-		    enc = rb_enc_compatible(res, from);
-		    rb_enc_associate(res, enc);
-		    break;
-		  default:
-		    rb_enc_associate(res, rb_ascii8bit_encoding());
-		    break;
-		}
 	    }
 
 	    if (p[-1] == '*')
@@ -687,7 +691,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		char c;
 
 		from = NEXTFROM;
-		c = num2i32(from);
+		c = (char)num2i32(from);
 		rb_str_buf_cat(res, &c, sizeof(char));
 	    }
 	    break;
@@ -698,7 +702,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		short s;
 
 		from = NEXTFROM;
-		s = num2i32(from);
+		s = (short)num2i32(from);
 		rb_str_buf_cat(res, OFF16(&s), NATINT_LEN(short,2));
 	    }
 	    break;
@@ -709,7 +713,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		int i;
 
 		from = NEXTFROM;
-		i = num2i32(from);
+		i = (int)num2i32(from);
 		rb_str_buf_cat(res, (char*)&i, sizeof(int));
 	    }
 	    break;
@@ -741,7 +745,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		unsigned short s;
 
 		from = NEXTFROM;
-		s = num2i32(from);
+		s = (unsigned short)num2i32(from);
 		s = NATINT_HTONS(s);
 		rb_str_buf_cat(res, OFF16(&s), NATINT_LEN(short,2));
 	    }
@@ -763,7 +767,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		unsigned short s;
 
 		from = NEXTFROM;
-		s = num2i32(from);
+		s = (unsigned short)num2i32(from);
 		s = NATINT_HTOVS(s);
 		rb_str_buf_cat(res, OFF16(&s), NATINT_LEN(short,2));
 	    }
@@ -786,7 +790,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		float f;
 
 		from = NEXTFROM;
-		f = RFLOAT_VALUE(rb_Float(from));
+		f = (float)RFLOAT_VALUE(rb_to_float(from));
 		rb_str_buf_cat(res, (char*)&f, sizeof(float));
 	    }
 	    break;
@@ -797,7 +801,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		FLOAT_CONVWITH(ftmp);
 
 		from = NEXTFROM;
-		f = RFLOAT_VALUE(rb_Float(from));
+		f = (float)RFLOAT_VALUE(rb_to_float(from));
 		f = HTOVF(f,ftmp);
 		rb_str_buf_cat(res, (char*)&f, sizeof(float));
 	    }
@@ -809,7 +813,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		DOUBLE_CONVWITH(dtmp);
 
 		from = NEXTFROM;
-		d = RFLOAT_VALUE(rb_Float(from));
+		d = RFLOAT_VALUE(rb_to_float(from));
 		d = HTOVD(d,dtmp);
 		rb_str_buf_cat(res, (char*)&d, sizeof(double));
 	    }
@@ -821,7 +825,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		double d;
 
 		from = NEXTFROM;
-		d = RFLOAT_VALUE(rb_Float(from));
+		d = RFLOAT_VALUE(rb_to_float(from));
 		rb_str_buf_cat(res, (char*)&d, sizeof(double));
 	    }
 	    break;
@@ -832,7 +836,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		FLOAT_CONVWITH(ftmp);
 
 		from = NEXTFROM;
-		f = RFLOAT_VALUE(rb_Float(from));
+		f = (float)RFLOAT_VALUE(rb_to_float(from));
 		f = HTONF(f,ftmp);
 		rb_str_buf_cat(res, (char*)&f, sizeof(float));
 	    }
@@ -844,7 +848,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		DOUBLE_CONVWITH(dtmp);
 
 		from = NEXTFROM;
-		d = RFLOAT_VALUE(rb_Float(from));
+		d = RFLOAT_VALUE(rb_to_float(from));
 		d = HTOND(d,dtmp);
 		rb_str_buf_cat(res, (char*)&d, sizeof(double));
 	    }
@@ -879,8 +883,6 @@ pack_pack(VALUE ary, VALUE fmt)
 	    break;
 
 	  case 'U':		/* Unicode character */
-	    enc = rb_enc_compatible(res, rb_enc_from_encoding(rb_utf8_encoding()));
-	    rb_enc_associate(res, enc);
 	    while (len-- > 0) {
 		SIGNED_VALUE l;
 		char buf[8];
@@ -899,8 +901,6 @@ pack_pack(VALUE ary, VALUE fmt)
 
 	  case 'u':		/* uuencoded string */
 	  case 'm':		/* base64 encoded string */
-	    enc = rb_enc_compatible(res, rb_enc_from_encoding(rb_usascii_encoding()));
-	    rb_enc_associate(res, enc);
 	    from = NEXTFROM;
 	    StringValue(from);
 	    ptr = RSTRING_PTR(from);
@@ -929,8 +929,6 @@ pack_pack(VALUE ary, VALUE fmt)
 	    break;
 
 	  case 'M':		/* quoted-printable encoded string */
-	    enc = rb_enc_compatible(res, rb_enc_from_encoding(rb_usascii_encoding()));
-	    rb_enc_associate(res, enc);
 	    from = rb_obj_as_string(NEXTFROM);
 	    if (len <= 1)
 		len = 72;
@@ -993,7 +991,7 @@ pack_pack(VALUE ary, VALUE fmt)
 		}
 
 		while (ul) {
-		    c = ((ul & 0x7f) | 0x80);
+		    c = (char)(ul & 0x7f) | 0x80;
 		    rb_str_buf_cat(buf, &c, sizeof(char));
 		    ul >>=  7;
 		}
@@ -1025,6 +1023,17 @@ pack_pack(VALUE ary, VALUE fmt)
 	rb_str_associate(res, associates);
     }
     OBJ_INFECT(res, fmt);
+    switch (enc_info) {
+      case 1:
+	ENCODING_CODERANGE_SET(res, rb_usascii_encindex(), ENC_CODERANGE_7BIT);
+	break;
+      case 2:
+	rb_enc_set_index(res, rb_utf8_encindex());
+	break;
+      default:
+	/* do nothing, keep ASCII-8BIT */
+	break;
+    }
     return res;
 }
 
@@ -1042,7 +1051,7 @@ encodes(VALUE str, const char *s, long len, int type, int tail_lf)
     int padding;
 
     if (type == 'u') {
-	buff[i++] = len + ' ';
+	buff[i++] = (char)len + ' ';
 	padding = '`';
     }
     else {
@@ -1154,7 +1163,7 @@ hex2num(char c)
 
 #define PACK_LENGTH_ADJUST_SIZE(sz) do {	\
     tmp = 0;					\
-    if (len > (send-s)/sz) {			\
+    if (len > (long)((send-s)/sz)) {		\
         if (!star) {				\
 	    tmp = len-(send-s)/sz;		\
         }					\
@@ -1291,7 +1300,7 @@ b64_xtable_once(volatile signed char *init, rb_thread_lock_t *lock)
  *            |         | short in network byte order
  *     -------+---------+-----------------------------------------
  *       P    | String  | treat sizeof(char *) characters as a
- *            |         | pointer, and  return \emph{len} characters
+ *            |         | pointer, and  return the length bytes
  *            |         | from the referenced location
  *     -------+---------+-----------------------------------------
  *       p    | String  | treat sizeof(char *) characters as a
@@ -1811,9 +1820,9 @@ pack_unpack(VALUE str, VALUE fmt)
 			    d = (*s++ - ' ') & 077;
 			else
 			    d = 0;
-			hunk[0] = a << 2 | b >> 4;
-			hunk[1] = b << 4 | c >> 2;
-			hunk[2] = c << 6 | d;
+			hunk[0] = (char)(a << 2 | b >> 4);
+			hunk[1] = (char)(b << 4 | c >> 2);
+			hunk[2] = (char)(c << 6 | d);
 			memcpy(ptr, hunk, mlen);
 			ptr += mlen;
 			len -= mlen;
@@ -1909,7 +1918,6 @@ pack_unpack(VALUE str, VALUE fmt)
 		    }
 		}
 		rb_str_set_len(buf, ptr - RSTRING_PTR(buf));
-		ENCODING_CODERANGE_SET(buf, rb_usascii_encindex(), ENC_CODERANGE_7BIT);
 		UNPACK_PUSH(buf);
 	    }
 	    break;
@@ -1999,7 +2007,7 @@ pack_unpack(VALUE str, VALUE fmt)
 	    break;
 
 	  case 'p':
-	    if (len > (send - s) / sizeof(char *))
+	    if (len > (long)((send - s) / sizeof(char *)))
 		len = (send - s) / sizeof(char *);
 	    while (len-- > 0) {
 		if (send - s < sizeof(char *))
@@ -2084,38 +2092,38 @@ rb_uv_to_utf8(char buf[6], unsigned long uv)
 	return 1;
     }
     if (uv <= 0x7ff) {
-	buf[0] = ((uv>>6)&0xff)|0xc0;
-	buf[1] = (uv&0x3f)|0x80;
+	buf[0] = (char)((uv>>6)&0xff)|0xc0;
+	buf[1] = (char)(uv&0x3f)|0x80;
 	return 2;
     }
     if (uv <= 0xffff) {
-	buf[0] = ((uv>>12)&0xff)|0xe0;
-	buf[1] = ((uv>>6)&0x3f)|0x80;
-	buf[2] = (uv&0x3f)|0x80;
+	buf[0] = (char)((uv>>12)&0xff)|0xe0;
+	buf[1] = (char)((uv>>6)&0x3f)|0x80;
+	buf[2] = (char)(uv&0x3f)|0x80;
 	return 3;
     }
     if (uv <= 0x1fffff) {
-	buf[0] = ((uv>>18)&0xff)|0xf0;
-	buf[1] = ((uv>>12)&0x3f)|0x80;
-	buf[2] = ((uv>>6)&0x3f)|0x80;
-	buf[3] = (uv&0x3f)|0x80;
+	buf[0] = (char)((uv>>18)&0xff)|0xf0;
+	buf[1] = (char)((uv>>12)&0x3f)|0x80;
+	buf[2] = (char)((uv>>6)&0x3f)|0x80;
+	buf[3] = (char)(uv&0x3f)|0x80;
 	return 4;
     }
     if (uv <= 0x3ffffff) {
-	buf[0] = ((uv>>24)&0xff)|0xf8;
-	buf[1] = ((uv>>18)&0x3f)|0x80;
-	buf[2] = ((uv>>12)&0x3f)|0x80;
-	buf[3] = ((uv>>6)&0x3f)|0x80;
-	buf[4] = (uv&0x3f)|0x80;
+	buf[0] = (char)((uv>>24)&0xff)|0xf8;
+	buf[1] = (char)((uv>>18)&0x3f)|0x80;
+	buf[2] = (char)((uv>>12)&0x3f)|0x80;
+	buf[3] = (char)((uv>>6)&0x3f)|0x80;
+	buf[4] = (char)(uv&0x3f)|0x80;
 	return 5;
     }
     if (uv <= 0x7fffffff) {
-	buf[0] = ((uv>>30)&0xff)|0xfc;
-	buf[1] = ((uv>>24)&0x3f)|0x80;
-	buf[2] = ((uv>>18)&0x3f)|0x80;
-	buf[3] = ((uv>>12)&0x3f)|0x80;
-	buf[4] = ((uv>>6)&0x3f)|0x80;
-	buf[5] = (uv&0x3f)|0x80;
+	buf[0] = (char)((uv>>30)&0xff)|0xfc;
+	buf[1] = (char)((uv>>24)&0x3f)|0x80;
+	buf[2] = (char)((uv>>18)&0x3f)|0x80;
+	buf[3] = (char)((uv>>12)&0x3f)|0x80;
+	buf[4] = (char)((uv>>6)&0x3f)|0x80;
+	buf[5] = (char)(uv&0x3f)|0x80;
 	return 6;
     }
     rb_raise(rb_eRangeError, "pack(U): value out of range");

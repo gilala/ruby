@@ -21,6 +21,10 @@ enum ruby_public_object_vmkey {
     rb_vmkey_mProcess,
 #define rb_mProcess (*rb_vm_specific_ptr(rb_vmkey_mProcess))
     rb_vmkey_cBasicObject,
+#define rb_mWaitReadable (*rb_vm_specific_ptr(rb_vmkey_mWaitReadable))
+    rb_vmkey_mWaitReadable,
+#define rb_mWaitWritable (*rb_vm_specific_ptr(rb_vmkey_mWaitWritable))
+    rb_vmkey_mWaitWritable,
 #define rb_cBasicObject (*rb_vm_specific_ptr(rb_vmkey_cBasicObject))
     rb_vmkey_cObject,
 #define rb_cObject (*rb_vm_specific_ptr(rb_vmkey_cObject))

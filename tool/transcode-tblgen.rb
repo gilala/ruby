@@ -19,6 +19,7 @@ def c_esc(str)
 end
 
 class StrSet
+  attr_reader :pat
   def self.parse(pattern)
     if /\A\s*(([0-9a-f][0-9a-f]|\{([0-9a-f][0-9a-f]|[0-9a-f][0-9a-f]-[0-9a-f][0-9a-f])(,([0-9a-f][0-9a-f]|[0-9a-f][0-9a-f]-[0-9a-f][0-9a-f]))*\})+(\s+|\z))*\z/i !~ pattern
       raise ArgumentError, "invalid pattern: #{pattern.inspect}"
@@ -68,7 +69,7 @@ class StrSet
 
   def eql?(other)
     self.class == other.class &&
-    @pat == other.instance_eval { @pat }
+    @pat == other.pat
   end
 
   alias == eql?
@@ -237,7 +238,10 @@ class ActionMap
       else
         ss.each_firstbyte {|byte, rest|
           h[byte] ||= {}
-          if h[byte][rest]
+          if h[byte][rest].nil?
+          elsif action == :nomap0
+            next
+          elsif h[byte][rest] != :nomap0
             raise "ambiguous %s or %s (%02X/%s)" % [h[byte][rest], action, byte, rest]
           end
           h[byte][rest] = action
@@ -314,7 +318,8 @@ class ActionMap
 
   def generate_info(info)
     case info
-    when :nomap
+    when :nomap, :nomap0
+      # :nomap0 is low priority.  it never collides.
       "NOMAP"
     when :undef
       "UNDEF"
@@ -334,6 +339,8 @@ class ActionMap
       "o2(0x#$1,0x#$2)"
     when /\A([0-9a-f][0-9a-f])([0-9a-f][0-9a-f])([0-9a-f][0-9a-f])\z/i
       "o3(0x#$1,0x#$2,0x#$3)"
+    when /\A([0-9a-f][0-9a-f])(3[0-9])([0-9a-f][0-9a-f])(3[0-9])\z/i
+      "g4(0x#$1,0x#$2,0x#$3,0x#$4)"
     when /\A(f[0-7])([0-9a-f][0-9a-f])([0-9a-f][0-9a-f])([0-9a-f][0-9a-f])\z/i
       "o4(0x#$1,0x#$2,0x#$3,0x#$4)"
     when /\A([0-9a-f][0-9a-f]){4,259}\z/i
@@ -431,7 +438,7 @@ End
       else
         name_hint2 = nil
         name_hint2 = "#{name_hint}_#{'%02X' % byte}" if name_hint
-        table[byte] = "/*BYTE_LOOKUP*/" + rest.generate_node(bytes_code, words_code, name_hint2, rest_valid_encoding)
+        table[byte] = "/*BYTE_LOOKUP*/" + rest.gennode(bytes_code, words_code, name_hint2, rest_valid_encoding)
       end
     }
 
@@ -605,7 +612,7 @@ end
 TRANSCODERS = []
 TRANSCODE_GENERATED_TRANSCODER_CODE = ''
 
-def transcode_tblgen(from, to, map)
+def transcode_tbl_only(from, to, map)
   if VERBOSE_MODE
     if from.empty? || to.empty?
       STDERR.puts "converter for #{from.empty? ? to : from}"
@@ -624,6 +631,11 @@ def transcode_tblgen(from, to, map)
   end
   map = encode_utf8(map)
   real_tree_name, max_input = transcode_compile_tree(tree_name, from, map)
+  return map, tree_name, real_tree_name, max_input
+end
+
+def transcode_tblgen(from, to, map)
+  map, tree_name, real_tree_name, max_input = transcode_tbl_only(from, to, map)
   transcoder_name = "rb_#{tree_name}"
   TRANSCODERS << transcoder_name
   input_unit_length = UnitLength[from]
@@ -658,7 +670,7 @@ def transcode_generated_code
     "\#define TRANSCODE_TABLE_INFO " +
     "#{OUTPUT_PREFIX}byte_array, #{TRANSCODE_GENERATED_BYTES_CODE.length}, " +
     "#{OUTPUT_PREFIX}word_array, #{TRANSCODE_GENERATED_WORDS_CODE.length}, " +
-    "sizeof(unsigned int)\n" +
+    "((int)sizeof(unsigned int))\n" +
     TRANSCODE_GENERATED_TRANSCODER_CODE
 end
 

@@ -64,6 +64,8 @@ enum ruby_private_object_vmkey {
 
     rb_vmkey_ivar_symbols,
 
+    rb_vmkey_default_rand,
+
     ruby_builtin_object_count,
     ruby_private_object_count = ruby_builtin_object_count - ruby_private_object_vmkey_begin + 1
 };

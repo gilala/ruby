@@ -16,6 +16,7 @@ $extlibs = nil
 $extpath = nil
 $ignore = nil
 $message = nil
+$command_output = nil
 
 $progname = $0
 alias $PROGRAM_NAME $0
@@ -79,6 +80,7 @@ def extract_makefile(makefile, keep = true)
   end
   $objs = (m[/^OBJS[ \t]*=[ \t](.*)/, 1] || "").split
   $srcs = (m[/^SRCS[ \t]*=[ \t](.*)/, 1] || "").split
+  $distcleanfiles = (m[/^DISTCLEANFILES[ \t]*=[ \t](.*)/, 1] || "").split
   $LOCAL_LIBS = m[/^LOCAL_LIBS[ \t]*=[ \t]*(.*)/, 1] || ""
   $LIBPATH = Shellwords.shellwords(m[/^libpath[ \t]*=[ \t]*(.*)/, 1] || "") - %w[$(libdir) $(topdir)]
   true
@@ -104,8 +106,8 @@ def extmake(target)
     $mdir = target
     $srcdir = File.join($top_srcdir, "ext", $mdir)
     $preload = nil
-    $objs = ""
-    $srcs = ""
+    $objs = []
+    $srcs = []
     $compiled[target] = false
     makefile = "./Makefile"
     ok = File.exist?(makefile)
@@ -137,18 +139,19 @@ def extmake(target)
       begin
 	$extconf_h = nil
 	ok &&= extract_makefile(makefile)
+	old_objs = $objs
+	old_cleanfiles = $distcleanfiles
+	conf = ["#{$srcdir}/makefile.rb", "#{$srcdir}/extconf.rb"].find {|f| File.exist?(f)}
 	if (($extconf_h && !File.exist?($extconf_h)) ||
 	    !(t = modified?(makefile, MTIMES)) ||
-	    ["#{$srcdir}/makefile.rb", "#{$srcdir}/extconf.rb", "#{$srcdir}/depend"].any? {|f| modified?(f, [t])})
+	    [conf, "#{$srcdir}/depend"].any? {|f| modified?(f, [t])})
         then
 	  ok = false
           init_mkmf
 	  Logging::logfile 'mkmf.log'
 	  rm_f makefile
-	  if File.exist?($0 = "#{$srcdir}/makefile.rb")
-	    load $0
-	  elsif File.exist?($0 = "#{$srcdir}/extconf.rb")
-	    load $0
+	  if conf
+	    load $0 = conf
 	  else
 	    create_makefile(target)
 	  end
@@ -178,6 +181,8 @@ def extmake(target)
       args += ["static"] unless $clean
       $extlist.push [$static, $target, File.basename($target), $preload]
     end
+    FileUtils.rm_f(old_cleanfiles - $distcleanfiles)
+    FileUtils.rm_f(old_objs - $objs)
     unless system($make, *args)
       $ignore or $continue or return false
     end
@@ -231,6 +236,7 @@ end
 
 def parse_args()
   $mflags = []
+  $makeflags = []
 
   $optparser ||= OptionParser.new do |opts|
     opts.on('-n') {$dryrun = true}
@@ -259,10 +265,14 @@ def parse_args()
       if arg = v.first
         arg.insert(0, '-') if /\A[^-][^=]*\Z/ =~ arg
       end
+      $makeflags.concat(v.reject {|arg| /\AMINIRUBY=/ =~ arg}.quote)
       $mflags.concat(v)
     end
     opts.on('--message [MESSAGE]', String) do |v|
       $message = v
+    end
+    opts.on('--command-output=FILE', String) do |v|
+      $command_output = v
     end
   end
   begin
@@ -352,7 +362,7 @@ $static_ext = {}
 if $extstatic
   $extstatic.each do |t|
     target = t
-    target = target.downcase if /mswin32|bccwin32/ =~ RUBY_PLATFORM
+    target = target.downcase if File::FNM_SYSCASE.nonzero?
     $static_ext[target] = $static_ext.size
   end
 end
@@ -372,7 +382,7 @@ for dir in ["ext", File::join($top_srcdir, "ext")]
 	end
 	next
       end
-      target = target.downcase if /mswin32|bccwin32/ =~ RUBY_PLATFORM
+      target = target.downcase if File::FNM_SYSCASE.nonzero?
       $static_ext[target] = $static_ext.size
     end
     MTIMES << f.mtime
@@ -522,6 +532,7 @@ void Init_ext _((void))\n{\n#$extinit}
   puts(*conf)
   $stdout.flush
   $mflags.concat(conf)
+  $makeflags.concat(conf)
 else
   FileUtils.rm_f(extinit.to_a)
 end
@@ -529,7 +540,7 @@ rubies = []
 %w[RUBY RUBYW STATIC_RUBY].each {|n|
   r = n
   if r = arg_config("--"+r.downcase) || config_string(r+"_INSTALL_NAME")
-    rubies << Config.expand(r+=EXEEXT)
+    rubies << RbConfig.expand(r+=EXEEXT)
     $mflags << "#{n}=#{r}"
   end
 }
@@ -538,9 +549,10 @@ Dir.chdir ".."
 unless $destdir.to_s.empty?
   $mflags.defined?("DESTDIR") or $mflags << "DESTDIR=#{$destdir}"
 end
-puts "making #{rubies.join(', ')}"
-$stdout.flush
+message = "making #{rubies.join(', ')}"
 $mflags.concat(rubies)
+$makeflags.uniq!
+$makeflags.concat(rubies)
 
 if $nmake == ?b
   unless (vars = $mflags.grep(/\A\w+=/n)).empty?
@@ -556,7 +568,27 @@ if $nmake == ?b
 end
 $mflags.unshift("topdir=#$topdir")
 ENV.delete("RUBYOPT")
-system($make, *sysquote($mflags)) or exit($?.exitstatus)
+if $command_output
+  message = "echo #{message}"
+  cmd = $makeflags.quote.join(' ')
+  open($command_output, 'wb') do |f|
+    case $command_output
+    when /\.sh\z/
+      f.puts message, "rm -f $0; exec \"$@\" #{cmd}"
+    when /\.bat\z/
+      ["@echo off", message, "%* #{cmd}", "del %0 & exit %ERRORLEVEL%"].each do |s|
+        f.print s, "\r\n"
+      end
+    else
+      f.puts cmd
+    end
+    f.chmod(0755)
+  end
+else
+  puts message
+  $stdout.flush
+  system($make, *sysquote($mflags)) or exit($?.exitstatus)
+end
 
 #Local variables:
 # mode: ruby

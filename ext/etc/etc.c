@@ -22,10 +22,6 @@
 #include <grp.h>
 #endif
 
-#ifndef HAVE_TYPE_UID_T
-#define uid_t int
-#endif
-
 static VALUE sPasswd;
 #ifdef HAVE_GETGRENT
 static VALUE sGroup;
@@ -124,7 +120,7 @@ etc_getpwuid(int argc, VALUE *argv, VALUE obj)
 {
 #if defined(HAVE_GETPWENT)
     VALUE id;
-    uid_t uid;
+    rb_uid_t uid;
     struct passwd *pwd;
 
     rb_secure(4);
@@ -186,6 +182,16 @@ passwd_iterate(void)
     endpwent();
     return Qnil;
 }
+
+static void
+each_passwd(void)
+{
+    if (passwd_blocking) {
+	rb_raise(rb_eRuntimeError, "parallel passwd iteration");
+    }
+    passwd_blocking = Qtrue;
+    rb_ensure(passwd_iterate, 0, passwd_ensure, 0);
+}
 #endif
 
 /* Provides a convenient Ruby iterator which executes a block for each entry 
@@ -211,17 +217,41 @@ etc_passwd(VALUE obj)
 
     rb_secure(4);
     if (rb_block_given_p()) {
-	if (passwd_blocking) {
-	    rb_raise(rb_eRuntimeError, "parallel passwd iteration");
-	}
-	passwd_blocking = Qtrue;
-	rb_ensure(passwd_iterate, 0, passwd_ensure, 0);
+	each_passwd();
     }
-    if (pw = getpwent()) {
+    else if (pw = getpwent()) {
 	return setup_passwd(pw);
     }
 #endif
     return Qnil;
+}
+
+/* Iterates for each entry in the /etc/passwd file if a block is given.
+ * If no block is given, returns the enumerator.
+ *
+ * The code block is passed an Struct::Passwd struct; see getpwent above for 
+ * details.
+ *
+ * Example:
+ *
+ *     require 'etc'
+ *
+ *     Etc::Passwd.each {|u|
+ *       puts u.name + " = " + u.gecos
+ *     }
+ *
+ *     Etc::Passwd.collect {|u| u.gecos}
+ *     Etc::Passwd.collect {|u| u.gecos}
+ *
+ */
+static VALUE
+etc_each_passwd(VALUE obj)
+{
+#ifdef HAVE_GETPWENT
+    RETURN_ENUMERATOR(obj, 0, 0);
+    each_passwd();
+#endif
+    return obj;
 }
 
 /* Resets the process of reading the /etc/passwd file, so that the next call
@@ -390,6 +420,16 @@ group_iterate(void)
     endgrent();
     return Qnil;
 }
+
+static void
+each_group(void)
+{
+    if (group_blocking) {
+	rb_raise(rb_eRuntimeError, "parallel group iteration");
+    }
+    group_blocking = Qtrue;
+    rb_ensure(group_iterate, 0, group_ensure, 0);
+}
 #endif
 
 /* Provides a convenient Ruby iterator which executes a block for each entry 
@@ -415,18 +455,42 @@ etc_group(VALUE obj)
 
     rb_secure(4);
     if (rb_block_given_p()) {
-	if (group_blocking) {
-	    rb_raise(rb_eRuntimeError, "parallel group iteration");
-	}
-	group_blocking = Qtrue;
-	rb_ensure(group_iterate, 0, group_ensure, 0);
+	each_group();
     }
-    if (grp = getgrent()) {
+    else if (grp = getgrent()) {
 	return setup_group(grp);
     }
 #endif
     return Qnil;
 }
+
+#ifdef HAVE_GETGRENT
+/* Iterates for each entry in the /etc/group file if a block is given.
+ * If no block is given, returns the enumerator.
+ *
+ * The code block is passed an Struct::Group struct; see getpwent above for 
+ * details.
+ *
+ * Example:
+ *
+ *     require 'etc'
+ *
+ *     Etc::Group.each {|g|
+ *       puts g.name + ": " + g.mem.join(', ')
+ *     }
+ *
+ *     Etc::Group.collect {|g| g.name}
+ *     Etc::Group.select {|g| !g.mem.empty?}
+ *
+ */
+static VALUE
+etc_each_group(VALUE obj)
+{
+    RETURN_ENUMERATOR(obj, 0, 0);
+    each_group();
+    return obj;
+}
+#endif
 
 /* Resets the process of reading the /etc/group file, so that the next call
  * to getgrent will return the first entry again.
@@ -538,6 +602,8 @@ Init_etc(void)
 #endif
 				NULL);
     rb_define_const(mEtc, "Passwd", sPasswd);
+    rb_extend_object(sPasswd, rb_mEnumerable);
+    rb_define_singleton_method(sPasswd, "each", etc_each_passwd, 0);
 
 #ifdef HAVE_GETGRENT
     sGroup = rb_struct_define("Group", "name",
@@ -547,5 +613,7 @@ Init_etc(void)
 			      "gid", "mem", NULL);
 
     rb_define_const(mEtc, "Group", sGroup);
+    rb_extend_object(sGroup, rb_mEnumerable);
+    rb_define_singleton_method(sGroup, "each", etc_each_group, 0);
 #endif
 }

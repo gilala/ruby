@@ -1084,3 +1084,80 @@ assert_equal '[1, [:foo, 3, 4, :foo]]', %q{
   a = b = [:foo]
   regular(1, *a, *[3, 4], *b)
 }
+
+assert_equal '["B", "A"]', %q{
+  class A
+    def m
+      'A'
+    end
+  end
+
+  class B < A
+    define_method(:m) do    
+      ['B', super()]
+    end
+  end
+
+  class C < B
+  end
+
+  C.new.m
+}
+
+assert_equal 'ok', %q{
+  module Foo
+    def foo
+      begin
+        super
+      rescue NoMethodError
+        :ok
+      end
+    end
+    module_function :foo
+  end
+  Foo.foo
+}, '[ruby-dev:37587]'
+
+assert_equal 'Object#foo', %q{
+  class Object
+    def self.foo
+      "Object.foo"
+    end
+    def foo
+      "Object#foo"
+    end
+  end
+
+  module Foo
+    def foo
+      begin
+        super
+      rescue NoMethodError
+        :ok
+      end
+    end
+    module_function :foo
+  end
+  Foo.foo
+}, '[ruby-dev:37587]'
+
+assert_normal_exit %q{
+  class BasicObject
+    remove_method :method_missing
+  end
+  begin
+    "a".lalala!
+  rescue NoMethodError => e
+    e.message == "undefined method `lalala!' for \"a\":String" ? :ok : :ng
+  end
+}, '[ruby-core:22298]'
+
+assert_equal 'ok', %q{
+  "hello"[0] ||= "H"
+  "ok"
+}
+
+assert_equal 'ok', %q{
+  "hello"[0, 1] ||= "H"
+  "ok"
+}

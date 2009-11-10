@@ -6,7 +6,7 @@
   created at: Wed Jan 20 13:59:32 JST 1999
 
   Copyright (C) 1997-2008  Shugo Maeda
-  Copyright (C) 2008       TAKAO Kouji
+  Copyright (C) 2008-2009  TAKAO Kouji
 
   $Id$
 
@@ -68,8 +68,6 @@ static char **readline_attempted_completion_function(const char *text,
     str = rb_str_conv_enc(str, rb_enc_get(str), rb_locale_encoding());\
 } while (0)\
 
-#ifdef HAVE_RL_EVENT_HOOK
-#define BUSY_WAIT 0
 
 /*
  * Document-class: Readline
@@ -106,6 +104,26 @@ static char **readline_attempted_completion_function(const char *text,
  * Documented by TAKAO Kouji <kouji at takao7 dot net>.
  */
 
+#if defined HAVE_RL_GETC_FUNCTION
+static VALUE readline_instream;
+static ID id_getbyte;
+
+static int readline_getc(FILE *);
+static int
+readline_getc(FILE *input)
+{
+    rb_io_t *ifp = 0;
+    VALUE c;
+    if (!readline_instream) return rl_getc(input);
+    GetOpenFile(readline_instream, ifp);
+    if (rl_instream != ifp->stdio_file) return rl_getc(input);
+    c = rb_funcall(readline_instream, id_getbyte, 0, 0);
+    if (NIL_P(c)) return EOF;
+    return NUM2CHR(c);
+}
+#elif defined HAVE_RL_EVENT_HOOK
+#define BUSY_WAIT 0
+
 static int readline_event(void);
 static int
 readline_event(void)
@@ -122,6 +140,12 @@ readline_event(void)
 #endif
 }
 #endif
+
+static VALUE
+readline_get(VALUE prompt)
+{
+    return (VALUE)readline((char *)prompt);
+}
 
 /*
  * call-seq:
@@ -223,13 +247,16 @@ readline_readline(int argc, VALUE *argv, VALUE self)
 	prompt = RSTRING_PTR(tmp);
     }
 
-    if (!isatty(0) && errno == EBADF) rb_raise(rb_eIOError, "stdin closed");
+    if (!isatty(0) && errno == EBADF) rb_raise(rb_eIOError, "closed stdin");
 
-    buff = (char*)rb_protect((VALUE(*)_((VALUE)))readline, (VALUE)prompt,
-                              &status);
+#ifdef _WIN32
+    rl_prep_terminal(1);
+#endif
+    buff = (char*)rb_protect(readline_get, (VALUE)prompt, &status);
     if (status) {
 #if defined HAVE_RL_CLEANUP_AFTER_SIGNAL
         /* restore terminal mode and signal handler*/
+        rl_free_line_state();
         rl_cleanup_after_signal();
 #elif defined HAVE_RL_DEPREP_TERM_FUNCTION
         /* restore terminal mode */
@@ -272,6 +299,9 @@ readline_s_set_input(VALUE self, VALUE input)
     Check_Type(input, T_FILE);
     GetOpenFile(input, ifp);
     rl_instream = rb_io_stdio_file(ifp);
+#ifdef HAVE_RL_GETC_FUNCTION
+    readline_instream = input;
+#endif
     return input;
 }
 
@@ -304,6 +334,8 @@ readline_s_set_output(VALUE self, VALUE output)
  * should take input-string, and return an array of completion
  * candidates.
  *
+ * Set default if +proc+ is nil.
+ *
  * Raises ArgumentError exception if +proc+ does not respond to call method.
  *
  * Raises SecurityError exception if $SAFE is 4.
@@ -312,7 +344,7 @@ static VALUE
 readline_s_set_completion_proc(VALUE self, VALUE proc)
 {
     rb_secure(4);
-    if (!rb_respond_to(proc, rb_intern("call")))
+    if (!NIL_P(proc) && !rb_respond_to(proc, rb_intern("call")))
 	rb_raise(rb_eArgError, "argument must respond to `call'");
     return rb_ivar_set(mReadline, completion_proc, proc);
 }
@@ -370,13 +402,61 @@ readline_s_get_completion_case_fold(VALUE self)
     return rb_attr_get(mReadline, completion_case_fold);
 }
 
+#ifdef HAVE_RL_LINE_BUFFER
+/*
+ * call-seq:
+ *   Readline.line_buffer -> string
+ *
+ * Returns the full line that is being edited. This is useful from
+ * within the complete_proc for determining the context of the
+ * completion request.
+ *
+ * The length of +Readline.line_buffer+ and GNU Readline's rl_end are
+ * same.
+ */
+static VALUE
+readline_s_get_line_buffer(VALUE self)
+{
+    rb_secure(4);
+    if (rl_line_buffer == NULL)
+	return Qnil;
+    return rb_tainted_str_new2(rl_line_buffer);
+}
+#else
+#define readline_s_get_line_buffer rb_f_notimplement
+#endif
+
+#ifdef HAVE_RL_POINT
+/*
+ * call-seq:
+ *   Readline.point -> int
+ *
+ * Returns the index of the current cursor position in
+ * +Readline.line_buffer+.
+ *
+ * The index in +Readline.line_buffer+ which matches the start of
+ * input-string passed to completion_proc is computed by subtracting
+ * the length of input-string from +Readline.point+.
+ *
+ *   start = (the length of input-string) - Readline.point
+ */
+static VALUE
+readline_s_get_point(VALUE self)
+{
+    rb_secure(4);
+    return INT2NUM(rl_point);
+}
+#else
+#define readline_s_get_point rb_f_notimplement
+#endif
+
 static char **
 readline_attempted_completion_function(const char *text, int start, int end)
 {
     VALUE proc, ary, temp;
     char **result;
     int case_fold;
-    int i, matches;
+    long i, matches;
 
     proc = rb_attr_get(mReadline, completion_proc);
     if (NIL_P(proc))
@@ -434,6 +514,61 @@ readline_attempted_completion_function(const char *text, int start, int end)
     return result;
 }
 
+#ifdef HAVE_RL_SET_SCREEN_SIZE
+/*
+ * call-seq:
+ *   Readline.set_screen_size(rows, columns) -> self
+ *
+ * Set terminal size to +rows+ and +columns+.
+ *
+ * See GNU Readline's rl_set_screen_size function. 
+ *
+ * Raises NotImplementedError if the using readline library does not support.
+ *
+ * Raises SecurityError exception if $SAFE is 4.
+ */
+static VALUE
+readline_s_set_screen_size(VALUE self, VALUE rows, VALUE columns)
+{
+    rb_secure(4);
+    rl_set_screen_size(NUM2INT(rows), NUM2INT(columns));
+    return self;
+}
+#else
+#define readline_s_set_screen_size rb_f_notimplement
+#endif
+
+#ifdef HAVE_RL_GET_SCREEN_SIZE
+/*
+ * call-seq:
+ *   Readline.get_screen_size -> [rows, columns]
+ *
+ * Returns the terminal's rows and columns.
+ *
+ * See GNU Readline's rl_get_screen_size function. 
+ *
+ * Raises NotImplementedError if the using readline library does not support.
+ *
+ * Raises SecurityError exception if $SAFE is 4.
+ */
+static VALUE
+readline_s_get_screen_size(VALUE self)
+{
+    int rows, columns;
+    VALUE res;
+    
+    rb_secure(4);
+    rl_get_screen_size(&rows, &columns);
+    res = rb_ary_new();
+    rb_ary_push(res, INT2NUM(rows));
+    rb_ary_push(res, INT2NUM(columns));
+    return res;
+}
+#else
+#define readline_s_get_screen_size rb_f_notimplement
+#endif
+
+#ifdef HAVE_RL_VI_EDITING_MODE
 /*
  * call-seq:
  *   Readline.vi_editing_mode -> nil
@@ -448,16 +583,15 @@ readline_attempted_completion_function(const char *text, int start, int end)
 static VALUE
 readline_s_vi_editing_mode(VALUE self)
 {
-#ifdef HAVE_RL_VI_EDITING_MODE
     rb_secure(4);
     rl_vi_editing_mode(1,0);
     return Qnil;
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif /* HAVE_RL_VI_EDITING_MODE */
 }
+#else
+#define readline_s_vi_editing_mode rb_f_notimplement
+#endif
 
+#ifdef HAVE_RL_EDITING_MODE
 /*
  * call-seq:
  *   Readline.vi_editing_mode? -> bool
@@ -471,15 +605,14 @@ readline_s_vi_editing_mode(VALUE self)
 static VALUE
 readline_s_vi_editing_mode_p(VALUE self)
 {
-#ifdef HAVE_RL_EDITING_MODE
     rb_secure(4);
     return rl_editing_mode == 0 ? Qtrue : Qfalse;
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif /* HAVE_RL_EDITING_MODE */
 }
+#else
+#define readline_s_vi_editing_mode_p rb_f_notimplement
+#endif
 
+#ifdef HAVE_RL_EMACS_EDITING_MODE
 /*
  * call-seq:
  *   Readline.emacs_editing_mode -> nil
@@ -494,16 +627,15 @@ readline_s_vi_editing_mode_p(VALUE self)
 static VALUE
 readline_s_emacs_editing_mode(VALUE self)
 {
-#ifdef HAVE_RL_EMACS_EDITING_MODE
     rb_secure(4);
     rl_emacs_editing_mode(1,0);
     return Qnil;
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif /* HAVE_RL_EMACS_EDITING_MODE */
 }
+#else
+#define readline_s_emacs_editing_mode rb_f_notimplement
+#endif
 
+#ifdef  HAVE_RL_EDITING_MODE
 /*
  * call-seq:
  *   Readline.emacs_editing_mode? -> bool
@@ -517,15 +649,14 @@ readline_s_emacs_editing_mode(VALUE self)
 static VALUE
 readline_s_emacs_editing_mode_p(VALUE self)
 {
-#ifdef  HAVE_RL_EDITING_MODE
     rb_secure(4);
     return rl_editing_mode == 1 ? Qtrue : Qfalse;
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif /* HAVE_RL_EDITING_MODE */
 }
+#else
+#define readline_s_emacs_editing_mode_p rb_f_notimplement
+#endif
 
+#ifdef HAVE_RL_COMPLETION_APPEND_CHARACTER
 /*
  * call-seq:
  *   Readline.completion_append_character = char
@@ -567,7 +698,6 @@ readline_s_emacs_editing_mode_p(VALUE self)
 static VALUE
 readline_s_set_completion_append_character(VALUE self, VALUE str)
 {
-#ifdef HAVE_RL_COMPLETION_APPEND_CHARACTER
     rb_secure(4);
     if (NIL_P(str)) {
 	rl_completion_append_character = '\0';
@@ -581,12 +711,12 @@ readline_s_set_completion_append_character(VALUE self, VALUE str)
 	}
     }
     return self;
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif /* HAVE_RL_COMPLETION_APPEND_CHARACTER */
 }
+#else
+#define readline_s_set_completion_append_character rb_f_notimplement
+#endif
 
+#ifdef HAVE_RL_COMPLETION_APPEND_CHARACTER
 /*
  * call-seq:
  *   Readline.completion_append_character -> char
@@ -601,22 +731,20 @@ readline_s_set_completion_append_character(VALUE self, VALUE str)
 static VALUE
 readline_s_get_completion_append_character(VALUE self)
 {
-#ifdef HAVE_RL_COMPLETION_APPEND_CHARACTER
-    VALUE str;
+    char buf[1];
 
     rb_secure(4);
     if (rl_completion_append_character == '\0')
 	return Qnil;
 
-    str = rb_str_new(0, 1);
-    RSTRING_PTR(str)[0] = rl_completion_append_character;
-    return str;
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif /* HAVE_RL_COMPLETION_APPEND_CHARACTER */
+    buf[0] = (char) rl_completion_append_character;
+    return rb_locale_str_new(buf, 1);
 }
+#else
+#define readline_s_get_completion_append_character rb_f_notimplement
+#endif
 
+#ifdef HAVE_RL_BASIC_WORD_BREAK_CHARACTERS
 /*
  * call-seq:
  *   Readline.basic_word_break_characters = string
@@ -632,7 +760,6 @@ readline_s_get_completion_append_character(VALUE self)
 static VALUE
 readline_s_set_basic_word_break_characters(VALUE self, VALUE str)
 {
-#ifdef HAVE_RL_BASIC_WORD_BREAK_CHARACTERS
     static char *basic_word_break_characters = NULL;
 
     rb_secure(4);
@@ -649,12 +776,12 @@ readline_s_set_basic_word_break_characters(VALUE self, VALUE str)
     basic_word_break_characters[RSTRING_LEN(str)] = '\0';
     rl_basic_word_break_characters = basic_word_break_characters;
     return self;
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif /* HAVE_RL_BASIC_WORD_BREAK_CHARACTERS */
 }
+#else
+#define readline_s_set_basic_word_break_characters rb_f_notimplement
+#endif
 
+#ifdef HAVE_RL_BASIC_WORD_BREAK_CHARACTERS
 /*
  * call-seq:
  *   Readline.basic_word_break_characters -> string
@@ -669,17 +796,16 @@ readline_s_set_basic_word_break_characters(VALUE self, VALUE str)
 static VALUE
 readline_s_get_basic_word_break_characters(VALUE self, VALUE str)
 {
-#ifdef HAVE_RL_BASIC_WORD_BREAK_CHARACTERS
     rb_secure(4);
     if (rl_basic_word_break_characters == NULL)
 	return Qnil;
     return rb_locale_str_new_cstr(rl_basic_word_break_characters);
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif /* HAVE_RL_BASIC_WORD_BREAK_CHARACTERS */
 }
+#else
+#define readline_s_get_basic_word_break_characters rb_f_notimplement
+#endif
 
+#ifdef HAVE_RL_COMPLETER_WORD_BREAK_CHARACTERS
 /*
  * call-seq:
  *   Readline.completer_word_break_characters = string
@@ -695,7 +821,6 @@ readline_s_get_basic_word_break_characters(VALUE self, VALUE str)
 static VALUE
 readline_s_set_completer_word_break_characters(VALUE self, VALUE str)
 {
-#ifdef HAVE_RL_COMPLETER_WORD_BREAK_CHARACTERS
     static char *completer_word_break_characters = NULL;
 
     rb_secure(4);
@@ -712,12 +837,12 @@ readline_s_set_completer_word_break_characters(VALUE self, VALUE str)
     completer_word_break_characters[RSTRING_LEN(str)] = '\0';
     rl_completer_word_break_characters = completer_word_break_characters;
     return self;
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif /* HAVE_RL_COMPLETER_WORD_BREAK_CHARACTERS */
 }
+#else
+#define readline_s_set_completer_word_break_characters rb_f_notimplement
+#endif
 
+#ifdef HAVE_RL_COMPLETER_WORD_BREAK_CHARACTERS
 /*
  * call-seq:
  *   Readline.completer_word_break_characters -> string
@@ -732,17 +857,16 @@ readline_s_set_completer_word_break_characters(VALUE self, VALUE str)
 static VALUE
 readline_s_get_completer_word_break_characters(VALUE self, VALUE str)
 {
-#ifdef HAVE_RL_COMPLETER_WORD_BREAK_CHARACTERS
     rb_secure(4);
     if (rl_completer_word_break_characters == NULL)
 	return Qnil;
     return rb_locale_str_new_cstr(rl_completer_word_break_characters);
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif /* HAVE_RL_COMPLETER_WORD_BREAK_CHARACTERS */
 }
+#else
+#define readline_s_get_completer_word_break_characters rb_f_notimplement
+#endif
 
+#ifdef HAVE_RL_BASIC_QUOTE_CHARACTERS
 /*
  * call-seq:
  *   Readline.basic_quote_characters = string
@@ -756,7 +880,6 @@ readline_s_get_completer_word_break_characters(VALUE self, VALUE str)
 static VALUE
 readline_s_set_basic_quote_characters(VALUE self, VALUE str)
 {
-#ifdef HAVE_RL_BASIC_QUOTE_CHARACTERS
     static char *basic_quote_characters = NULL;
 
     rb_secure(4);
@@ -774,12 +897,12 @@ readline_s_set_basic_quote_characters(VALUE self, VALUE str)
     rl_basic_quote_characters = basic_quote_characters;
 
     return self;
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif /* HAVE_RL_BASIC_QUOTE_CHARACTERS */
 }
+#else
+#define readline_s_set_basic_quote_characters rb_f_notimplement
+#endif
 
+#ifdef HAVE_RL_BASIC_QUOTE_CHARACTERS
 /*
  * call-seq:
  *   Readline.basic_quote_characters -> string
@@ -793,17 +916,16 @@ readline_s_set_basic_quote_characters(VALUE self, VALUE str)
 static VALUE
 readline_s_get_basic_quote_characters(VALUE self, VALUE str)
 {
-#ifdef HAVE_RL_BASIC_QUOTE_CHARACTERS
     rb_secure(4);
     if (rl_basic_quote_characters == NULL)
 	return Qnil;
     return rb_locale_str_new_cstr(rl_basic_quote_characters);
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif /* HAVE_RL_BASIC_QUOTE_CHARACTERS */
 }
+#else
+#define readline_s_get_basic_quote_characters rb_f_notimplement
+#endif
 
+#ifdef HAVE_RL_COMPLETER_QUOTE_CHARACTERS
 /*
  * call-seq:
  *   Readline.completer_quote_characters = string
@@ -820,7 +942,6 @@ readline_s_get_basic_quote_characters(VALUE self, VALUE str)
 static VALUE
 readline_s_set_completer_quote_characters(VALUE self, VALUE str)
 {
-#ifdef HAVE_RL_COMPLETER_QUOTE_CHARACTERS
     static char *completer_quote_characters = NULL;
 
     rb_secure(4);
@@ -837,12 +958,12 @@ readline_s_set_completer_quote_characters(VALUE self, VALUE str)
     rl_completer_quote_characters = completer_quote_characters;
 
     return self;
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif /* HAVE_RL_COMPLETER_QUOTE_CHARACTERS */
 }
+#else
+#define readline_s_set_completer_quote_characters rb_f_notimplement
+#endif
 
+#ifdef HAVE_RL_COMPLETER_QUOTE_CHARACTERS
 /*
  * call-seq:
  *   Readline.completer_quote_characters -> string
@@ -857,17 +978,16 @@ readline_s_set_completer_quote_characters(VALUE self, VALUE str)
 static VALUE
 readline_s_get_completer_quote_characters(VALUE self, VALUE str)
 {
-#ifdef HAVE_RL_COMPLETER_QUOTE_CHARACTERS
     rb_secure(4);
     if (rl_completer_quote_characters == NULL)
 	return Qnil;
     return rb_locale_str_new_cstr(rl_completer_quote_characters);
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif /* HAVE_RL_COMPLETER_QUOTE_CHARACTERS */
 }
+#else
+#define readline_s_get_completer_quote_characters rb_f_notimplement
+#endif
 
+#ifdef HAVE_RL_FILENAME_QUOTE_CHARACTERS
 /*
  * call-seq:
  *   Readline.filename_quote_characters = string
@@ -882,7 +1002,6 @@ readline_s_get_completer_quote_characters(VALUE self, VALUE str)
 static VALUE
 readline_s_set_filename_quote_characters(VALUE self, VALUE str)
 {
-#ifdef HAVE_RL_FILENAME_QUOTE_CHARACTERS
     static char *filename_quote_characters = NULL;
 
     rb_secure(4);
@@ -899,12 +1018,12 @@ readline_s_set_filename_quote_characters(VALUE self, VALUE str)
     rl_filename_quote_characters = filename_quote_characters;
 
     return self;
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif /* HAVE_RL_FILENAME_QUOTE_CHARACTERS */
 }
+#else
+#define readline_s_set_filename_quote_characters rb_f_notimplement
+#endif
 
+#ifdef HAVE_RL_FILENAME_QUOTE_CHARACTERS
 /*
  * call-seq:
  *   Readline.filename_quote_characters -> string
@@ -919,16 +1038,34 @@ readline_s_set_filename_quote_characters(VALUE self, VALUE str)
 static VALUE
 readline_s_get_filename_quote_characters(VALUE self, VALUE str)
 {
-#ifdef HAVE_RL_FILENAME_QUOTE_CHARACTERS
     rb_secure(4);
     if (rl_filename_quote_characters == NULL)
 	return Qnil;
     return rb_locale_str_new_cstr(rl_filename_quote_characters);
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif /* HAVE_RL_FILENAME_QUOTE_CHARACTERS */
 }
+#else
+#define readline_s_get_filename_quote_characters rb_f_notimplement
+#endif
+
+#ifdef HAVE_RL_REFRESH_LINE
+/*
+ * call-seq:
+ *   Readline.refresh_line -> nil
+ *
+ * Clear the current input line.
+ *
+ * Raises SecurityError exception if $SAFE is 4.
+ */
+static VALUE
+readline_s_refresh_line(VALUE self)
+{
+    rb_secure(4);
+    rl_refresh_line(0, 0);
+    return Qnil;
+}
+#else
+#define readline_s_refresh_line rb_f_notimplement
+#endif
 
 static VALUE
 hist_to_s(VALUE self)
@@ -968,10 +1105,10 @@ hist_get(VALUE self, VALUE index)
     return rb_locale_str_new_cstr(entry->line);
 }
 
+#ifdef HAVE_REPLACE_HISTORY_ENTRY
 static VALUE
 hist_set(VALUE self, VALUE index, VALUE str)
 {
-#ifdef HAVE_REPLACE_HISTORY_ENTRY
     HIST_ENTRY *entry = NULL;
     int i;
 
@@ -988,11 +1125,10 @@ hist_set(VALUE self, VALUE index, VALUE str)
 	rb_raise(rb_eIndexError, "invalid index");
     }
     return str;
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif
 }
+#else
+#define hist_set rb_f_notimplement
+#endif
 
 static VALUE
 hist_push(VALUE self, VALUE str)
@@ -1108,18 +1244,17 @@ hist_delete_at(VALUE self, VALUE index)
     return rb_remove_history(i);
 }
 
+#ifdef HAVE_CLEAR_HISTORY
 static VALUE
 hist_clear(VALUE self)
 {
-#ifdef HAVE_CLEAR_HISTORY
     rb_secure(4);
     clear_history();
     return self;
-#else
-    rb_notimplement();
-    return Qnil; /* not reached */
-#endif
 }
+#else
+#define hist_clear rb_f_notimplement
+#endif
 
 static VALUE
 filename_completion_proc_call(VALUE self, VALUE str)
@@ -1177,7 +1312,7 @@ Init_readline()
     VALUE history, fcomp, ucomp, version;
 
     /* Allow conditional parsing of the ~/.inputrc file. */
-    rl_readline_name = "Ruby";
+    rl_readline_name = (char *)"Ruby";
 
     using_history();
 
@@ -1199,6 +1334,14 @@ Init_readline()
 			       readline_s_set_completion_case_fold, 1);
     rb_define_singleton_method(mReadline, "completion_case_fold",
 			       readline_s_get_completion_case_fold, 0);
+    rb_define_singleton_method(mReadline, "line_buffer",
+			       readline_s_get_line_buffer, 0);
+    rb_define_singleton_method(mReadline, "point",
+			       readline_s_get_point, 0);
+    rb_define_singleton_method(mReadline, "set_screen_size",
+			       readline_s_set_screen_size, 2);
+    rb_define_singleton_method(mReadline, "get_screen_size",
+			       readline_s_get_screen_size, 0);
     rb_define_singleton_method(mReadline, "vi_editing_mode",
 			       readline_s_vi_editing_mode, 0);
     rb_define_singleton_method(mReadline, "vi_editing_mode?",
@@ -1231,6 +1374,8 @@ Init_readline()
 			       readline_s_set_filename_quote_characters, 1);
     rb_define_singleton_method(mReadline, "filename_quote_characters",
 			       readline_s_get_filename_quote_characters, 0);
+    rb_define_singleton_method(mReadline, "refresh_line",
+			       readline_s_refresh_line, 0);
 
     history = rb_obj_alloc(rb_cObject);
     rb_extend_object(history, rb_mEnumerable);
@@ -1288,8 +1433,10 @@ Init_readline()
 #else
 	{
 	    HIST_ENTRY *entry = remove_history(0);
-	    free(entry->line);
-	    free(entry);
+	    if (entry) {
+		free((char *)entry->line);
+		free(entry);
+	    }
 	}
 #endif
     }
@@ -1301,8 +1448,17 @@ Init_readline()
     rb_define_const(mReadline, "VERSION", version);
 
     rl_attempted_completion_function = readline_attempted_completion_function;
-#ifdef HAVE_RL_EVENT_HOOK
+#if defined HAVE_RL_GETC_FUNCTION
+    rl_getc_function = readline_getc;
+    id_getbyte = rb_intern_const("getbyte");
+#elif defined HAVE_RL_EVENT_HOOK
     rl_event_hook = readline_event;
+#endif
+#ifdef HAVE_RL_CATCH_SIGNALS
+    rl_catch_signals = 0;
+#endif
+#ifdef HAVE_RL_CATCH_SIGWINCH
+    rl_catch_sigwinch = 0;
 #endif
 #ifdef HAVE_RL_CLEAR_SIGNALS
     rl_clear_signals();

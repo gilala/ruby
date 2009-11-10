@@ -179,7 +179,10 @@ class TestSprintf < Test::Unit::TestCase
     assert_raise(ArgumentError) { sprintf("%!", 1) }
     assert_raise(ArgumentError) { sprintf("%1$1$d", 1) }
     assert_raise(ArgumentError) { sprintf("%0%") }
+    verbose, $VERBOSE = $VERBOSE, nil
     assert_nothing_raised { sprintf("", 1) }
+  ensure
+    $VERBOSE = verbose
   end
 
   def test_float
@@ -269,5 +272,11 @@ class TestSprintf < Test::Unit::TestCase
     b1 = (/\.\./ =~ s1) != nil
     b2 = (/\.\./ =~ s2) != nil
     assert(b1 == b2, "[ruby-dev:33224]")
+  end
+
+  def test_named
+    assert_equal("value", sprintf("%<key>s", :key => "value"))
+    assert_raise(ArgumentError) {sprintf("%1$<key2>s", :key => "value")}
+    assert_raise(ArgumentError) {sprintf("%<key><key2>s", :key => "value")}
   end
 end

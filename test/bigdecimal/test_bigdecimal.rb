@@ -256,8 +256,8 @@ class TestBigDecimal < Test::Unit::TestCase
 
   def test_hash
     a = []
-    x = BigDecimal.new("1")
-    10.times { a << x *= 10 }
+    b = BigDecimal.new("1")
+    10.times { a << b *= 10 }
     h = {}
     a.each_with_index {|x, i| h[x] = i }
     a.each_with_index do |x, i|
@@ -690,5 +690,9 @@ class TestBigDecimal < Test::Unit::TestCase
     assert_equal(BigDecimal::SIGN_NEGATIVE_INFINITE, BigDecimal.new("-1E1" + "0" * 10000).sign)
     assert_equal(BigDecimal::SIGN_POSITIVE_ZERO, BigDecimal.new("1E-1" + "0" * 10000).sign)
     assert_equal(BigDecimal::SIGN_NEGATIVE_ZERO, BigDecimal.new("-1E-1" + "0" * 10000).sign)
+  end
+
+  def test_coerce
+    assert_equal(2, 1 + BigDecimal.new("1"), '[ruby-core:25697]')
   end
 end

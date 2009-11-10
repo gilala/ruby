@@ -13,12 +13,16 @@
 #define RUBY_VM_H 1
 #define HAVE_MVM 1
 
+#include <stddef.h>
+
 /* VM type declaration */
 typedef struct rb_vm_struct ruby_vm_t;
 
 /* core API */
 ruby_vm_t *ruby_vm_new(int argc, char *argv[]);
 int ruby_vm_run(ruby_vm_t *vm);
+int ruby_vm_run_node(ruby_vm_t *vm, void *n);
+int ruby_vm_exec_node(ruby_vm_t *vm, void *n);
 int ruby_vm_start(ruby_vm_t *vm);
 int ruby_vm_join(ruby_vm_t *vm);
 int ruby_vm_destruct(ruby_vm_t *vm);
@@ -43,23 +47,19 @@ void *ruby_vm_specific_ptr(ruby_vm_t *, int);
 
 /* system level initializer */
 
-#if (defined(__APPLE__) || defined(__NeXT__)) && defined(__MACH__)
-/* to link startup code with ObjC support */
-#define RUBY_GLOBAL_SETUP static void objcdummyfunction(void) {objc_msgSend();}
-#else
-#define RUBY_GLOBAL_SETUP
-#endif
-
-void ruby_sysinit(int *, char ***);
-
 #ifdef __ia64
-void ruby_init_stack(void *, void *);
+void ruby_init_stack(volatile void *, volatile void *);
 #define ruby_init_stack(addr) ruby_init_stack(addr, rb_ia64_bsp())
 #else
-void ruby_init_stack(void *);
+void ruby_init_stack(volatile void *);
 #endif
 #define RUBY_INIT_STACK \
     void *variable_in_this_stack_frame; \
     ruby_init_stack(&variable_in_this_stack_frame);
+
+struct rb_objspace;
+void *rb_objspace_xmalloc(struct rb_objspace *objspace, size_t size);
+void *rb_objspace_xrealloc(struct rb_objspace *objspace, void *ptr, size_t size);
+void rb_objspace_xfree(struct rb_objspace *objspace, void *ptr);
 
 #endif /* RUBY_VM_H */

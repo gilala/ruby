@@ -106,6 +106,7 @@ static VALUE rb_eIconvBrokenLibrary;
 
 static ID rb_success, rb_failed;
 static VALUE iconv_fail _((VALUE error, VALUE success, VALUE failed, struct iconv_env_t* env, const char *mesg));
+static VALUE iconv_fail_retry _((VALUE error, VALUE success, VALUE failed, struct iconv_env_t* env, const char *mesg));
 static VALUE iconv_failure_initialize _((VALUE error, VALUE mesg, VALUE success, VALUE failed));
 static VALUE iconv_failure_success _((VALUE self));
 static VALUE iconv_failure_failed _((VALUE self));
@@ -231,8 +232,8 @@ iconv_create(VALUE to, VALUE from, struct rb_iconv_opt_t *opt, int *idx)
 	    s = RSTRING_PTR(msg);
 	    rb_str_set_len(msg, strlen(s));
 	    if (!inval) rb_sys_fail(s);
-	    iconv_fail(rb_eIconvInvalidEncoding,
-		       Qnil, rb_ary_new3(2, to, from), NULL, s);
+	    rb_exc_raise(iconv_fail(rb_eIconvInvalidEncoding, Qnil,
+				    rb_ary_new3(2, to, from), NULL, s));
 	}
     }
 
@@ -372,7 +373,13 @@ iconv_fail(VALUE error, VALUE success, VALUE failed, struct iconv_env_t* env, co
 	    args[2] = rb_ary_new4(env->argc, env->argv);
 	}
     }
-    error = rb_class_new_instance(3, args, error);
+    return rb_class_new_instance(3, args, error);
+}
+
+static VALUE
+iconv_fail_retry(VALUE error, VALUE success, VALUE failed, struct iconv_env_t* env, const char *mesg)
+{
+    error = iconv_fail(error, success, failed, env, mesg);
     if (!rb_block_given_p()) rb_exc_raise(error);
     rb_set_errinfo(error);
     return rb_yield(failed);
@@ -418,7 +425,7 @@ iconv_convert(iconv_t cd, VALUE str, long start, long length, int toidx, struct 
 	error = iconv_try(cd, &inptr, &inlen, &outptr, &outlen);
 	if (RTEST(error)) {
 	    unsigned int i;
-	    rescue = iconv_fail(error, Qnil, Qnil, env, 0);
+	    rescue = iconv_fail_retry(error, Qnil, Qnil, env, 0);
 	    if (TYPE(rescue) == T_ARRAY) {
 		str = RARRAY_LEN(rescue) > 0 ? RARRAY_PTR(rescue)[0] : Qnil;
 	    }
@@ -460,8 +467,8 @@ iconv_convert(iconv_t cd, VALUE str, long start, long length, int toidx, struct 
 	if (0 <= outlen && outlen <= sizeof(buffer)) {
 	    outlen = sizeof(buffer) - outlen;
 	    if (NIL_P(error) ||	/* something converted */
-		outlen > inptr - tmpstart || /* input can't contain output */
-		(outlen < inptr - tmpstart && inlen > 0) || /* something skipped */
+		outlen > (size_t)(inptr - tmpstart) || /* input can't contain output */
+		(outlen < (size_t)(inptr - tmpstart) && inlen > 0) || /* something skipped */
 		memcmp(buffer, tmpstart, outlen)) /* something differs */
 	    {
 		if (NIL_P(str)) {
@@ -502,7 +509,7 @@ iconv_convert(iconv_t cd, VALUE str, long start, long length, int toidx, struct 
 		rb_str_cat(ret, instart, inptr - instart);
 	    }
 	    str = rb_str_derive(str, inptr, inlen);
-	    rescue = iconv_fail(error, ret, str, env, errmsg);
+	    rescue = iconv_fail_retry(error, ret, str, env, errmsg);
 	    if (TYPE(rescue) == T_ARRAY) {
 		if ((len = RARRAY_LEN(rescue)) > 0)
 		    rb_str_concat(ret, RARRAY_PTR(rescue)[0]);
@@ -791,6 +798,7 @@ list_iconv(unsigned int namescount, const char *const *names, void *data)
 }
 #endif
 
+#if defined(HAVE_ICONVLIST) || defined(HAVE___ICONV_FREE_LIST)
 static VALUE
 iconv_s_list(void)
 {
@@ -821,11 +829,12 @@ iconv_s_list(void)
     for (i = 0; i < RARRAY_LEN(ary); i++) {
 	rb_yield(RARRAY_PTR(ary)[i]);
     }
-#else
-    rb_notimplement();
 #endif
     return Qnil;
 }
+#else
+#define iconv_s_list rb_f_notimplement
+#endif
 
 /*
  * Document-method: close
@@ -944,6 +953,7 @@ iconv_conv(int argc, VALUE *argv, VALUE self)
     return str;
 }
 
+#ifdef ICONV_TRIVIALP
 /*
  * Document-method: trivial?
  * call-seq: trivial?
@@ -953,16 +963,16 @@ iconv_conv(int argc, VALUE *argv, VALUE self)
 static VALUE
 iconv_trivialp(VALUE self)
 {
-#ifdef ICONV_TRIVIALP
     int trivial = 0;
     iconv_ctl(self, ICONV_TRIVIALP, trivial);
     if (trivial) return Qtrue;
-#else
-    rb_notimplement();
-#endif
     return Qfalse;
 }
+#else
+#define iconv_trivialp rb_f_notimplement
+#endif
 
+#ifdef ICONV_GET_TRANSLITERATE
 /*
  * Document-method: transliterate?
  * call-seq: transliterate?
@@ -972,16 +982,16 @@ iconv_trivialp(VALUE self)
 static VALUE
 iconv_get_transliterate(VALUE self)
 {
-#ifdef ICONV_GET_TRANSLITERATE
     int trans = 0;
     iconv_ctl(self, ICONV_GET_TRANSLITERATE, trans);
     if (trans) return Qtrue;
-#else
-    rb_notimplement();
-#endif
     return Qfalse;
 }
+#else
+#define iconv_get_transliterate rb_f_notimplement
+#endif
 
+#ifdef ICONV_SET_TRANSLITERATE
 /*
  * Document-method: transliterate=
  * call-seq: cd.transliterate = flag
@@ -991,15 +1001,15 @@ iconv_get_transliterate(VALUE self)
 static VALUE
 iconv_set_transliterate(VALUE self, VALUE transliterate)
 {
-#ifdef ICONV_SET_TRANSLITERATE
     int trans = RTEST(transliterate);
     iconv_ctl(self, ICONV_SET_TRANSLITERATE, trans);
-#else
-    rb_notimplement();
-#endif
     return self;
 }
+#else
+#define iconv_set_transliterate rb_f_notimplement
+#endif
 
+#ifdef ICONV_GET_DISCARD_ILSEQ
 /*
  * Document-method: discard_ilseq?
  * call-seq: discard_ilseq?
@@ -1009,16 +1019,16 @@ iconv_set_transliterate(VALUE self, VALUE transliterate)
 static VALUE
 iconv_get_discard_ilseq(VALUE self)
 {
-#ifdef ICONV_GET_DISCARD_ILSEQ
     int dis = 0;
     iconv_ctl(self, ICONV_GET_DISCARD_ILSEQ, dis);
     if (dis) return Qtrue;
-#else
-    rb_notimplement();
-#endif
     return Qfalse;
 }
+#else
+#define iconv_get_discard_ilseq rb_f_notimplement
+#endif
 
+#ifdef ICONV_SET_DISCARD_ILSEQ
 /*
  * Document-method: discard_ilseq=
  * call-seq: cd.discard_ilseq = flag
@@ -1028,14 +1038,13 @@ iconv_get_discard_ilseq(VALUE self)
 static VALUE
 iconv_set_discard_ilseq(VALUE self, VALUE discard_ilseq)
 {
-#ifdef ICONV_SET_DISCARD_ILSEQ
     int dis = RTEST(discard_ilseq);
     iconv_ctl(self, ICONV_SET_DISCARD_ILSEQ, dis);
-#else
-    rb_notimplement();
-#endif
     return self;
 }
+#else
+#define iconv_set_discard_ilseq rb_f_notimplement
+#endif
 
 /*
  * Document-method: ctlmethods

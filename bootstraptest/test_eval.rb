@@ -286,3 +286,36 @@ assert_equal 'ok', %q{
 assert_normal_exit %q{
   eval("", method(:proc).call {}.binding)
 }
+
+assert_equal "(eval):1:in `block in <main>': ", %q{
+  b = binding
+  10.times{
+    eval('', b)
+  }
+  begin
+    eval('1.times{raise}', b)
+  rescue => e
+    e.message
+  end
+}, '[ruby-dev:35392]'
+
+assert_equal "[:x]", %q{
+  def kaboom!
+    yield.eval("local_variables")
+  end
+
+  for x in enum_for(:kaboom!)
+    binding
+  end
+}, '[ruby-core:25125]'
+
+assert_normal_exit %q{
+  hash = {}
+  ("aaaa".."matz").each_with_index do |s, i|
+    hash[s] = i
+  end
+  begin
+    eval "class C; @@h = #{hash.inspect}; end"
+  rescue SystemStackError
+  end
+}, '[ruby-core:25714]'

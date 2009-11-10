@@ -709,7 +709,7 @@ class TestM17NComb < Test::Unit::TestCase
   def test_str_chomp
     combination(STRINGS, STRINGS) {|s1, s2|
       if !s1.ascii_only? && !s2.ascii_only? && !Encoding.compatible?(s1,s2)
-        if s1.bytesize > s2.bytesize 
+        if s1.bytesize > s2.bytesize
           assert_raise(Encoding::CompatibilityError) { s1.chomp(s2) }
         end
         next
@@ -727,15 +727,6 @@ class TestM17NComb < Test::Unit::TestCase
     STRINGS.each {|s|
       s = s.dup
       desc = "#{encdump s}.chop"
-      if !s.valid_encoding?
-        #assert_raise(ArgumentError, desc) { s.chop }
-        begin
-          s.chop
-        rescue ArgumentError
-          e = $!
-        end
-        next if e
-      end
       t = nil
       assert_nothing_raised(desc) { t = s.chop }
       assert(t.valid_encoding?) if s.valid_encoding?
@@ -1099,7 +1090,11 @@ class TestM17NComb < Test::Unit::TestCase
         next
       end
       if !s1.ascii_only? && !s2.ascii_only? && s1.encoding != s2.encoding
-        assert_raise(ArgumentError) { s1.scan(s2) }
+        if s1.valid_encoding?
+          assert_raise(Encoding::CompatibilityError) { s1.scan(s2) }
+        else
+          assert_raise(ArgumentError, /invalid byte sequence/) { s1.scan(s2) }
+        end
         next
       end
       if !s1.valid_encoding?
@@ -1350,7 +1345,7 @@ class TestM17NComb < Test::Unit::TestCase
     STRINGS.each {|s0|
       next if s0.empty?
       s = s0.dup
-      n = 1000
+      n = 300
       h = {}
       n.times {|i|
         if h[s]
@@ -1418,7 +1413,7 @@ class TestM17NComb < Test::Unit::TestCase
           next
         end
         if !str_enc_compatible?(s1, s2)
-          assert_raise(ArgumentError, desc) { doit.call }
+          assert_raise(Encoding::CompatibilityError, desc) { doit.call }
           next
         end
         if !enccall(s1, :include?, s2)
@@ -1476,7 +1471,7 @@ class TestM17NComb < Test::Unit::TestCase
           next
         end
         if !str_enc_compatible?(s1, s2)
-          assert_raise(ArgumentError, desc) { doit.call }
+          assert_raise(Encoding::CompatibilityError, desc) { doit.call }
           next
         end
         if !enccall(s1, :include?, s2)

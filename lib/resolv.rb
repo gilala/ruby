@@ -162,10 +162,10 @@ class Resolv
   class ResolvTimeout < TimeoutError; end
 
   ##
-  # DNS::Hosts is a hostname resolver that uses the system hosts file.
+  # Resolv::Hosts is a hostname resolver that uses the system hosts file.
 
   class Hosts
-    if /mswin32|mingw|bccwin/ =~ RUBY_PLATFORM
+    if /mswin|mingw|bccwin/ =~ RUBY_PLATFORM
       require 'win32/resolv'
       DefaultFileName = Win32::Resolv.get_hosts_path
     else
@@ -173,7 +173,7 @@ class Resolv
     end
 
     ##
-    # Creates a new DNS::Hosts, using +filename+ for its data source.
+    # Creates a new Resolv::Hosts, using +filename+ for its data source.
 
     def initialize(filename = DefaultFileName)
       @filename = filename
@@ -379,8 +379,20 @@ class Resolv
 
     def each_address(name)
       each_resource(name, Resource::IN::A) {|resource| yield resource.address}
-      each_resource(name, Resource::IN::AAAA) {|resource| yield resource.address}
+      if use_ipv6?
+        each_resource(name, Resource::IN::AAAA) {|resource| yield resource.address}
+      end
     end
+
+    def use_ipv6?
+      begin
+        list = Socket.ip_address_list
+      rescue NotImplementedError
+        return true
+      end
+      list.any? {|a| a.ipv6? && !a.ipv6_loopback? && !a.ipv6_linklocal? }
+    end
+    private :use_ipv6?
 
     ##
     # Gets the hostname for +address+ from the DNS resolver.
@@ -587,10 +599,10 @@ class Resolv
       }
     end
 
-    def self.bind_random_port(udpsock) # :nodoc:
+    def self.bind_random_port(udpsock, is_ipv6=false) # :nodoc:
       begin
         port = rangerand(1024..65535)
-        udpsock.bind("", port)
+        udpsock.bind(is_ipv6 ? "::" : "", port)
       rescue Errno::EADDRINUSE
         retry
       end
@@ -643,6 +655,7 @@ class Resolv
         def initialize
           super()
           @sock = UDPSocket.new
+          @sock.do_not_reverse_lookup = true
           @sock.fcntl(Fcntl::F_SETFD, Fcntl::FD_CLOEXEC) if defined? Fcntl::F_SETFD
           DNS.bind_random_port(@sock)
         end
@@ -687,10 +700,12 @@ class Resolv
           super()
           @host = host
           @port = port
-          @sock = UDPSocket.new(host.index(':') ? Socket::AF_INET6 : Socket::AF_INET)
-          DNS.bind_random_port(@sock)
-          @sock.connect(host, port)
+          is_ipv6 = host.index(':')
+          @sock = UDPSocket.new(is_ipv6 ? Socket::AF_INET6 : Socket::AF_INET)
+          @sock.do_not_reverse_lookup = true
           @sock.fcntl(Fcntl::F_SETFD, Fcntl::FD_CLOEXEC) if defined? Fcntl::F_SETFD
+          DNS.bind_random_port(@sock, is_ipv6)
+          @sock.connect(host, port)
         end
 
         def recv_reply
@@ -817,7 +832,7 @@ class Resolv
         if File.exist? filename
           config_hash = Config.parse_resolv_conf(filename)
         else
-          if /mswin32|cygwin|mingw|bccwin/ =~ RUBY_PLATFORM
+          if /mswin|cygwin|mingw|bccwin/ =~ RUBY_PLATFORM
             require 'win32/resolv'
             search, nameserver = Win32::Resolv.get_resolv_info
             config_hash = {}

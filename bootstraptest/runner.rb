@@ -1,3 +1,5 @@
+"exec" "${RUBY-ruby}" "-x" "$0" "$@"; true # -*- mode: ruby; coding: utf-8 -*-
+#!./ruby
 # $Id$
 
 # NOTE:
@@ -15,13 +17,27 @@ end
 
 if !Dir.respond_to?(:mktmpdir)
   # copied from lib/tmpdir.rb
-  def Dir.mktmpdir(prefix="d", tmpdir=nil)
+  def Dir.mktmpdir(prefix_suffix=nil, tmpdir=nil)
+    case prefix_suffix
+    when nil
+      prefix = "d"
+      suffix = ""
+    when String
+      prefix = prefix_suffix
+      suffix = ""
+    when Array
+      prefix = prefix_suffix[0]
+      suffix = prefix_suffix[1]
+    else
+      raise ArgumentError, "unexpected prefix_suffix: #{prefix_suffix.inspect}"
+    end
     tmpdir ||= Dir.tmpdir
     t = Time.now.strftime("%Y%m%d")
     n = nil
     begin
       path = "#{tmpdir}/#{prefix}#{t}-#{$$}-#{rand(0x100000000).to_s(36)}"
       path << "-#{n}" if n
+      path << suffix
       Dir.mkdir(path, 0700)
     rescue Errno::EEXIST
       n ||= 0
@@ -74,7 +90,7 @@ def main
 Usage: #{File.basename($0, '.*')} --ruby=PATH [--sets=NAME,NAME,...]
         --sets=NAME,NAME,...        Name of test sets.
         --dir=DIRECTORY             Working directory.
-                                    default: /tmp/bootstraptest.tmpwd
+                                    default: /tmp/bootstraptestXXXXX.tmpwd
     -s, --stress                    stress test.
     -v, --verbose                   Output test name before exec.
     -q, --quiet                     Don\'t print header message.
@@ -95,8 +111,13 @@ End
 
   unless quiet
     puts Time.now
-    patchlevel = defined?(RUBY_PATCHLEVEL) ? " patchlevel #{RUBY_PATCHLEVEL}" : ''
-    puts "Driver is ruby #{RUBY_VERSION} (#{RUBY_RELEASE_DATE}#{patchlevel}) [#{RUBY_PLATFORM}]"
+    if defined?(RUBY_DESCRIPTION)
+      puts "Driver is #{RUBY_DESCRIPTION}"
+    elsif defined?(RUBY_PATCHLEVEL)
+      puts "Driver is ruby #{RUBY_VERSION} (#{RUBY_RELEASE_DATE}#{RUBY_PLATFORM}) [#{RUBY_PLATFORM}]"
+    else
+      puts "Driver is ruby #{RUBY_VERSION} (#{RUBY_RELEASE_DATE}) [#{RUBY_PLATFORM}]"
+    end
     puts "Target is #{`#{@ruby} -v`.chomp}"
     puts
     $stdout.flush
@@ -118,7 +139,11 @@ def exec_test(pathes)
   end
   $stderr.puts
   if @error == 0
-    $stderr.puts "PASS #{@count} tests"
+    if @count == 0
+      $stderr.puts "No tests, no problem"
+    else
+      $stderr.puts "PASS all #{@count} tests"
+    end
     exit true
   else
     @errbuf.each do |msg|
@@ -328,7 +353,7 @@ def in_temporary_working_directory(dir)
       yield
     }
   else
-    Dir.mktmpdir("bootstraptest.tmpwd") {|d|
+    Dir.mktmpdir(["bootstraptest", ".tmpwd"]) {|d|
       Dir.chdir(d) {
         yield
       }

@@ -17,11 +17,11 @@
 
 #define ENCODING_INLINE_MAX 1023
 #define ENCODING_SHIFT (FL_USHIFT+10)
-#define ENCODING_MASK (ENCODING_INLINE_MAX<<ENCODING_SHIFT)
+#define ENCODING_MASK (((VALUE)ENCODING_INLINE_MAX)<<ENCODING_SHIFT)
 
 #define ENCODING_SET_INLINED(obj,i) do {\
     RBASIC(obj)->flags &= ~ENCODING_MASK;\
-    RBASIC(obj)->flags |= (i) << ENCODING_SHIFT;\
+    RBASIC(obj)->flags |= (VALUE)(i) << ENCODING_SHIFT;\
 } while (0)
 #define ENCODING_SET(obj,i) do {\
     VALUE rb_encoding_set_obj = (obj); \
@@ -32,7 +32,7 @@
         rb_enc_set_index(rb_encoding_set_obj, encoding_set_enc_index); \
 } while (0)
 
-#define ENCODING_GET_INLINED(obj) ((RBASIC(obj)->flags & ENCODING_MASK)>>ENCODING_SHIFT)
+#define ENCODING_GET_INLINED(obj) (int)((RBASIC(obj)->flags & ENCODING_MASK)>>ENCODING_SHIFT)
 #define ENCODING_GET(obj) \
     (ENCODING_GET_INLINED(obj) != ENCODING_INLINE_MAX ? \
      ENCODING_GET_INLINED(obj) : \
@@ -42,12 +42,12 @@
 
 #define ENCODING_MAXNAMELEN 42
 
-#define ENC_CODERANGE_MASK	(FL_USER8|FL_USER9)
+#define ENC_CODERANGE_MASK	((int)(FL_USER8|FL_USER9))
 #define ENC_CODERANGE_UNKNOWN	0
-#define ENC_CODERANGE_7BIT	FL_USER8
-#define ENC_CODERANGE_VALID	FL_USER9
-#define ENC_CODERANGE_BROKEN	(FL_USER8|FL_USER9)
-#define ENC_CODERANGE(obj) (RBASIC(obj)->flags & ENC_CODERANGE_MASK)
+#define ENC_CODERANGE_7BIT	((int)FL_USER8)
+#define ENC_CODERANGE_VALID	((int)FL_USER9)
+#define ENC_CODERANGE_BROKEN	((int)(FL_USER8|FL_USER9))
+#define ENC_CODERANGE(obj) ((int)RBASIC(obj)->flags & ENC_CODERANGE_MASK)
 #define ENC_CODERANGE_ASCIIONLY(obj) (ENC_CODERANGE(obj) == ENC_CODERANGE_7BIT)
 #define ENC_CODERANGE_SET(obj,cr) (RBASIC(obj)->flags = \
 				   (RBASIC(obj)->flags & ~ENC_CODERANGE_MASK) | (cr))
@@ -88,7 +88,7 @@ VALUE rb_enc_reg_new(const char*, long, rb_encoding*, int);
 PRINTF_ARGS(VALUE rb_enc_sprintf(rb_encoding *, const char*, ...), 2, 3);
 VALUE rb_enc_vsprintf(rb_encoding *, const char*, va_list);
 long rb_enc_strlen(const char*, const char*, rb_encoding*);
-char* rb_enc_nth(const char*, const char*, int, rb_encoding*);
+char* rb_enc_nth(const char*, const char*, long, rb_encoding*);
 VALUE rb_obj_encoding(VALUE);
 VALUE rb_enc_str_buf_cat(VALUE str, const char *ptr, long len, rb_encoding *enc);
 
@@ -112,6 +112,9 @@ rb_encoding * rb_enc_find(const char *name);
 /* -> mbclen (no error notification: 0 < ret <= e-p, no exception) */
 int rb_enc_mbclen(const char *p, const char *e, rb_encoding *enc);
 
+/* -> mbclen (only for valid encoding) */
+int rb_enc_fast_mbclen(const char *p, const char *e, rb_encoding *enc);
+
 /* -> chlen, invalid or needmore */
 int rb_enc_precise_mbclen(const char *p, const char *e, rb_encoding *enc);
 #define MBCLEN_CHARFOUND_P(ret)     ONIGENC_MBCLEN_CHARFOUND_P(ret)
@@ -123,8 +126,14 @@ int rb_enc_precise_mbclen(const char *p, const char *e, rb_encoding *enc);
 /* -> 0x00..0x7f, -1 */
 int rb_enc_ascget(const char *p, const char *e, int *len, rb_encoding *enc);
 
-/* -> code or raise exception */
+
+/* -> code (and len) or raise exception */
+unsigned int rb_enc_codepoint_len(const char *p, const char *e, int *len, rb_encoding *enc);
+
+/* prototype for obsolete function */
 unsigned int rb_enc_codepoint(const char *p, const char *e, rb_encoding *enc);
+/* overriding macro */
+#define rb_enc_codepoint(p,e,enc) rb_enc_codepoint_len((p),(e),0,(enc))
 #define rb_enc_mbc_to_codepoint(p, e, enc) ONIGENC_MBC_TO_CODE(enc,(UChar*)(p),(UChar*)(e))
 
 /* -> codelen>0 or raise exception */
@@ -161,11 +170,13 @@ int rb_enc_tolower(int c, rb_encoding *enc);
 ID rb_intern3(const char*, long, rb_encoding*);
 ID rb_interned_id_p(const char *, long, rb_encoding *);
 int rb_enc_symname_p(const char*, rb_encoding*);
+int rb_enc_symname2_p(const char*, long, rb_encoding*);
 int rb_enc_str_coderange(VALUE);
 long rb_str_coderange_scan_restartable(const char*, const char*, rb_encoding*, int*);
 int rb_enc_str_asciionly_p(VALUE);
 #define rb_enc_str_asciicompat_p(str) rb_enc_asciicompat(rb_enc_get(str))
 VALUE rb_enc_from_encoding(rb_encoding *enc);
+int rb_enc_unicode_p(rb_encoding *enc);
 rb_encoding *rb_ascii8bit_encoding(void);
 rb_encoding *rb_utf8_encoding(void);
 rb_encoding *rb_usascii_encoding(void);
@@ -183,13 +194,10 @@ void rb_enc_set_default_internal(VALUE encoding);
 VALUE rb_locale_charmap(VALUE klass);
 long rb_memsearch(const void*,long,const void*,long,rb_encoding*);
 
-#define enc_initialized_p(enc) ((enc)->ruby_encoding_index != ENC_UNINITIALIZED)
 #define ENC_DUMMY_FLAG (1<<24)
 #define ENC_INDEX_MASK (~(~0U<<24))
 
 #define ENC_TO_ENCINDEX(enc)   ((enc)->ruby_encoding_index & ENC_INDEX_MASK)
-#define ENC_FROM_ENCINDEX(idx) (RARRAY_PTR(rb_encoding_list)[idx])
-#define ENC_FROM_ENCODING(enc) ENC_FROM_ENCINDEX(ENC_TO_ENCINDEX(enc))
 
 #define ENC_DUMMY_P(enc) ((enc)->ruby_encoding_index & ENC_DUMMY_FLAG)
 #define ENC_SET_DUMMY(enc) ((enc)->ruby_encoding_index |= ENC_DUMMY_FLAG)
@@ -246,6 +254,9 @@ const char *rb_econv_encoding_to_insert_output(rb_econv_t *ec);
 
 /* raise an error if the last rb_econv_convert is error */
 void rb_econv_check_error(rb_econv_t *ec);
+
+/* returns an exception object or nil */
+VALUE rb_econv_make_exception(rb_econv_t *ec);
 
 int rb_econv_putbackable(rb_econv_t *ec);
 void rb_econv_putback(rb_econv_t *ec, unsigned char *p, int n);

@@ -2,7 +2,7 @@ module DL
   module CParser
     def parse_struct_signature(signature, tymap=nil)
       if( signature.is_a?(String) )
-        signature = signature.split("\s*,\s*")
+        signature = signature.split(/\s*,\s*/)
       end
       mems = []
       tys  = []
@@ -41,7 +41,7 @@ module DL
       case signature
       when /^([\d\w@\*_\s]+)\(([\d\w\*_\s\,\[\]]*)\)$/
         ret = $1
-        args = $2
+        (args = $2).strip!
         ret = ret.split(/\s+/)
         args = args.split(/\s*,\s*/)
         func = ret.pop
@@ -52,7 +52,7 @@ module DL
         ret  = ret.join(" ")
         return [func, parse_ctype(ret, tymap), args.collect{|arg| parse_ctype(arg, tymap)}]
       else
-        raise(RuntimeError,"can't parse the function prototype: #{proto}")
+        raise(RuntimeError,"can't parse the function prototype: #{signature}")
       end
     end
 

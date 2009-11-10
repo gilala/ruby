@@ -67,7 +67,12 @@ char *strrchr(const char *, const char);
 #define ruby_setjmp(env) RUBY_SETJMP(env)
 #define ruby_longjmp(env,val) RUBY_LONGJMP(env,val)
 #ifdef __CYGWIN__
-int _setjmp(), _longjmp();
+# ifndef _setjmp
+int _setjmp(jmp_buf);
+# endif
+# ifndef _longjmp
+NORETURN(void _longjmp(jmp_buf, int));
+# endif
 #endif
 
 #include <sys/types.h>
@@ -152,7 +157,7 @@ enum ruby_tag_type {
 #define TAG_MASK	RUBY_TAG_MASK
 
 #define NEW_THROW_OBJECT(val, pt, st) \
-  ((VALUE)NEW_NODE(NODE_LIT, (val), (pt), (st)))
+  ((VALUE)rb_node_newnode(NODE_LIT, (VALUE)(val), (VALUE)(pt), (VALUE)(st)))
 #define SET_THROWOBJ_CATCH_POINT(obj, val) \
   (RNODE((obj))->u2.value = (val))
 #define SET_THROWOBJ_STATE(obj, val) \
@@ -162,9 +167,9 @@ enum ruby_tag_type {
 #define GET_THROWOBJ_CATCH_POINT(obj) ((VALUE*)RNODE((obj))->u2.value)
 #define GET_THROWOBJ_STATE(obj)       ((int)RNODE((obj))->u3.value)
 
-#define SCOPE_TEST(f)  (vm_cref()->nd_visi & (f))
-#define SCOPE_CHECK(f) (vm_cref()->nd_visi == (f))
-#define SCOPE_SET(f)   (vm_cref()->nd_visi = (f))
+#define SCOPE_TEST(f)  (rb_vm_cref()->nd_visi & (f))
+#define SCOPE_CHECK(f) (rb_vm_cref()->nd_visi == (f))
+#define SCOPE_SET(f)   (rb_vm_cref()->nd_visi = (f))
 
 #define CHECK_STACK_OVERFLOW(cfp, margin) do \
   if (((VALUE *)(cfp)->sp) + (margin) + sizeof(rb_control_frame_t) >= ((VALUE *)cfp)) { \
@@ -180,8 +185,8 @@ enum {
     RAISED_STACKOVERFLOW = 2,
     RAISED_NOMEMORY = 4
 };
-int rb_thread_set_raised(rb_thread_t *th);
-int rb_thread_reset_raised(rb_thread_t *th);
+int rb_threadptr_set_raised(rb_thread_t *th);
+int rb_threadptr_reset_raised(rb_thread_t *th);
 #define rb_thread_raised_set(th, f)   ((th)->raised_flag |= (f))
 #define rb_thread_raised_reset(th, f) ((th)->raised_flag &= ~(f))
 #define rb_thread_raised_p(th, f)     (((th)->raised_flag & (f)) != 0)
@@ -193,14 +198,16 @@ VALUE rb_make_exception(int argc, VALUE *argv);
 NORETURN(void rb_fiber_start(void));
 
 NORETURN(void rb_print_undef(VALUE, ID, int));
-NORETURN(void vm_localjump_error(const char *,VALUE, int));
-NORETURN(void vm_jump_tag_but_local_jump(int, VALUE));
+NORETURN(void rb_vm_localjump_error(const char *,VALUE, int));
+NORETURN(void rb_vm_jump_tag_but_local_jump(int, VALUE));
+NORETURN(void rb_raise_method_missing(rb_thread_t *th, int argc, VALUE *argv,
+				      VALUE obj, int call_status));
 
-VALUE vm_make_jump_tag_but_local_jump(int state, VALUE val);
-NODE *vm_cref(void);
-rb_control_frame_t *vm_get_ruby_level_caller_cfp(rb_thread_t *th, rb_control_frame_t *cfp);
+VALUE rb_vm_make_jump_tag_but_local_jump(int state, VALUE val);
+NODE *rb_vm_cref(void);
 VALUE rb_obj_is_proc(VALUE);
 VALUE rb_vm_call_cfunc(VALUE recv, VALUE (*func)(VALUE), VALUE arg, const rb_block_t *blockptr, VALUE filename);
+void rb_vm_set_progname(VALUE filename);
 void rb_thread_terminate_all(void);
 VALUE rb_vm_top_self();
 VALUE rb_vm_cbase(void);
@@ -219,5 +226,21 @@ VALUE ruby_vm_get_argv(rb_vm_t *vm);
 const char *ruby_vm_get_inplace_mode(rb_vm_t *vm);
 void ruby_vm_set_inplace_mode(rb_vm_t *vm, const char *suffix);
 void ruby_vm_set_argv(rb_vm_t *vm, int argc, char **argv);
+
+#ifndef CharNext		/* defined as CharNext[AW] on Windows. */
+#define CharNext(p) ((p) + mblen(p, RUBY_MBCHAR_MAXSIZE))
+#endif
+
+#if defined DOSISH || defined __CYGWIN__
+static inline void
+translit_char(char *p, int from, int to)
+{
+    while (*p) {
+	if ((unsigned char)*p == from)
+	    *p = to;
+	p = CharNext(p);
+    }
+}
+#endif
 
 #endif /* RUBY_EVAL_INTERN_H */

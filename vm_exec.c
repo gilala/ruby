@@ -14,10 +14,10 @@
 #if VMDEBUG > 0
 #define DECL_SC_REG(type, r, reg) register type reg_##r
 
-#elif __GNUC__ && __x86_64__
+#elif __GNUC__ && __x86_64__ && !__clang__
 #define DECL_SC_REG(type, r, reg) register type reg_##r __asm__("r" reg)
 
-#elif __GNUC__ && __i386__
+#elif __GNUC__ && __i386__ && !__clang__
 #define DECL_SC_REG(type, r, reg) register type reg_##r __asm__("e" reg)
 
 #else
@@ -113,7 +113,7 @@ vm_exec_core(rb_thread_t *th, VALUE initial)
 }
 
 const void **
-vm_get_insns_address_table(void)
+rb_vm_get_insns_address_table(void)
 {
     return (const void **)vm_exec_core(0, 0);
 }
@@ -124,7 +124,7 @@ vm_get_insns_address_table(void)
 #include "vmtc.inc"
 
 const void *const *
-vm_get_insns_address_table(void)
+rb_vm_get_insns_address_table(void)
 {
     return insns_address_table;
 }

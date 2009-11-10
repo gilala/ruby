@@ -42,72 +42,105 @@ rb_dl_set_win32_last_error(VALUE self, VALUE val)
 #endif
 
 
-void
-dlcfunc_free(struct cfunc_data *data)
+static void
+dlcfunc_free(void *ptr)
 {
-  if( data->name ){
-      xfree(data->name);
-  }
-  xfree(data);
+    struct cfunc_data *data = ptr;
+    if( data->name ){
+	xfree(data->name);
+    }
+    xfree(data);
 }
+
+static size_t
+dlcfunc_memsize(const void *ptr)
+{
+    const struct cfunc_data *data = ptr;
+    size_t size = 0;
+    if( data ){
+	size += sizeof(*data);
+	if( data->name ){
+	    size += strlen(data->name) + 1;
+	}
+    }
+    return size;
+}
+
+const rb_data_type_t dlcfunc_data_type = {
+    "dl/cfunc",
+    0, dlcfunc_free, dlcfunc_memsize,
+};
 
 VALUE
 rb_dlcfunc_new(void (*func)(), int type, const char *name, ID calltype)
 {
-  VALUE val;
-  struct cfunc_data *data;
+    VALUE val;
+    struct cfunc_data *data;
 
-  rb_secure(4);
-  if( func ){
-    val = Data_Make_Struct(rb_cDLCFunc, struct cfunc_data, 0, dlcfunc_free, data);
-    data->ptr  = func;
-    data->name = name ? strdup(name) : NULL;
-    data->type = type;
-    data->calltype = calltype;
-  }
-  else{
-    val = Qnil;
-  }
+    rb_secure(4);
+    if( func ){
+	val = TypedData_Make_Struct(rb_cDLCFunc, struct cfunc_data, &dlcfunc_data_type, data);
+	data->ptr  = func;
+	data->name = name ? strdup(name) : NULL;
+	data->type = type;
+	data->calltype = calltype;
+    }
+    else{
+	val = Qnil;
+    }
 
-  return val;
+    return val;
 }
 
 void *
 rb_dlcfunc2ptr(VALUE val)
 {
-  struct cfunc_data *data;
-  void * func;
+    struct cfunc_data *data;
+    void * func;
 
-  if( rb_obj_is_kind_of(val, rb_cDLCFunc) ){
-    Data_Get_Struct(val, struct cfunc_data, data);
-    func = data->ptr;
-  }
-  else if( val == Qnil ){
-    func = NULL;
-  }
-  else{
-    rb_raise(rb_eTypeError, "DL::CFunc was expected");
-  }
+    if( rb_typeddata_is_kind_of(val, &dlcfunc_data_type) ){
+	data = DATA_PTR(val);
+	func = data->ptr;
+    }
+    else if( val == Qnil ){
+	func = NULL;
+    }
+    else{
+	rb_raise(rb_eTypeError, "DL::CFunc was expected");
+    }
 
-  return func;
+    return func;
 }
 
-VALUE
+static VALUE
 rb_dlcfunc_s_allocate(VALUE klass)
 {
-  VALUE obj;
-  struct cfunc_data *data;
+    VALUE obj;
+    struct cfunc_data *data;
 
-  obj = Data_Make_Struct(klass, struct cfunc_data, 0, dlcfunc_free, data);
-  data->ptr  = 0;
-  data->name = 0;
-  data->type = 0;
-  data->calltype = CFUNC_CDECL;
+    obj = TypedData_Make_Struct(klass, struct cfunc_data, &dlcfunc_data_type, data);
+    data->ptr  = 0;
+    data->name = 0;
+    data->type = 0;
+    data->calltype = CFUNC_CDECL;
 
-  return obj;
+    return obj;
 }
 
-VALUE
+int
+rb_dlcfunc_kind_p(VALUE func)
+{
+    return rb_typeddata_is_kind_of(func, &dlcfunc_data_type);
+}
+
+/*
+ * call-seq:
+ *    DL::CFunc.new(address, type=DL::TYPE_VOID, name=nil, calltype=:cdecl)
+ *
+ * Create a new function that points to +address+ with an optional return type
+ * of +type+, a name of +name+ and a calltype of +calltype+.
+ */
+static VALUE
 rb_dlcfunc_initialize(int argc, VALUE argv[], VALUE self)
 {
     VALUE addr, name, type, calltype;
@@ -120,85 +153,133 @@ rb_dlcfunc_initialize(int argc, VALUE argv[], VALUE self)
     saddr = (void*)(NUM2PTR(rb_Integer(addr)));
     sname = NIL_P(name) ? NULL : StringValuePtr(name);
     
-    Data_Get_Struct(self, struct cfunc_data, data);
+    TypedData_Get_Struct(self, struct cfunc_data, &dlcfunc_data_type, data);
     if( data->name ) xfree(data->name);
     data->ptr  = saddr;
     data->name = sname ? strdup(sname) : 0;
-    data->type = (type == Qnil) ? DLTYPE_VOID : NUM2INT(type);
-    data->calltype = (calltype == Qnil) ? CFUNC_CDECL : SYM2ID(calltype);
+    data->type = NIL_P(type) ? DLTYPE_VOID : NUM2INT(type);
+    data->calltype = NIL_P(calltype) ? CFUNC_CDECL : SYM2ID(calltype);
 
     return Qnil;
 }
 
-VALUE
+/*
+ * call-seq:
+ *    name  => str
+ *
+ * Get the name of this function
+ */
+static VALUE
 rb_dlcfunc_name(VALUE self)
 {
     struct cfunc_data *cfunc;
 
-    Data_Get_Struct(self, struct cfunc_data, cfunc);
+    TypedData_Get_Struct(self, struct cfunc_data, &dlcfunc_data_type, cfunc);
     return cfunc->name ? rb_tainted_str_new2(cfunc->name) : Qnil;
 }
 
-VALUE
+/*
+ * call-seq:
+ *    cfunc.ctype   => num
+ *
+ * Get the C function return value type.  See DL for a list of constants
+ * corresponding to this method's return value.
+ */
+static VALUE
 rb_dlcfunc_ctype(VALUE self)
 {
     struct cfunc_data *cfunc;
 
-    Data_Get_Struct(self, struct cfunc_data, cfunc);
+    TypedData_Get_Struct(self, struct cfunc_data, &dlcfunc_data_type, cfunc);
     return INT2NUM(cfunc->type);
 }
 
-VALUE
+/*
+ * call-seq:
+ *    cfunc.ctype = type
+ *
+ * Set the C function return value type to +type+.
+ */
+static VALUE
 rb_dlcfunc_set_ctype(VALUE self, VALUE ctype)
 {
     struct cfunc_data *cfunc;
 
-    Data_Get_Struct(self, struct cfunc_data, cfunc);
+    TypedData_Get_Struct(self, struct cfunc_data, &dlcfunc_data_type, cfunc);
     cfunc->type = NUM2INT(ctype);
     return ctype;
 }
 
-VALUE
+/*
+ * call-seq:
+ *    cfunc.calltype    => symbol
+ *
+ * Get the call type of this function.
+ */
+static VALUE
 rb_dlcfunc_calltype(VALUE self)
 {
     struct cfunc_data *cfunc;
 
-    Data_Get_Struct(self, struct cfunc_data, cfunc);
+    TypedData_Get_Struct(self, struct cfunc_data, &dlcfunc_data_type, cfunc);
     return ID2SYM(cfunc->calltype);
 }
 
-VALUE
+/*
+ * call-seq:
+ *    cfunc.calltype = symbol
+ *
+ * Set the call type for this function.
+ */
+static VALUE
 rb_dlcfunc_set_calltype(VALUE self, VALUE sym)
 {
     struct cfunc_data *cfunc;
 
-    Data_Get_Struct(self, struct cfunc_data, cfunc);
+    TypedData_Get_Struct(self, struct cfunc_data, &dlcfunc_data_type, cfunc);
     cfunc->calltype = SYM2ID(sym);
     return sym;
 }
 
-
-VALUE
+/*
+ * call-seq:
+ *    cfunc.ptr
+ *
+ * Get the underlying function pointer as a DL::CPtr object.
+ */
+static VALUE
 rb_dlcfunc_ptr(VALUE self)
 {
     struct cfunc_data *cfunc;
 
-    Data_Get_Struct(self, struct cfunc_data, cfunc);
+    TypedData_Get_Struct(self, struct cfunc_data, &dlcfunc_data_type, cfunc);
     return PTR2NUM(cfunc->ptr);
 }
 
-VALUE
+/*
+ * call-seq:
+ *    cfunc.ptr = pointer
+ *
+ * Set the underlying function pointer to a DL::CPtr named +pointer+.
+ */
+static VALUE
 rb_dlcfunc_set_ptr(VALUE self, VALUE addr)
 {
     struct cfunc_data *cfunc;
 
-    Data_Get_Struct(self, struct cfunc_data, cfunc);
+    TypedData_Get_Struct(self, struct cfunc_data, &dlcfunc_data_type, cfunc);
     cfunc->ptr = NUM2PTR(addr);
 
     return Qnil;
 }
 
-VALUE
+/*
+ * call-seq: inspect
+ *
+ * Returns a string formatted with an easily readable representation of the
+ * internal state of the DL::CFunc
+ */
+static VALUE
 rb_dlcfunc_inspect(VALUE self)
 {
     VALUE val;
@@ -206,7 +287,7 @@ rb_dlcfunc_inspect(VALUE self)
     int str_size;
     struct cfunc_data *cfunc;
     
-    Data_Get_Struct(self, struct cfunc_data, cfunc);
+    TypedData_Get_Struct(self, struct cfunc_data, &dlcfunc_data_type, cfunc);
     
     str_size = (cfunc->name ? strlen(cfunc->name) : 0) + 100;
     str = ruby_xmalloc(str_size);
@@ -224,7 +305,9 @@ rb_dlcfunc_inspect(VALUE self)
 
 
 # define DECL_FUNC_CDECL(f,ret,args)  ret (FUNC_CDECL(*f))(args)
+#ifdef FUNC_STDCALL
 # define DECL_FUNC_STDCALL(f,ret,args)  ret (FUNC_STDCALL(*f))(args)
+#endif
 
 #define CALL_CASE switch( RARRAY_LEN(ary) ){ \
   CASE(0); break; \
@@ -236,7 +319,15 @@ rb_dlcfunc_inspect(VALUE self)
 }
 
 
-VALUE
+/*
+ * call-seq:
+ *    dlcfunc.call(ary)   => some_value
+ *    dlcfunc[ary]        => some_value
+ *
+ * Calls the function pointer passing in +ary+ as values to the underlying
+ * C function.  The return value depends on the ctype.
+ */
+static VALUE
 rb_dlcfunc_call(VALUE self, VALUE ary)
 {
     struct cfunc_data *cfunc;
@@ -249,7 +340,7 @@ rb_dlcfunc_call(VALUE self, VALUE ary)
     memset(stack, 0, sizeof(DLSTACK_TYPE) * DLSTACK_SIZE);
     Check_Type(ary, T_ARRAY);
     
-    Data_Get_Struct(self, struct cfunc_data, cfunc);
+    TypedData_Get_Struct(self, struct cfunc_data, &dlcfunc_data_type, cfunc);
 
     if( cfunc->ptr == 0 ){
 	rb_raise(rb_eDLError, "can't call null-function");
@@ -265,11 +356,15 @@ rb_dlcfunc_call(VALUE self, VALUE ary)
     }
     
     /* calltype == CFUNC_CDECL */
-    if( cfunc->calltype == CFUNC_CDECL ){
+    if( cfunc->calltype == CFUNC_CDECL
+#ifndef FUNC_STDCALL
+	|| cfunc->calltype == CFUNC_STDCALL
+#endif
+	){
 	switch( cfunc->type ){
 	case DLTYPE_VOID:
 #define CASE(n) case n: { \
-            DECL_FUNC_CDECL(f,void,DLSTACK_PROTO##n) = cfunc->ptr; \
+	    DECL_FUNC_CDECL(f,void,DLSTACK_PROTO##n) = cfunc->ptr; \
 	    f(DLSTACK_ARGS##n(stack)); \
 	    result = Qnil; \
 }
@@ -329,9 +424,9 @@ rb_dlcfunc_call(VALUE self, VALUE ary)
 #if HAVE_LONG_LONG  /* used in ruby.h */
 	case DLTYPE_LONG_LONG:
 #define CASE(n) case n: { \
-	    DECL_FUNC_CDECL(f,LONG_LONG,DLSTACK_PROTO) = cfunc->ptr; \
+	    DECL_FUNC_CDECL(f,LONG_LONG,DLSTACK_PROTO##n) = cfunc->ptr; \
 	    LONG_LONG ret; \
-	    ret = f(DLSTACK_ARGS(stack)); \
+	    ret = f(DLSTACK_ARGS##n(stack)); \
 	    result = LL2NUM(ret); \
 }
 	    CALL_CASE;
@@ -340,9 +435,9 @@ rb_dlcfunc_call(VALUE self, VALUE ary)
 #endif
 	case DLTYPE_FLOAT:
 #define CASE(n) case n: { \
-	    DECL_FUNC_CDECL(f,float,DLSTACK_PROTO) = cfunc->ptr; \
+	    DECL_FUNC_CDECL(f,float,DLSTACK_PROTO##n) = cfunc->ptr; \
 	    float ret; \
-	    ret = f(DLSTACK_ARGS(stack)); \
+	    ret = f(DLSTACK_ARGS##n(stack)); \
 	    result = rb_float_new(ret); \
 }
 	    CALL_CASE;
@@ -350,9 +445,9 @@ rb_dlcfunc_call(VALUE self, VALUE ary)
 	    break;
 	case DLTYPE_DOUBLE:
 #define CASE(n) case n: { \
-	    DECL_FUNC_CDECL(f,double,DLSTACK_PROTO) = cfunc->ptr; \
+	    DECL_FUNC_CDECL(f,double,DLSTACK_PROTO##n) = cfunc->ptr; \
 	    double ret; \
-	    ret = f(DLSTACK_ARGS(stack)); \
+	    ret = f(DLSTACK_ARGS##n(stack)); \
 	    result = rb_float_new(ret); \
 }
 	    CALL_CASE;
@@ -362,12 +457,13 @@ rb_dlcfunc_call(VALUE self, VALUE ary)
 	    rb_raise(rb_eDLTypeError, "unknown type %d", cfunc->type);
 	}
     }
+#ifdef FUNC_STDCALL
     else if( cfunc->calltype == CFUNC_STDCALL ){
 	/* calltype == CFUNC_STDCALL */
 	switch( cfunc->type ){
 	case DLTYPE_VOID:
 #define CASE(n) case n: { \
-            DECL_FUNC_STDCALL(f,void,DLSTACK_PROTO##n) = cfunc->ptr; \
+	    DECL_FUNC_STDCALL(f,void,DLSTACK_PROTO##n##_) = cfunc->ptr; \
 	    f(DLSTACK_ARGS##n(stack)); \
 	    result = Qnil; \
 }
@@ -376,7 +472,7 @@ rb_dlcfunc_call(VALUE self, VALUE ary)
 	    break;
 	case DLTYPE_VOIDP:
 #define CASE(n) case n: { \
-	    DECL_FUNC_STDCALL(f,void*,DLSTACK_PROTO##n) = cfunc->ptr; \
+	    DECL_FUNC_STDCALL(f,void*,DLSTACK_PROTO##n##_) = cfunc->ptr; \
 	    void * ret; \
 	    ret = f(DLSTACK_ARGS##n(stack)); \
 	    result = PTR2NUM(ret); \
@@ -386,7 +482,7 @@ rb_dlcfunc_call(VALUE self, VALUE ary)
 	    break;
 	case DLTYPE_CHAR:
 #define CASE(n) case n: { \
-	    DECL_FUNC_STDCALL(f,char,DLSTACK_PROTO##n) = cfunc->ptr; \
+	    DECL_FUNC_STDCALL(f,char,DLSTACK_PROTO##n##_) = cfunc->ptr; \
 	    char ret; \
 	    ret = f(DLSTACK_ARGS##n(stack)); \
 	    result = CHR2FIX(ret); \
@@ -396,7 +492,7 @@ rb_dlcfunc_call(VALUE self, VALUE ary)
 	    break;
 	case DLTYPE_SHORT:
 #define CASE(n) case n: { \
-	    DECL_FUNC_STDCALL(f,short,DLSTACK_PROTO##n) = cfunc->ptr; \
+	    DECL_FUNC_STDCALL(f,short,DLSTACK_PROTO##n##_) = cfunc->ptr; \
 	    short ret; \
 	    ret = f(DLSTACK_ARGS##n(stack)); \
 	    result = INT2NUM((int)ret); \
@@ -406,7 +502,7 @@ rb_dlcfunc_call(VALUE self, VALUE ary)
 	    break;
 	case DLTYPE_INT:
 #define CASE(n) case n: { \
-	    DECL_FUNC_STDCALL(f,int,DLSTACK_PROTO##n) = cfunc->ptr; \
+	    DECL_FUNC_STDCALL(f,int,DLSTACK_PROTO##n##_) = cfunc->ptr; \
 	    int ret; \
 	    ret = f(DLSTACK_ARGS##n(stack)); \
 	    result = INT2NUM(ret); \
@@ -416,7 +512,7 @@ rb_dlcfunc_call(VALUE self, VALUE ary)
 	    break;
 	case DLTYPE_LONG:
 #define CASE(n) case n: { \
-	    DECL_FUNC_STDCALL(f,long,DLSTACK_PROTO##n) = cfunc->ptr; \
+	    DECL_FUNC_STDCALL(f,long,DLSTACK_PROTO##n##_) = cfunc->ptr; \
 	    long ret; \
 	    ret = f(DLSTACK_ARGS##n(stack)); \
 	    result = LONG2NUM(ret); \
@@ -427,9 +523,9 @@ rb_dlcfunc_call(VALUE self, VALUE ary)
 #if HAVE_LONG_LONG  /* used in ruby.h */
 	case DLTYPE_LONG_LONG:
 #define CASE(n) case n: { \
-	    DECL_FUNC_STDCALL(f,LONG_LONG,DLSTACK_PROTO) = cfunc->ptr; \
+	    DECL_FUNC_STDCALL(f,LONG_LONG,DLSTACK_PROTO##n##_) = cfunc->ptr; \
 	    LONG_LONG ret; \
-	    ret = f(DLSTACK_ARGS(stack)); \
+	    ret = f(DLSTACK_ARGS##n(stack)); \
 	    result = LL2NUM(ret); \
 }
 	    CALL_CASE;
@@ -438,9 +534,9 @@ rb_dlcfunc_call(VALUE self, VALUE ary)
 #endif
 	case DLTYPE_FLOAT:
 #define CASE(n) case n: { \
-	    DECL_FUNC_STDCALL(f,float,DLSTACK_PROTO) = cfunc->ptr; \
+	    DECL_FUNC_STDCALL(f,float,DLSTACK_PROTO##n##_) = cfunc->ptr; \
 	    float ret; \
-	    ret = f(DLSTACK_ARGS(stack)); \
+	    ret = f(DLSTACK_ARGS##n(stack)); \
 	    result = rb_float_new(ret); \
 }
 	    CALL_CASE;
@@ -448,9 +544,9 @@ rb_dlcfunc_call(VALUE self, VALUE ary)
 	    break;
 	case DLTYPE_DOUBLE:
 #define CASE(n) case n: { \
-	    DECL_FUNC_STDCALL(f,double,DLSTACK_PROTO) = cfunc->ptr; \
+	    DECL_FUNC_STDCALL(f,double,DLSTACK_PROTO##n##_) = cfunc->ptr; \
 	    double ret; \
-	    ret = f(DLSTACK_ARGS(stack)); \
+	    ret = f(DLSTACK_ARGS##n(stack)); \
 	    result = rb_float_new(ret); \
 }
 	    CALL_CASE;
@@ -460,6 +556,7 @@ rb_dlcfunc_call(VALUE self, VALUE ary)
 	    rb_raise(rb_eDLTypeError, "unknown type %d", cfunc->type);
 	}
     }
+#endif
     else{
 	rb_raise(rb_eDLError,
 #ifndef LONG_LONG_VALUE
@@ -478,17 +575,23 @@ rb_dlcfunc_call(VALUE self, VALUE ary)
     return result;
 }
 
-VALUE
+/*
+ * call-seq:
+ *    dlfunc.to_i   => integer
+ *
+ * Returns the memory location of this function pointer as an integer.
+ */
+static VALUE
 rb_dlcfunc_to_i(VALUE self)
 {
   struct cfunc_data *cfunc;
 
-  Data_Get_Struct(self, struct cfunc_data, cfunc);
+  TypedData_Get_Struct(self, struct cfunc_data, &dlcfunc_data_type, cfunc);
   return PTR2NUM(cfunc->ptr);
 }
 
 void
-Init_dlcfunc()
+Init_dlcfunc(void)
 {
     id_last_error = rb_intern("__DL2_LAST_ERROR__");
 #if defined(HAVE_WINDOWS_H)

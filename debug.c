@@ -15,15 +15,17 @@
 #include "debug.h"
 #include "eval_intern.h"
 #include "vm_core.h"
+#include "id.h"
 
 /* for gdb */
-static const union {
+const union {
     enum ruby_special_consts    special_consts;
     enum ruby_value_type        value_type;
     enum ruby_tag_type          tag_type;
     enum node_type              node_type;
     enum ruby_public_object_vmkey public_vmkey;
     enum ruby_private_object_vmkey private_vmkey;
+    enum ruby_method_ids        method_ids;
     enum {
         RUBY_ENCODING_INLINE_MAX = ENCODING_INLINE_MAX,
         RUBY_ENCODING_SHIFT = ENCODING_SHIFT,
@@ -32,7 +34,7 @@ static const union {
         RUBY_ENC_CODERANGE_UNKNOWN = ENC_CODERANGE_UNKNOWN,
         RUBY_ENC_CODERANGE_7BIT    = ENC_CODERANGE_7BIT,
         RUBY_ENC_CODERANGE_VALID   = ENC_CODERANGE_VALID,
-        RUBY_ENC_CODERANGE_BROKEN  = ENC_CODERANGE_BROKEN, 
+        RUBY_ENC_CODERANGE_BROKEN  = ENC_CODERANGE_BROKEN,
         RUBY_FL_MARK        = FL_MARK,
         RUBY_FL_RESERVED    = FL_RESERVED,
         RUBY_FL_FINALIZE    = FL_FINALIZE,
@@ -67,7 +69,7 @@ static const union {
         RUBY_NODE_LMASK     = NODE_LMASK,
         RUBY_NODE_FL_NEWLINE   = NODE_FL_NEWLINE
     } various;
-} dummy_gdb_enums = {0};
+} ruby_dummy_gdb_enums = {0};
 
 const VALUE RUBY_FL_USER19    = FL_USER19;
 
@@ -77,9 +79,9 @@ ruby_debug_print_indent(int level, int debug_level, int indent_level)
     if (level < debug_level) {
 	fprintf(stderr, "%*s", indent_level, "");
 	fflush(stderr);
-	return Qtrue;
+	return TRUE;
     }
-    return Qfalse;
+    return FALSE;
 }
 
 void
@@ -98,7 +100,7 @@ ruby_debug_print_value(int level, int debug_level, const char *header, VALUE obj
 	VALUE str;
 	str = rb_inspect(obj);
 	fprintf(stderr, "DBG> %s: %s\n", header,
-		obj == -1 ? "" : StringValueCStr(str));
+		obj == (VALUE)(SIGNED_VALUE)-1 ? "" : StringValueCStr(str));
 	fflush(stderr);
     }
     return obj;
@@ -124,7 +126,7 @@ NODE *
 ruby_debug_print_node(int level, int debug_level, const char *header, const NODE *node)
 {
     if (level < debug_level) {
-	fprintf(stderr, "DBG> %s: %s (%lu)\n", header,
+	fprintf(stderr, "DBG> %s: %s (%u)\n", header,
 		ruby_node_name(nd_type(node)), nd_line(node));
     }
     return (NODE *)node;
@@ -150,6 +152,9 @@ set_debug_option(const char *str, int len, void *arg)
     } while (0)
     SET_WHEN("gc_stress", *ruby_initial_gc_stress_ptr);
     SET_WHEN("core", ruby_enable_coredump);
+#if defined _WIN32 && defined _MSC_VER && _MSC_VER >= 1400
+    SET_WHEN("rtc_error", ruby_w32_rtc_error);
+#endif
     fprintf(stderr, "unexpected debug option: %.*s\n", len, str);
 }
 

@@ -36,6 +36,7 @@ main(int argc, char **argv)
 	int ret;
 
 	RUBY_INIT_STACK;
+	ruby_init();
 	vm = ruby_vm_new(argc, argv);
 	ret = ruby_vm_run(vm);
 	ruby_vm_destruct(vm);

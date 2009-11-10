@@ -1,18 +1,22 @@
 load File.dirname(__FILE__) + '/rubyspec/ruby.1.9.mspec'
 class MSpecScript
-  builddir = File.expand_path(File.join(File.dirname(__FILE__), '..'))
+  builddir = Dir.pwd
   srcdir = ENV['SRCDIR']
-  srcdir ||= $1 if File.read("#{builddir}/Makefile")[/^\s*srcdir\s*=\s*(.+)/i]
-  srcdir ||= builddir
-  config = proc{|name| `#{builddir}/miniruby -I#{srcdir} -rrbconfig -e 'print Config::CONFIG["#{name}"]'`}
+  if !srcdir and File.exist?("#{builddir}/Makefile") then 
+    File.open("#{builddir}/Makefile", "r:US-ASCII") {|f|
+      f.read[/^\s*srcdir\s*=\s*(.+)/i] and srcdir = $1
+    }
+  end
+  config = proc{|name| `#{builddir}/miniruby -I#{srcdir} -rrbconfig -e 'print RbConfig::CONFIG["#{name}"]'`}
 
   # The default implementation to run the specs.
   set :target, File.join(builddir, "miniruby#{config['exeext']}")
+  set :prefix, File.expand_path('rubyspec', File.dirname(__FILE__))
   set :flags, %W[
     -I#{srcdir}/lib
     -I#{srcdir}/#{config['EXTOUT']}/common
     -I#{srcdir}/-
     -r#{srcdir}/ext/purelib.rb
-    #{srcdir}/runruby.rb --extout=#{config['EXTOUT']}
+    #{srcdir}/tool/runruby.rb --extout=#{config['EXTOUT']}
   ]
 end

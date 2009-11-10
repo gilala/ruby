@@ -291,7 +291,7 @@ mktime_do(struct mktime_arg *arg)
     if ( len > ptr - str && ( *ptr == '-' || *ptr == '+' ) )
     {
         time_t tz_offset = strtol(ptr, NULL, 10) * 3600;
-        time_t tmp;
+        VALUE tmp;
 
         while ( *ptr != ':' && *ptr != '\0' ) ptr++;
         if ( *ptr == ':' )
@@ -309,8 +309,9 @@ mktime_do(struct mktime_arg *arg)
 
         /* Make TZ time*/
         time = rb_funcall(rb_cTime, s_utc, 6, year, mon, day, hour, min, sec);
-        tmp = NUM2LONG(rb_funcall(time, s_to_i, 0)) - tz_offset;
-        return rb_funcall(rb_cTime, s_at, 2, LONG2NUM(tmp), LONG2NUM(usec));
+        tmp = rb_funcall(time, s_to_i, 0);
+        tmp = rb_funcall(tmp, '-', 1, LONG2FIX(tz_offset));
+        return rb_funcall(rb_cTime, s_at, 2, tmp, LONG2NUM(usec));
     }
     else
     {
@@ -1937,6 +1938,15 @@ syck_emitter_s_alloc(VALUE class)
     return pobj;
 }
 
+static VALUE
+id_hash_new(void)
+{
+    VALUE hash;
+    hash = rb_hash_new();
+    rb_funcall(hash, rb_intern("compare_by_identity"), 0);
+    return hash;
+}
+
 /*
  * YAML::Syck::Emitter.reset( options )
  */
@@ -1952,7 +1962,7 @@ syck_emitter_reset(int argc, VALUE *argv, VALUE self)
 
     bonus->oid = Qnil;
     bonus->port = rb_str_new2( "" );
-    bonus->data = rb_hash_new();
+    bonus->data = id_hash_new();
 
     if (rb_scan_args(argc, argv, "01", &options) == 0)
     {

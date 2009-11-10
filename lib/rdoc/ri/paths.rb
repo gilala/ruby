@@ -28,45 +28,30 @@ module RDoc::RI::Paths
 
   VERSION = RbConfig::CONFIG['ruby_version']
 
-  base    = File.join(RbConfig::CONFIG['datadir'], "ri", VERSION)
+  if VERSION > '1.9.1'
+    if m = /ruby/.match(RbConfig::CONFIG['RUBY_INSTALL_NAME'])
+      m = [m.pre_match, m.post_match]
+    else
+      m = [""] * 2
+    end
+    ri = "#{m[0]}ri#{m[1]}"
+    rdoc = "#{m[0]}rdoc#{m[1]}"
+    base    = File.join(RbConfig::CONFIG['datadir'], ri, VERSION)
+  else
+    if m = /ruby/.match(RbConfig::CONFIG['RUBY_BASE_NAME'])
+      m = [m.pre_match, m.post_match]
+    else
+      m = [""] * 2
+    end
+    ri = "#{m[0]}ri#{m[1]}"
+    rdoc = "#{m[0]}rdoc#{m[1]}"
+    base = File.join(RbConfig::CONFIG['ridir'], VERSION)
+  end
   SYSDIR  = File.join(base, "system")
   SITEDIR = File.join(base, "site")
-  homedir = ENV['HOME'] || ENV['USERPROFILE'] || ENV['HOMEPATH']
+  HOMEDIR = (File.expand_path("~/.#{rdoc}") rescue nil)
 
-  if homedir then
-    HOMEDIR = File.join(homedir, ".rdoc")
-  else
-    HOMEDIR = nil
-  end
-
-  begin
-    require 'rubygems' unless defined?(Gem) and defined?(Gem::Enable) and
-                              Gem::Enable
-
-    # HACK dup'd from Gem.latest_partials and friends
-    all_paths = []
-
-    all_paths = Gem.path.map do |dir|
-      Dir[File.join(dir, 'doc', '*', 'ri')]
-    end.flatten
-
-    ri_paths = {}
-
-    all_paths.each do |dir|
-      base = File.basename File.dirname(dir)
-      if base =~ /(.*)-((\d+\.)*\d+)/ then
-        name, version = $1, $2
-        ver = Gem::Version.new version
-        if ri_paths[name].nil? or ver > ri_paths[name][0] then
-          ri_paths[name] = [ver, dir]
-        end
-      end
-    end
-
-    GEMDIRS = ri_paths.map { |k,v| v.last }.sort
-  rescue LoadError
-    GEMDIRS = []
-  end
+  autoload(:GEMDIRS, File.expand_path('../gemdirs.rb', __FILE__))
 
   # Returns the selected documentation directories as an Array, or PATH if no
   # overriding directories were given.

@@ -163,10 +163,10 @@ ossl_x509extfactory_set_crl(VALUE self, VALUE crl)
     return crl;
 }
 
+#ifdef HAVE_X509V3_SET_NCONF
 static VALUE
 ossl_x509extfactory_set_config(VALUE self, VALUE config)
 {
-#ifdef HAVE_X509V3_SET_NCONF
     X509V3_CTX *ctx;
     CONF *conf;
 
@@ -176,10 +176,10 @@ ossl_x509extfactory_set_config(VALUE self, VALUE config)
     X509V3_set_nconf(ctx, conf);
 
     return config;
-#else
-    rb_notimplement();
-#endif
 }
+#else
+#define rb_f_fork rb_f_notimplement
+#endif
 
 static VALUE 
 ossl_x509extfactory_initialize(int argc, VALUE *argv, VALUE self)
@@ -325,15 +325,15 @@ ossl_x509ext_set_value(VALUE self, VALUE data)
 	ossl_raise(eX509ExtError, "malloc error");
     memcpy(s, RSTRING_PTR(data), RSTRING_LEN(data));
     if(!(asn1s = ASN1_OCTET_STRING_new())){
-	free(s);
+	OPENSSL_free(s);
 	ossl_raise(eX509ExtError, NULL);
     }
     if(!M_ASN1_OCTET_STRING_set(asn1s, s, RSTRING_LEN(data))){
-	free(s);
+	OPENSSL_free(s);
 	ASN1_OCTET_STRING_free(asn1s);
 	ossl_raise(eX509ExtError, NULL);
     }
-    free(s);
+    OPENSSL_free(s);
     GetX509Ext(self, ext);
     X509_EXTENSION_set_data(ext, asn1s);
 

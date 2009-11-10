@@ -121,7 +121,7 @@ module Net # :nodoc:
         return rbuf_consume(@rbuf.size)
       end
     end
-        
+
     def readline
       readuntil("\n").chop
     end
@@ -133,11 +133,19 @@ module Net # :nodoc:
     def rbuf_fill
       begin
         @rbuf << @io.read_nonblock(BUFSIZE)
-      rescue Errno::EWOULDBLOCK
+      rescue IO::WaitReadable
         if IO.select([@io], nil, nil, @read_timeout)
-          @rbuf << @io.read_nonblock(BUFSIZE)
+          retry
         else
-          raise Timeout::TimeoutError
+          raise Timeout::Error
+        end
+      rescue IO::WaitWritable
+        # OpenSSL::Buffering#read_nonblock may fail with IO::WaitWritable.
+        # http://www.openssl.org/support/faq.html#PROG10
+        if IO.select(nil, [@io], nil, @read_timeout)
+          retry
+        else
+          raise Timeout::Error
         end
       end
     end
@@ -228,7 +236,7 @@ module Net # :nodoc:
       LOG_on()
       LOG "read message (#{read_bytes} bytes)"
     end
-  
+
     # *library private* (cannot handle 'break')
     def each_list_item
       while (str = readuntil("\r\n")) != ".\r\n"

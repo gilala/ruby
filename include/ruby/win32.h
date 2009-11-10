@@ -27,8 +27,14 @@ extern "C" {
 
 // #include <stdarg.h> conflict with varargs.h?
 #if !defined(WSAAPI)
+#if defined(__cplusplus) && defined(_MSC_VER)
+extern "C++" {			/* template without extern "C++" */
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#if defined(__cplusplus) && defined(_MSC_VER)
+}
+#endif
 #endif
 
 #define NT 1			/* deprecated */
@@ -89,12 +95,6 @@ typedef unsigned int uintptr_t;
 # define mode_t int
 #endif
 
-#ifdef _M_IX86
-# define WIN95 1
-#else
-# undef  WIN95
-#endif
-
 #ifdef WIN95
 extern DWORD rb_w32_osid(void);
 #define rb_w32_iswinnt()  (rb_w32_osid() == VER_PLATFORM_WIN32_NT)
@@ -139,7 +139,6 @@ extern DWORD rb_w32_osid(void);
 #define getppid()		rb_w32_getppid()
 #define sleep(x)		rb_w32_Sleep((x)*1000)
 #define Sleep(msec)		(void)rb_w32_Sleep(msec)
-#define fstat(fd,st)		_fstati64(fd,st)
 #ifdef __BORLANDC__
 #define creat(p, m)		_creat(p, m)
 #define eof()			_eof()
@@ -155,14 +154,14 @@ extern DWORD rb_w32_osid(void);
 #define fdopen(h, m)		rb_w32_fdopen(h, m)
 #undef fsopen
 #define fsopen(p, m, sh)	rb_w32_fsopen(p, m, sh)
-#endif
+#endif /* __BORLANDC__ */
 
 #undef execv
 #define execv(path,argv)	rb_w32_aspawn(P_OVERLAY,path,argv)
 #if !defined(__BORLANDC__)
 #undef isatty
 #define isatty(h)		rb_w32_isatty(h)
-#endif
+#endif /* __BORLANDC__ */
 
 #undef mkdir
 #define mkdir(p, m)		rb_w32_mkdir(p, m)
@@ -170,19 +169,21 @@ extern DWORD rb_w32_osid(void);
 #define rmdir(p)		rb_w32_rmdir(p)
 #undef unlink
 #define unlink(p)		rb_w32_unlink(p)
-#endif
+#endif /* RUBY_EXPORT */
 
 #if SIZEOF_OFF_T == 8
 #define off_t __int64
 #define stat stati64
+#define fstat(fd,st)		_fstati64(fd,st)
 #if defined(__BORLANDC__)
 #define stati64(path, st) rb_w32_stati64(path, st)
-#elif !defined(_MSC_VER) || _MSC_VER < 1400
+#elif !defined(_MSC_VER) || RT_VER < 80
 #define stati64 _stati64
 #define _stati64(path, st) rb_w32_stati64(path, st)
 #else
 #define stati64 _stat64
 #define _stat64(path, st) rb_w32_stati64(path, st)
+#define _fstati64 _fstat64
 #endif
 #else
 #define stat(path,st)		rb_w32_stat(path,st)
@@ -190,9 +191,10 @@ extern DWORD rb_w32_osid(void);
 extern int rb_w32_stat(const char *, struct stat *);
 extern int rb_w32_fstat(int, struct stat *);
 #endif
+#define access(path,mode)	rb_w32_access(path,mode)
 
-#define strcasecmp		stricmp
-#define strncasecmp		strnicmp
+#define strcasecmp		_stricmp
+#define strncasecmp		_strnicmp
 #define fsync			_commit
 
 #ifdef __MINGW32__
@@ -203,6 +205,21 @@ struct timezone {
 #undef isascii
 #define isascii __isascii
 #endif
+
+struct iovec {
+    void *iov_base;
+    size_t iov_len;
+};
+struct msghdr {
+    void *msg_name;
+    int msg_namelen;
+    struct iovec *msg_iov;
+    int msg_iovlen;
+    void *msg_control;
+    int msg_controllen;
+    int msg_flags;
+};
+
 #define NtInitialize ruby_sysinit
 extern int    rb_w32_cmdvector(const char *, char ***);
 extern rb_pid_t  rb_w32_pipe_exec(const char *, const char *, int, int *, int *);
@@ -224,6 +241,8 @@ extern int    WSAAPI rb_w32_recv(int, char *, int, int);
 extern int    WSAAPI rb_w32_recvfrom(int, char *, int, int, struct sockaddr *, int *);
 extern int    WSAAPI rb_w32_send(int, const char *, int, int);
 extern int    WSAAPI rb_w32_sendto(int, const char *, int, int, const struct sockaddr *, int);
+extern int    recvmsg(int, struct msghdr *, int);
+extern int    sendmsg(int, const struct msghdr *, int);
 extern int    WSAAPI rb_w32_setsockopt(int, int, int, const char *, int);
 extern int    WSAAPI rb_w32_shutdown(int, int);
 extern int    WSAAPI rb_w32_socket(int, int, int);
@@ -243,17 +262,10 @@ extern char **rb_w32_get_environ(void);
 extern void   rb_w32_free_environ(char **);
 extern int    rb_w32_map_errno(DWORD);
 
-#define vsnprintf(s,n,f,l) rb_w32_vsnprintf(s,n,f,l)
-#define snprintf   rb_w32_snprintf
-extern int rb_w32_vsnprintf(char *, size_t, const char *, va_list);
-extern int rb_w32_snprintf(char *, size_t, const char *, ...);
-
 extern int chown(const char *, int, int);
 extern int link(const char *, const char *);
 extern int gettimeofday(struct timeval *, struct timezone *);
 extern rb_pid_t waitpid (rb_pid_t, int *, int);
-extern int rb_w32_argv_size(char *const *);
-extern char *rb_w32_join_argv(char *, char *const *);
 extern rb_pid_t rb_w32_spawn(int, const char *, const char*);
 extern rb_pid_t rb_w32_aspawn(int, const char *, char *const *);
 extern int kill(int, int);
@@ -267,6 +279,7 @@ extern int rb_w32_mkdir(const char *, int);
 extern int rb_w32_rmdir(const char *);
 extern int rb_w32_unlink(const char *);
 extern int rb_w32_stati64(const char *, struct stati64 *);
+extern int rb_w32_access(const char *, int);
 
 #ifdef __BORLANDC__
 extern int rb_w32_fstati64(int, struct stati64 *);
@@ -281,15 +294,19 @@ extern FILE *rb_w32_fsopen(const char *, const char *, int);
 #ifndef isnan
 #define isnan(x) _isnan(x)
 #endif
-#ifndef finite
-#define finite(x) _finite(x)
-#endif
+static inline int
+finite(double x)
+{
+    return _finite(x);
+}
 #ifndef copysign
 #define copysign(a, b) _copysign(a, b)
 #endif
-#ifndef scalb
-#define scalb(a, b) _scalb(a, b)
-#endif
+static inline double
+scalb(double a, long b)
+{
+    return _scalb(a, b);
+}
 #endif
 
 #if !defined S_IFIFO && defined _S_IFIFO
@@ -539,6 +556,7 @@ HANDLE GetCurrentThreadHandle(void);
 int  rb_w32_sleep(unsigned long msec);
 int  rb_w32_putc(int, FILE*);
 int  rb_w32_getc(FILE*);
+int  rb_w32_wopen(const WCHAR *, int, ...);
 int  rb_w32_open(const char *, int, ...);
 int  rb_w32_close(int);
 int  rb_w32_fclose(FILE*);

@@ -94,7 +94,7 @@ free_window(struct windata *winp)
 {
     if (winp->window && winp->window != stdscr) delwin(winp->window);
     winp->window = 0;
-    free(winp);
+    xfree(winp);
 }
 
 static VALUE
@@ -138,6 +138,7 @@ curses_init_screen(void)
 static VALUE
 curses_close_screen(void)
 {
+    curses_stdscr();
 #ifdef HAVE_ISENDWIN
     if (!isendwin())
 #endif
@@ -159,19 +160,20 @@ curses_finalize(VALUE dummy)
     rb_gc_unregister_address(&rb_stdscr);
 }
 
+#ifdef HAVE_ISENDWIN
 /* def closed? */
 static VALUE
 curses_closed(void)
 {
-#ifdef HAVE_ISENDWIN
+    curses_stdscr();
     if (isendwin()) {
 	return Qtrue;
     }
     return Qfalse;
-#else
-    rb_notimplement();
-#endif
 }
+#else
+#define curses_closed rb_f_notimplement
+#endif
 
 /* def clear */
 static VALUE
@@ -328,19 +330,19 @@ curses_char(VALUE c)
     }
 }
 
+#ifdef HAVE_UNGETCH
 /* def ungetch */
 static VALUE
 curses_ungetch(VALUE obj, VALUE ch)
 {
-#ifdef HAVE_UNGETCH
     int c = curses_char(ch);
     curses_stdscr();
     ungetch(c);
-#else
-    rb_notimplement();
-#endif
     return Qnil;
 }
+#else
+#define curses_ungetch rb_f_notimplement
+#endif
 
 /* def setpos(y, x) */
 static VALUE
@@ -355,6 +357,7 @@ curses_setpos(VALUE obj, VALUE y, VALUE x)
 static VALUE
 curses_standout(VALUE obj)
 {
+    curses_stdscr();
     standout();
     return Qnil;
 }
@@ -363,6 +366,7 @@ curses_standout(VALUE obj)
 static VALUE
 curses_standend(VALUE obj)
 {
+    curses_stdscr();
     standend();
     return Qnil;
 }
@@ -406,15 +410,22 @@ curses_addstr(VALUE obj, VALUE str)
     return Qnil;
 }
 
+static VALUE
+getch_func(void *arg)
+{
+    int *ip = (int *)arg;
+    *ip = getch();
+    return Qnil;
+}
+
 /* def getch */
 static VALUE
 curses_getch(VALUE obj)
 {
     int c;
 
-    rb_read_check(stdin);
     curses_stdscr();
-    c = getch();
+    rb_thread_blocking_region(getch_func, (void *)&c, RUBY_UBF_IO, 0);
     if (c == EOF) return Qnil;
     if (rb_isprint(c)) {
 	char ch = (char)c;
@@ -424,18 +435,29 @@ curses_getch(VALUE obj)
     return UINT2NUM(c);
 }
 
+/* This should be big enough.. I hope */
+#define GETSTR_BUF_SIZE 1024
+
+static VALUE
+getstr_func(void *arg)
+{
+    char *rtn = (char *)arg;
+#if defined(HAVE_GETNSTR)
+    getnstr(rtn,GETSTR_BUF_SIZE-1);
+#else
+    getstr(rtn);
+#endif
+    return Qnil;
+}
+
 /* def getstr */
 static VALUE
 curses_getstr(VALUE obj)
 {
-    char rtn[1024]; /* This should be big enough.. I hope */
+    char rtn[GETSTR_BUF_SIZE];
 
-    rb_read_check(stdin);
-#if defined(HAVE_GETNSTR)
-    getnstr(rtn,1023);
-#else
-    getstr(rtn);
-#endif
+    curses_stdscr();
+    rb_thread_blocking_region(getstr_func, (void *)rtn, RUBY_UBF_IO, 0);
     return rb_locale_str_new_cstr(rtn);
 }
 
@@ -443,6 +465,7 @@ curses_getstr(VALUE obj)
 static VALUE
 curses_delch(VALUE obj)
 {
+    curses_stdscr();
     delch();
     return Qnil;
 }
@@ -451,6 +474,7 @@ curses_delch(VALUE obj)
 static VALUE
 curses_deleteln(VALUE obj)
 {
+    curses_stdscr();
 #if defined(HAVE_DELETELN) || defined(deleteln)
     deleteln();
 #endif
@@ -461,6 +485,7 @@ curses_deleteln(VALUE obj)
 static VALUE
 curses_insertln(VALUE obj)
 {
+    curses_stdscr();
 #if defined(HAVE_INSERTLN) || defined(insertln)
     insertln();
 #endif
@@ -475,6 +500,7 @@ curses_keyname(VALUE obj, VALUE c)
     int cc = curses_char(c);
     const char *name;
 
+    curses_stdscr();
     name = keyname(cc);
     if (name) {
 	return rb_str_new_cstr(name);
@@ -510,6 +536,7 @@ curses_curs_set(VALUE obj, VALUE visibility)
 {
 #ifdef HAVE_CURS_SET
     int n;
+    curses_stdscr();
     return (n = curs_set(NUM2INT(visibility)) != ERR) ? INT2FIX(n) : Qnil;
 #else
     return Qnil;
@@ -521,6 +548,7 @@ curses_scrl(VALUE obj, VALUE n)
 {
     /* may have to raise exception on ERR */
 #ifdef HAVE_SCRL
+    curses_stdscr();
     return (scrl(NUM2INT(n)) == OK) ? Qtrue : Qfalse;
 #else
     return Qfalse;
@@ -532,6 +560,7 @@ curses_setscrreg(VALUE obj, VALUE top, VALUE bottom)
 {
     /* may have to raise exception on ERR */
 #ifdef HAVE_SETSCRREG
+    curses_stdscr();
     return (setscrreg(NUM2INT(top), NUM2INT(bottom)) == OK) ? Qtrue : Qfalse;
 #else
     return Qfalse;
@@ -541,6 +570,7 @@ curses_setscrreg(VALUE obj, VALUE top, VALUE bottom)
 static VALUE
 curses_attroff(VALUE obj, VALUE attrs)
 {
+    curses_stdscr();
     return window_attroff(rb_stdscr,attrs);
     /* return INT2FIX(attroff(NUM2INT(attrs))); */
 }
@@ -548,6 +578,7 @@ curses_attroff(VALUE obj, VALUE attrs)
 static VALUE
 curses_attron(VALUE obj, VALUE attrs)
 {
+    curses_stdscr();
     return window_attron(rb_stdscr,attrs);
     /* return INT2FIX(attroff(NUM2INT(attrs))); */
 }
@@ -555,6 +586,7 @@ curses_attron(VALUE obj, VALUE attrs)
 static VALUE
 curses_attrset(VALUE obj, VALUE attrs)
 {
+    curses_stdscr();
     return window_attrset(rb_stdscr,attrs);
     /* return INT2FIX(attroff(NUM2INT(attrs))); */
 }
@@ -563,6 +595,7 @@ static VALUE
 curses_bkgdset(VALUE obj, VALUE ch)
 {
 #ifdef HAVE_BKGDSET
+    curses_stdscr();
     bkgdset(NUM2CH(ch));
 #endif
     return Qnil;
@@ -572,69 +605,72 @@ static VALUE
 curses_bkgd(VALUE obj, VALUE ch)
 {
 #ifdef HAVE_BKGD
+    curses_stdscr();
     return (bkgd(NUM2CH(ch)) == OK) ? Qtrue : Qfalse;
 #else
     return Qfalse;
 #endif
 }
 
+#if defined(HAVE_USE_DEFAULT_COLORS)
 static VALUE
 curses_use_default_colors(VALUE obj)
 {
-#if defined(HAVE_USE_DEFAULT_COLORS)
+    curses_stdscr();
     use_default_colors();
     return Qnil;
-#else
-    rb_notimplement();
-#endif
 }
+#else
+#define curses_use_default_colors rb_f_notimplement
+#endif
 
+#if defined(HAVE_TABSIZE)
 static VALUE
 curses_tabsize_set(VALUE obj, VALUE val)
 {
-#if defined(HAVE_TABSIZE)
     TABSIZE = NUM2INT(val);
     return INT2NUM(TABSIZE);
-#else
-    rb_notimplement();
-#endif
 }
+#else
+#define curses_tabsize_set rb_f_notimplement
+#endif
 
+#if defined(HAVE_TABSIZE)
 static VALUE
 curses_tabsize_get(VALUE ojb)
 {
-#if defined(HAVE_TABSIZE)
     return INT2NUM(TABSIZE);
-#else
-    rb_notimplement();
-#endif
 }
+#else
+#define curses_tabsize_get rb_f_notimplement
+#endif
 
+#if defined(HAVE_ESCDELAY)
 static VALUE
 curses_escdelay_set(VALUE obj, VALUE val)
 {
-#if defined(HAVE_ESCDELAY)
     ESCDELAY = NUM2INT(val);
     return INT2NUM(ESCDELAY);
-#else
-    rb_notimplement();
-#endif
 }
+#else
+#define curses_escdelay_set rb_f_notimplement
+#endif
 
+#if defined(HAVE_ESCDELAY)
 static VALUE
 curses_escdelay_get(VALUE obj)
 {
-#if defined(HAVE_ESCDELAY)
     return INT2NUM(ESCDELAY);
-#else
-    rb_notimplement();
-#endif
 }
+#else
+#define curses_escdelay_get rb_f_notimplement
+#endif
 
 static VALUE
 curses_resizeterm(VALUE obj, VALUE lin, VALUE col)
 {
 #if defined(HAVE_RESIZETERM)
+    curses_stdscr();
     return (resizeterm(NUM2INT(lin),NUM2INT(col)) == OK) ? Qtrue : Qfalse;
 #else
     return Qnil;
@@ -646,6 +682,7 @@ static VALUE
 curses_start_color(VALUE obj)
 {
     /* may have to raise exception on ERR */
+    curses_stdscr();
     return (start_color() == OK) ? Qtrue : Qfalse;
 }
 
@@ -653,6 +690,7 @@ static VALUE
 curses_init_pair(VALUE obj, VALUE pair, VALUE f, VALUE b)
 {
     /* may have to raise exception on ERR */
+    curses_stdscr();
     return (init_pair(NUM2INT(pair),NUM2INT(f),NUM2INT(b)) == OK) ? Qtrue : Qfalse;
 }
 
@@ -660,6 +698,7 @@ static VALUE
 curses_init_color(VALUE obj, VALUE color, VALUE r, VALUE g, VALUE b)
 {
     /* may have to raise exception on ERR */
+    curses_stdscr();
     return (init_color(NUM2INT(color),NUM2INT(r),
 		       NUM2INT(g),NUM2INT(b)) == OK) ? Qtrue : Qfalse;
 }
@@ -667,29 +706,54 @@ curses_init_color(VALUE obj, VALUE color, VALUE r, VALUE g, VALUE b)
 static VALUE
 curses_has_colors(VALUE obj)
 {
+    curses_stdscr();
     return has_colors() ? Qtrue : Qfalse;
 }
 
 static VALUE
 curses_can_change_color(VALUE obj)
 {
+    curses_stdscr();
     return can_change_color() ? Qtrue : Qfalse;
 }
+
+#if defined(HAVE_COLORS)
+static VALUE
+curses_colors(VALUE obj)
+{
+    return INT2FIX(COLORS);
+}
+#else
+#define curses_colors rb_f_notimplement
+#endif
 
 static VALUE
 curses_color_content(VALUE obj, VALUE color)
 {
     short r,g,b;
 
+    curses_stdscr();
     color_content(NUM2INT(color),&r,&g,&b);
     return rb_ary_new3(3,INT2FIX(r),INT2FIX(g),INT2FIX(b));
 }
+
+
+#if defined(HAVE_COLOR_PAIRS)
+static VALUE
+curses_color_pairs(VALUE obj)
+{
+    return INT2FIX(COLOR_PAIRS);
+}
+#else
+#define curses_color_pairs rb_f_notimplement
+#endif
 
 static VALUE
 curses_pair_content(VALUE obj, VALUE pair)
 {
     short f,b;
 
+    curses_stdscr();
     pair_content(NUM2INT(pair),&f,&b);
     return rb_ary_new3(2,INT2FIX(f),INT2FIX(b));
 }
@@ -703,6 +767,7 @@ curses_color_pair(VALUE obj, VALUE attrs)
 static VALUE
 curses_pair_number(VALUE obj, VALUE attrs)
 {
+    curses_stdscr();
     return INT2FIX(PAIR_NUMBER(NUM2INT(attrs)));
 }
 #endif /* USE_COLOR */
@@ -738,6 +803,7 @@ curses_getmouse(VALUE obj)
     struct mousedata *mdata;
     VALUE val;
 
+    curses_stdscr();
     val = Data_Make_Struct(cMouseEvent,struct mousedata,
 			   0,curses_mousedata_free,mdata);
     mdata->mevent = (MEVENT*)xmalloc(sizeof(MEVENT));
@@ -749,6 +815,7 @@ curses_ungetmouse(VALUE obj, VALUE mevent)
 {
     struct mousedata *mdata;
 
+    curses_stdscr();
     GetMOUSE(mevent,mdata);
     return (ungetmouse(mdata->mevent) == OK) ? Qtrue : Qfalse;
 }
@@ -756,12 +823,14 @@ curses_ungetmouse(VALUE obj, VALUE mevent)
 static VALUE
 curses_mouseinterval(VALUE obj, VALUE interval)
 {
+    curses_stdscr();
     return mouseinterval(NUM2INT(interval)) ? Qtrue : Qfalse;
 }
 
 static VALUE
 curses_mousemask(VALUE obj, VALUE mask)
 {
+    curses_stdscr();
     return INT2NUM(mousemask(NUM2UINT(mask),NULL));
 }
 
@@ -781,36 +850,39 @@ DEFINE_MOUSE_GET_MEMBER(curs_mouse_bstate, bstate)
 #undef define_curs_mouse_member
 #endif /* USE_MOUSE */
 
+#ifdef HAVE_TIMEOUT
 static VALUE
 curses_timeout(VALUE obj, VALUE delay)
 {
-#ifdef HAVE_TIMEOUT
+    curses_stdscr();
     timeout(NUM2INT(delay));
     return Qnil;
-#else
-    rb_notimplement();
-#endif
 }
+#else
+#define curses_timeout rb_f_notimplement
+#endif
 
+#ifdef HAVE_DEF_PROG_MODE
 static VALUE
 curses_def_prog_mode(VALUE obj)
 {
-#ifdef HAVE_DEF_PROG_MODE
+    curses_stdscr();
     return def_prog_mode() == OK ? Qtrue : Qfalse;
-#else
-    rb_notimplement();
-#endif
 }
+#else
+#define curses_def_prog_mode rb_f_notimplement
+#endif
 
+#ifdef HAVE_RESET_PROG_MODE
 static VALUE
 curses_reset_prog_mode(VALUE obj)
 {
-#ifdef HAVE_RESET_PROG_MODE
+    curses_stdscr();
     return reset_prog_mode() == OK ? Qtrue : Qfalse;
-#else
-    rb_notimplement();
-#endif
 }
+#else
+#define curses_reset_prog_mode rb_f_notimplement
+#endif
 
 /*-------------------------- class Window --------------------------*/
 
@@ -1158,16 +1230,31 @@ window_addstr2(VALUE obj, VALUE str)
     return obj;
 }
 
+struct wgetch_arg {
+    WINDOW *win;
+    int c;
+};
+
+static VALUE
+wgetch_func(void *_arg)
+{
+    struct wgetch_arg *arg = (struct wgetch_arg *)_arg;
+    arg->c = wgetch(arg->win);
+    return Qnil;
+}
+
 /* def getch */
 static VALUE
 window_getch(VALUE obj)
 {
     struct windata *winp;
+    struct wgetch_arg arg;
     int c;
 
-    rb_read_check(stdin);
     GetWINDOW(obj, winp);
-    c = wgetch(winp->window);
+    arg.win = winp->window;
+    rb_thread_blocking_region(wgetch_func, (void *)&arg, RUBY_UBF_IO, 0);
+    c = arg.c;
     if (c == EOF) return Qnil;
     if (rb_isprint(c)) {
 	char ch = (char)c;
@@ -1177,21 +1264,34 @@ window_getch(VALUE obj)
     return UINT2NUM(c);
 }
 
+struct wgetstr_arg {
+    WINDOW *win;
+    char rtn[GETSTR_BUF_SIZE];
+};
+
+static VALUE
+wgetstr_func(void *_arg)
+{
+    struct wgetstr_arg *arg = (struct wgetstr_arg *)_arg;
+#if defined(HAVE_WGETNSTR)
+    wgetnstr(arg->win, arg->rtn, GETSTR_BUF_SIZE-1);
+#else
+    wgetstr(arg->win, arg->rtn);
+#endif
+    return Qnil;
+}
+
 /* def getstr */
 static VALUE
 window_getstr(VALUE obj)
 {
     struct windata *winp;
-    char rtn[1024]; /* This should be big enough.. I hope */
+    struct wgetstr_arg arg;
 
     GetWINDOW(obj, winp);
-    rb_read_check(stdin);
-#if defined(HAVE_WGETNSTR)
-    wgetnstr(winp->window, rtn, 1023);
-#else
-    wgetstr(winp->window, rtn);
-#endif
-    return rb_locale_str_new_cstr(rtn);
+    arg.win = winp->window;
+    rb_thread_blocking_region(wgetstr_func, (void *)&arg, RUBY_UBF_IO, 0);
+    return rb_locale_str_new_cstr(arg.rtn);
 }
 
 /* def delch */
@@ -1405,10 +1505,10 @@ window_resize(VALUE obj, VALUE lin, VALUE col)
 }
 
 
+#ifdef HAVE_KEYPAD
 static VALUE
 window_keypad(VALUE obj, VALUE val)
 {
-#ifdef HAVE_KEYPAD
     struct windata *winp;
 
     GetWINDOW(obj,winp);
@@ -1421,15 +1521,15 @@ window_keypad(VALUE obj, VALUE val)
     return (keypad(winp->window,RTEST(val) ? TRUE : FALSE)) == OK ?
 	Qtrue : Qfalse;
 #endif
-#else
-    rb_notimplement();
-#endif /* HAVE_KEYPAD */
 }
+#else
+#define window_keypad rb_f_notimplement
+#endif
 
+#ifdef HAVE_NODELAY
 static VALUE
 window_nodelay(VALUE obj, VALUE val)
 {
-#ifdef HAVE_NODELAY
     struct windata *winp;
     GetWINDOW(obj,winp);
 
@@ -1440,24 +1540,24 @@ window_nodelay(VALUE obj, VALUE val)
 #else
     return nodelay(winp->window,RTEST(val) ? TRUE : FALSE) == OK ? Qtrue : Qfalse;
 #endif
-#else
-    rb_notimplement();
-#endif
 }
+#else
+#define window_nodelay rb_f_notimplement
+#endif
 
+#ifdef HAVE_WTIMEOUT
 static VALUE
 window_timeout(VALUE obj, VALUE delay)
 {
-#ifdef HAVE_WTIMEOUT
     struct windata *winp;
     GetWINDOW(obj,winp);
 
     wtimeout(winp->window,NUM2INT(delay));
     return Qnil;
-#else
-    rb_notimplement();
-#endif
 }
+#else
+#define window_timeout rb_f_notimplement
+#endif
 
 /*------------------------- Initialization -------------------------*/
 void
@@ -1498,8 +1598,8 @@ Init_curses(void)
     rb_define_module_function(mCurses, "noraw", curses_noraw, 0);
     rb_define_module_function(mCurses, "cbreak", curses_cbreak, 0);
     rb_define_module_function(mCurses, "nocbreak", curses_nocbreak, 0);
-    rb_define_alias(mCurses, "crmode", "cbreak");
-    rb_define_alias(mCurses, "nocrmode", "nocbreak");
+    rb_define_module_function(mCurses, "crmode", curses_nocbreak, 0);
+    rb_define_module_function(mCurses, "nocrmode", curses_nocbreak, 0);
     rb_define_module_function(mCurses, "nl", curses_nl, 0);
     rb_define_module_function(mCurses, "nonl", curses_nonl, 0);
     rb_define_module_function(mCurses, "beep", curses_beep, 0);
@@ -1537,7 +1637,9 @@ Init_curses(void)
     rb_define_module_function(mCurses, "has_colors?", curses_has_colors, 0);
     rb_define_module_function(mCurses, "can_change_color?",
 			      curses_can_change_color, 0);
+    rb_define_module_function(mCurses, "colors", curses_colors, 0);
     rb_define_module_function(mCurses, "color_content", curses_color_content, 1);
+    rb_define_module_function(mCurses, "color_pairs", curses_color_pairs, 0);
     rb_define_module_function(mCurses, "pair_content", curses_pair_content, 1);
     rb_define_module_function(mCurses, "color_pair", curses_color_pair, 1);
     rb_define_module_function(mCurses, "pair_number", curses_pair_number, 1);

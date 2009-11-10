@@ -75,6 +75,8 @@ VALUE rb_ary_cmp(VALUE, VALUE);
 VALUE rb_ary_replace(VALUE copy, VALUE orig);
 VALUE rb_get_values_at(VALUE, long, int, VALUE*, VALUE(*)(VALUE,long));
 /* bignum.c */
+VALUE rb_big_new(long, int);
+int rb_bigzero_p(VALUE x);
 VALUE rb_big_clone(VALUE);
 void rb_big_2comp(VALUE);
 VALUE rb_big_norm(VALUE);
@@ -150,8 +152,10 @@ VALUE rb_make_metaclass(VALUE, VALUE);
 void rb_check_inheritable(VALUE);
 VALUE rb_class_inherited(VALUE, VALUE);
 VALUE rb_define_class_id(ID, VALUE);
+VALUE rb_define_class_id_under(VALUE, ID, VALUE);
 VALUE rb_module_new(void);
 VALUE rb_define_module_id(ID);
+VALUE rb_define_module_id_under(VALUE, ID);
 VALUE rb_mod_included_modules(VALUE);
 VALUE rb_mod_include_p(VALUE, VALUE);
 VALUE rb_mod_ancestors(VALUE);
@@ -199,6 +203,7 @@ void rb_check_frozen(VALUE);
 /* eval.c */
 int rb_sourceline(void);
 const char *rb_sourcefile(void);
+VALUE rb_check_funcall(VALUE, ID, int, VALUE*);
 
 #if defined(NFDBITS) && defined(HAVE_RB_FD_INIT)
 typedef struct {
@@ -218,6 +223,25 @@ int rb_fd_select(int, rb_fdset_t *, rb_fdset_t *, rb_fdset_t *, struct timeval *
 #define rb_fd_ptr(f)	((f)->fdset)
 #define rb_fd_max(f)	((f)->maxfd)
 
+#elif defined(_WIN32)
+
+typedef struct {
+    int capa;
+    fd_set *fdset;
+} rb_fdset_t;
+
+void rb_fd_init(volatile rb_fdset_t *);
+void rb_fd_term(rb_fdset_t *);
+#define rb_fd_zero(f)		((f)->fdset->fd_count = 0)
+void rb_fd_set(int, rb_fdset_t *);
+#define rb_fd_clr(n, f)		rb_w32_fdclr(n, (f)->fdset)
+#define rb_fd_isset(n, f)	rb_w32_fdisset(n, (f)->fdset)
+#define rb_fd_select(n, rfds, wfds, efds, timeout)	rb_w32_select(n, (rfds) ? ((rb_fdset_t*)rfds)->fdset : NULL, (wfds) ? ((rb_fdset_t*)wfds)->fdset : NULL, (efds) ? ((rb_fdset_t*)efds)->fdset: NULL, timeout)
+#define rb_fd_resize(n, f)	(void)(f)
+
+#define rb_fd_ptr(f)	((f)->fdset)
+#define rb_fd_max(f)	((f)->fdset->fd_count)
+
 #else
 
 typedef fd_set rb_fdset_t;
@@ -226,6 +250,7 @@ typedef fd_set rb_fdset_t;
 #define rb_fd_clr(n, f)	FD_CLR(n, f)
 #define rb_fd_isset(n, f) FD_ISSET(n, f)
 #define rb_fd_copy(d, s, n) (*(d) = *(s))
+#define rb_fd_resize(n, f)	(void)(f)
 #define rb_fd_ptr(f)	(f)
 #define rb_fd_init(f)	FD_ZERO(f)
 #define rb_fd_term(f)	(void)(f)
@@ -239,6 +264,7 @@ NORETURN(void rb_exc_fatal(VALUE));
 VALUE rb_f_exit(int,VALUE*);
 VALUE rb_f_abort(int,VALUE*);
 void rb_remove_method(VALUE, const char*);
+void rb_remove_method_id(VALUE, ID);
 #define rb_disable_super(klass, name) ((void)0)
 #define rb_enable_super(klass, name) ((void)0)
 #define HAVE_RB_DEFINE_ALLOC_FUNC 1
@@ -255,6 +281,7 @@ int rb_method_basic_definition_p(VALUE, ID);
 VALUE rb_eval_cmd(VALUE, VALUE, int);
 int rb_obj_respond_to(VALUE, ID, int);
 int rb_respond_to(VALUE, ID);
+VALUE rb_f_notimplement(int argc, VALUE *argv, VALUE obj);
 void rb_interrupt(void);
 VALUE rb_apply(VALUE, ID, VALUE);
 void rb_backtrace(void);
@@ -279,6 +306,7 @@ VALUE rb_proc_new(VALUE (*)(ANYARGS/* VALUE yieldarg[, VALUE procarg] */), VALUE
 VALUE rb_proc_call(VALUE, VALUE);
 VALUE rb_proc_call_with_block(VALUE, int argc, VALUE *argv, VALUE);
 int rb_proc_arity(VALUE);
+VALUE rb_proc_lambda_p(VALUE);
 VALUE rb_binding_new(void);
 VALUE rb_obj_method(VALUE, VALUE);
 VALUE rb_method_call(int, VALUE*, VALUE);
@@ -286,10 +314,9 @@ int rb_mod_method_arity(VALUE, ID);
 int rb_obj_method_arity(VALUE, ID);
 VALUE rb_protect(VALUE (*)(VALUE), VALUE, int*);
 void rb_set_end_proc(void (*)(VALUE), VALUE);
-void Init_jump(void);
 void ruby_finalize(void);
 NORETURN(void ruby_stop(int));
-int ruby_cleanup(int);
+int ruby_cleanup(volatile int);
 void rb_gc_mark_threads(void);
 void rb_thread_schedule(void);
 void rb_thread_wait_fd(int);
@@ -305,9 +332,8 @@ VALUE rb_thread_wakeup(VALUE);
 VALUE rb_thread_run(VALUE);
 VALUE rb_thread_kill(VALUE);
 VALUE rb_thread_create(VALUE (*)(ANYARGS), void*);
-void rb_thread_signal_raise(void *, int);
-void rb_thread_signal_exit(void *);
 int rb_thread_select(int, fd_set *, fd_set *, fd_set *, struct timeval *);
+int rb_thread_fd_select(int, rb_fdset_t *, rb_fdset_t *, rb_fdset_t *, struct timeval *);
 void rb_thread_wait_for(struct timeval);
 VALUE rb_thread_current(void);
 VALUE rb_thread_main(void);
@@ -316,12 +342,17 @@ VALUE rb_thread_local_aset(VALUE, ID, VALUE);
 void rb_thread_atfork(void);
 void rb_thread_atfork_before_exec(void);
 VALUE rb_exec_recursive(VALUE(*)(VALUE, VALUE, int),VALUE,VALUE);
+VALUE rb_exec_recursive_paired(VALUE(*)(VALUE, VALUE, int),VALUE,VALUE,VALUE);
+VALUE rb_exec_recursive_outer(VALUE(*)(VALUE, VALUE, int),VALUE,VALUE);
 /* file.c */
 VALUE rb_file_s_expand_path(int, VALUE *);
 VALUE rb_file_expand_path(VALUE, VALUE);
 VALUE rb_file_s_absolute_path(int, VALUE *);
 VALUE rb_file_absolute_path(VALUE, VALUE);
 void rb_file_const(const char*, VALUE);
+int rb_file_load_ok(const char *);
+int rb_find_file_ext_safe(VALUE*, const char* const*, int);
+VALUE rb_find_file_safe(VALUE, int);
 int rb_find_file_ext(VALUE*, const char* const*);
 VALUE rb_find_file(VALUE);
 char *rb_path_next(const char *);
@@ -349,6 +380,7 @@ void rb_gc_call_finalizer_at_exit(void);
 VALUE rb_gc_enable(void);
 VALUE rb_gc_disable(void);
 VALUE rb_gc_start(void);
+#define Init_stack(addr) ruby_init_stack(addr)
 /* hash.c */
 void st_foreach_safe(struct st_table *, int (*)(ANYARGS), st_data_t);
 void rb_hash_foreach(VALUE, int (*)(ANYARGS), VALUE);
@@ -358,6 +390,7 @@ VALUE rb_hash_dup(VALUE);
 VALUE rb_hash_freeze(VALUE);
 VALUE rb_hash_aref(VALUE, VALUE);
 VALUE rb_hash_lookup(VALUE, VALUE);
+VALUE rb_hash_lookup2(VALUE, VALUE, VALUE);
 VALUE rb_hash_fetch(VALUE, VALUE);
 VALUE rb_hash_aset(VALUE, VALUE, VALUE);
 VALUE rb_hash_delete_if(VALUE);
@@ -388,6 +421,7 @@ VALUE rb_io_printf(int, VALUE*, VALUE);
 VALUE rb_io_print(int, VALUE*, VALUE);
 VALUE rb_io_puts(int, VALUE*, VALUE);
 VALUE rb_io_fdopen(int, int, const char*);
+VALUE rb_io_get_io(VALUE);
 VALUE rb_file_open(const char*, const char*);
 VALUE rb_file_open_str(VALUE, const char*);
 VALUE rb_gets(void);
@@ -401,6 +435,7 @@ VALUE rb_marshal_load(VALUE);
 void rb_marshal_define_compat(VALUE newclass, VALUE oldclass, VALUE (*dumper)(VALUE), VALUE (*loader)(VALUE, VALUE));
 /* numeric.c */
 void rb_num_zerodiv(void);
+#define RB_NUM_COERCE_FUNCS_NEED_OPID 1
 VALUE rb_num_coerce_bin(VALUE, VALUE, ID);
 VALUE rb_num_coerce_cmp(VALUE, VALUE, ID);
 VALUE rb_num_coerce_relop(VALUE, VALUE, ID);
@@ -421,6 +456,9 @@ VALUE rb_obj_init_copy(VALUE,VALUE);
 VALUE rb_obj_taint(VALUE);
 VALUE rb_obj_tainted(VALUE);
 VALUE rb_obj_untaint(VALUE);
+VALUE rb_obj_untrust(VALUE);
+VALUE rb_obj_untrusted(VALUE);
+VALUE rb_obj_trust(VALUE);
 VALUE rb_obj_freeze(VALUE);
 VALUE rb_obj_frozen_p(VALUE);
 VALUE rb_obj_id(VALUE);
@@ -430,8 +468,10 @@ VALUE rb_class_inherited_p(VALUE, VALUE);
 VALUE rb_convert_type(VALUE,int,const char*,const char*);
 VALUE rb_check_convert_type(VALUE,int,const char*,const char*);
 VALUE rb_check_to_integer(VALUE, const char *);
+VALUE rb_check_to_float(VALUE);
 VALUE rb_to_int(VALUE);
 VALUE rb_Integer(VALUE);
+VALUE rb_to_float(VALUE);
 VALUE rb_Float(VALUE);
 VALUE rb_String(VALUE);
 VALUE rb_Array(VALUE);
@@ -471,27 +511,37 @@ VALUE rb_exec_arg_init(int argc, VALUE *argv, int accept_shell, struct rb_exec_a
 int rb_exec_arg_addopt(struct rb_exec_arg *e, VALUE key, VALUE val);
 void rb_exec_arg_fixup(struct rb_exec_arg *e);
 int rb_run_exec_options(const struct rb_exec_arg *e, struct rb_exec_arg *s);
+int rb_run_exec_options_err(const struct rb_exec_arg *e, struct rb_exec_arg *s, char*, size_t);
 int rb_exec(const struct rb_exec_arg*);
+int rb_exec_err(const struct rb_exec_arg*, char*, size_t);
 rb_pid_t rb_fork(int*, int (*)(void*), void*, VALUE);
+rb_pid_t rb_fork_err(int*, int (*)(void*, char*, size_t), void*, VALUE, char*, size_t);
 VALUE rb_f_exec(int,VALUE*);
 rb_pid_t rb_waitpid(rb_pid_t pid, int *status, int flags);
 void rb_syswait(rb_pid_t pid);
 rb_pid_t rb_spawn(int, VALUE*);
+rb_pid_t rb_spawn_err(int, VALUE*, char*, size_t);
 VALUE rb_proc_times(VALUE);
 VALUE rb_detach_process(rb_pid_t pid);
 /* range.c */
 VALUE rb_range_new(VALUE, VALUE, int);
 VALUE rb_range_beg_len(VALUE, long*, long*, long, int);
+int rb_range_values(VALUE range, VALUE *begp, VALUE *endp, int *exclp);
 /* random.c */
-unsigned long rb_genrand_int32(void);
+unsigned int rb_genrand_int32(void);
 double rb_genrand_real(void);
 void rb_reset_random_seed(void);
+VALUE rb_random_bytes(VALUE rnd, long n);
+VALUE rb_random_int(VALUE rnd, VALUE max);
+unsigned int rb_random_int32(VALUE rnd);
+double rb_random_real(VALUE rnd);
 /* re.c */
 #define rb_memcmp memcmp
 int rb_memcicmp(const void*,const void*,long);
 void rb_match_busy(VALUE);
 VALUE rb_reg_nth_defined(int, VALUE);
 VALUE rb_reg_nth_match(int, VALUE);
+int rb_reg_backref_number(VALUE match, VALUE backref);
 VALUE rb_reg_last_match(VALUE);
 VALUE rb_reg_match_pre(VALUE);
 VALUE rb_reg_match_post(VALUE);
@@ -551,6 +601,8 @@ VALUE rb_external_str_new(const char*, long);
 VALUE rb_external_str_new_cstr(const char*);
 VALUE rb_locale_str_new(const char*, long);
 VALUE rb_locale_str_new_cstr(const char*);
+VALUE rb_filesystem_str_new(const char*, long);
+VALUE rb_filesystem_str_new_cstr(const char*);
 VALUE rb_str_buf_new(long);
 VALUE rb_str_buf_new_cstr(const char*);
 VALUE rb_str_buf_new2(const char*);
@@ -584,14 +636,22 @@ VALUE rb_str_cat(VALUE, const char*, long);
 VALUE rb_str_cat2(VALUE, const char*);
 VALUE rb_str_append(VALUE, VALUE);
 VALUE rb_str_concat(VALUE, VALUE);
-int rb_memhash(const void *ptr, long len);
-int rb_str_hash(VALUE);
+st_index_t rb_memhash(const void *ptr, long len);
+st_index_t rb_hash_start(st_index_t);
+st_index_t rb_hash_uint32(st_index_t, uint32_t);
+st_index_t rb_hash_uint(st_index_t, st_index_t);
+st_index_t rb_hash_end(st_index_t);
+#define rb_hash_uint32(h, i) st_hash_uint32(h, i)
+#define rb_hash_uint(h, i) st_hash_uint(h, i)
+#define rb_hash_end(h) st_hash_end(h)
+st_index_t rb_str_hash(VALUE);
 int rb_str_hash_cmp(VALUE,VALUE);
 int rb_str_comparable(VALUE, VALUE);
 int rb_str_cmp(VALUE, VALUE);
 VALUE rb_str_equal(VALUE str1, VALUE str2);
 VALUE rb_str_drop_bytes(VALUE, long);
 void rb_str_update(VALUE, long, long, VALUE);
+VALUE rb_str_replace(VALUE, VALUE);
 VALUE rb_str_inspect(VALUE);
 VALUE rb_str_dump(VALUE);
 VALUE rb_str_split(VALUE, const char*);
@@ -601,56 +661,63 @@ void rb_str_setter(VALUE, ID, VALUE*);
 VALUE rb_str_intern(VALUE);
 VALUE rb_sym_to_s(VALUE);
 VALUE rb_str_length(VALUE);
+long rb_str_offset(VALUE, long);
 size_t rb_str_capacity(VALUE);
 #if defined __GNUC__
 #define rb_str_new_cstr(str) __extension__ (	\
 {						\
     (__builtin_constant_p(str)) ?		\
-	rb_str_new(str, strlen(str)) :		\
+	rb_str_new(str, (long)strlen(str)) :	\
 	rb_str_new_cstr(str);			\
 })
 #define rb_tainted_str_new_cstr(str) __extension__ ( \
 {					       \
     (__builtin_constant_p(str)) ?	       \
-	rb_tainted_str_new(str, strlen(str)) : \
+	rb_tainted_str_new(str, (long)strlen(str)) : \
 	rb_tainted_str_new_cstr(str);	       \
 })
 #define rb_usascii_str_new_cstr(str) __extension__ ( \
 {					       \
     (__builtin_constant_p(str)) ?	       \
-	rb_usascii_str_new(str, strlen(str)) : \
+	rb_usascii_str_new(str, (long)strlen(str)) : \
 	rb_usascii_str_new_cstr(str);	       \
 })
 #define rb_external_str_new_cstr(str) __extension__ ( \
 {						\
     (__builtin_constant_p(str)) ?		\
-	rb_external_str_new(str, strlen(str)) : \
+	rb_external_str_new(str, (long)strlen(str)) : \
 	rb_external_str_new_cstr(str);		\
 })
 #define rb_locale_str_new_cstr(str) __extension__ ( \
 {					       \
     (__builtin_constant_p(str)) ?	       \
-	rb_locale_str_new(str, strlen(str)) :  \
+	rb_locale_str_new(str, (long)strlen(str)) :  \
 	rb_locale_str_new_cstr(str);	       \
 })
 #define rb_str_buf_new_cstr(str) __extension__ ( \
 {						\
     (__builtin_constant_p(str)) ?		\
-	rb_str_buf_cat(rb_str_buf_new(strlen(str)), \
-		       str, strlen(str)) :	\
+	rb_str_buf_cat(rb_str_buf_new((long)strlen(str)), \
+		       str, (long)strlen(str)) : \
 	rb_str_buf_new_cstr(str);		\
 })
 #define rb_str_buf_cat2(str, ptr) __extension__ ( \
 {						\
     (__builtin_constant_p(ptr)) ?	        \
-	rb_str_buf_cat(str, ptr, strlen(ptr)) :	\
+	rb_str_buf_cat(str, ptr, (long)strlen(ptr)) : \
 	rb_str_buf_cat2(str, ptr);		\
 })
 #define rb_str_cat2(str, ptr) __extension__ (	\
 {						\
     (__builtin_constant_p(ptr)) ?	        \
-	rb_str_cat(str, ptr, strlen(ptr)) :	\
+	rb_str_cat(str, ptr, (long)strlen(ptr)) : \
 	rb_str_cat2(str, ptr);			\
+})
+#define rb_exc_new2(klass, ptr) __extension__ ( \
+{						\
+    (__builtin_constant_p(ptr)) ?	        \
+	rb_exc_new(klass, ptr, (long)strlen(ptr)) : \
+	rb_exc_new2(klass, ptr);		\
 })
 #endif
 #define rb_str_new2 rb_str_new_cstr
@@ -668,7 +735,7 @@ VALUE rb_struct_initialize(VALUE, VALUE);
 VALUE rb_struct_aref(VALUE, VALUE);
 VALUE rb_struct_aset(VALUE, VALUE, VALUE);
 VALUE rb_struct_getmember(VALUE, ID);
-VALUE rb_struct_iv_get(VALUE, const char*);
+DEPRECATED(VALUE rb_struct_iv_get(VALUE, const char*));
 VALUE rb_struct_s_members(VALUE);
 VALUE rb_struct_members(VALUE);
 VALUE rb_struct_alloc_noinit(VALUE);
@@ -697,10 +764,13 @@ char *rb_thread_cwd(void);
 /* time.c */
 VALUE rb_time_new(time_t, long);
 VALUE rb_time_nano_new(time_t, long);
+VALUE rb_time_num_new(VALUE, VALUE);
 /* variable.c */
 VALUE rb_mod_name(VALUE);
 VALUE rb_class_path(VALUE);
 void rb_set_class_path(VALUE, VALUE, const char*);
+void rb_set_class_path_string(VALUE, VALUE, VALUE);
+VALUE rb_path_to_class(VALUE);
 VALUE rb_path2class(const char*);
 void rb_name_class(VALUE, ID);
 VALUE rb_class_name(VALUE);
@@ -753,7 +823,6 @@ void ruby_show_copyright(void);
 ID rb_frame_callee(void);
 VALUE rb_str_succ(VALUE);
 VALUE rb_time_succ(VALUE);
-#define Init_stack(addr) ruby_init_stack(addr)
 void rb_frame_pop(void);
 int rb_frame_method_id_and_class(ID *idp, VALUE *klassp);
 

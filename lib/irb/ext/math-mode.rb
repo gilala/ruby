@@ -1,12 +1,12 @@
 #
-#   math-mode.rb - 
-#   	$Release Version: 0.9.5$
+#   math-mode.rb -
+#   	$Release Version: 0.9.6$
 #   	$Revision$
 #   	by Keiju ISHITSUKA(keiju@ruby-lang.org)
 #
 # --
 #
-#   
+#
 #
 require "mathn"
 

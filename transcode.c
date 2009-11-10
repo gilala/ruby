@@ -16,6 +16,7 @@
 #include <ctype.h>
 
 #if 0
+/* VALUE rb_cEncoding = rb_define_class("Encoding", rb_cObject); */
 VALUE rb_eUndefinedConversionError;
 VALUE rb_eInvalidByteSequenceError;
 VALUE rb_eConverterNotFoundError;
@@ -23,7 +24,7 @@ VALUE rb_eConverterNotFoundError;
 VALUE rb_cEncodingConverter;
 #endif
 
-static VALUE sym_invalid, sym_undef, sym_ignore, sym_replace;
+static VALUE sym_invalid, sym_undef, sym_replace;
 static VALUE sym_xml, sym_text, sym_attr;
 static VALUE sym_universal_newline;
 static VALUE sym_crlf_newline;
@@ -57,15 +58,15 @@ typedef struct rb_transcoding {
     unsigned char next_byte;
     unsigned int output_index;
 
-    int recognized_len; /* already interpreted */
-    int readagain_len; /* not yet interpreted */
+    ssize_t recognized_len; /* already interpreted */
+    ssize_t readagain_len; /* not yet interpreted */
     union {
         unsigned char ary[8]; /* max_input <= sizeof(ary) */
         unsigned char *ptr; /* length: max_input */
     } readbuf; /* recognized_len + readagain_len used */
 
-    int writebuf_off;
-    int writebuf_len;
+    ssize_t writebuf_off;
+    ssize_t writebuf_len;
     union {
         unsigned char ary[8]; /* max_output <= sizeof(ary) */
         unsigned char *ptr; /* length: max_output */
@@ -73,25 +74,26 @@ typedef struct rb_transcoding {
 
     union rb_transcoding_state_t { /* opaque data for stateful encoding */
         void *ptr;
+        char ary[sizeof(double) > sizeof(void*) ? sizeof(double) : sizeof(void*)];
         double dummy_for_alignment;
     } state;
 } rb_transcoding;
 #define TRANSCODING_READBUF(tc) \
-    ((tc)->transcoder->max_input <= sizeof((tc)->readbuf.ary) ? \
+    ((tc)->transcoder->max_input <= (int)sizeof((tc)->readbuf.ary) ? \
      (tc)->readbuf.ary : \
      (tc)->readbuf.ptr)
 #define TRANSCODING_WRITEBUF(tc) \
-    ((tc)->transcoder->max_output <= sizeof((tc)->writebuf.ary) ? \
+    ((tc)->transcoder->max_output <= (int)sizeof((tc)->writebuf.ary) ? \
      (tc)->writebuf.ary : \
      (tc)->writebuf.ptr)
 #define TRANSCODING_WRITEBUF_SIZE(tc) \
-    ((tc)->transcoder->max_output <= sizeof((tc)->writebuf.ary) ? \
+    ((tc)->transcoder->max_output <= (int)sizeof((tc)->writebuf.ary) ? \
      sizeof((tc)->writebuf.ary) : \
-     (tc)->transcoder->max_output)
-#define TRANSCODING_STATE_EMBED_MAX sizeof(union rb_transcoding_state_t)
+     (size_t)(tc)->transcoder->max_output)
+#define TRANSCODING_STATE_EMBED_MAX ((int)sizeof(union rb_transcoding_state_t))
 #define TRANSCODING_STATE(tc) \
-    ((tc)->transcoder->state_size <= sizeof((tc)->state) ? \
-     (void *)&(tc)->state : \
+    ((tc)->transcoder->state_size <= (int)sizeof((tc)->state) ? \
+     (tc)->state.ary : \
      (tc)->state.ptr)
 
 typedef struct {
@@ -151,7 +153,7 @@ struct rb_econv_t {
 typedef struct {
     const char *sname;
     const char *dname;
-    const char *lib; /* maybe null.  it means that don't load the library. */
+    const char *lib; /* null means means no need to load a library */
     const rb_transcoder *transcoder;
 } transcoder_entry_t;
 
@@ -169,7 +171,7 @@ make_transcoder_entry(const char *sname, const char *dname)
     }
     table2 = (st_table *)val;
     if (!st_lookup(table2, (st_data_t)dname, &val)) {
-        transcoder_entry_t *entry = ALLOC(transcoder_entry_t);
+        transcoder_entry_t *entry = malloc(sizeof(transcoder_entry_t));
         entry->sname = sname;
         entry->dname = dname;
         entry->lib = NULL;
@@ -352,7 +354,7 @@ transcode_search_path(const char *sname, const char *dname,
 
     st_free_table(bfs.visited);
 
-    return pathlen; /* is -1 if !found */
+    return pathlen; /* is -1 if not found */
 }
 
 static const rb_transcoder *
@@ -363,7 +365,7 @@ load_transcoder_entry(transcoder_entry_t *entry)
 
     if (entry->lib) {
         const char *lib = entry->lib;
-        int len = strlen(lib);
+        size_t len = strlen(lib);
         char path[sizeof(transcoder_lib_prefix) + MAX_TRANSCODER_LIBNAME_LEN];
 
         entry->lib = NULL;
@@ -426,11 +428,10 @@ transcode_restartable0(const unsigned char **in_pos, unsigned char **out_pos,
                       const unsigned char *in_stop, unsigned char *out_stop,
                       rb_transcoding *tc,
                       const int opt)
-
 {
     const rb_transcoder *tr = tc->transcoder;
     int unitlen = tr->input_unit_length;
-    int readagain_len = 0;
+    ssize_t readagain_len = 0;
 
     const unsigned char *inchar_start;
     const unsigned char *in_p;
@@ -503,6 +504,10 @@ transcode_restartable0(const unsigned char **in_pos, unsigned char **out_pos,
       case 26: goto resume_label26;
       case 27: goto resume_label27;
       case 28: goto resume_label28;
+      case 29: goto resume_label29;
+      case 30: goto resume_label30;
+      case 31: goto resume_label31;
+      case 32: goto resume_label32;
     }
 
     while (1) {
@@ -537,9 +542,21 @@ transcode_restartable0(const unsigned char **in_pos, unsigned char **out_pos,
         }
       follow_info:
 	switch (next_info & 0x1F) {
-          case NOMAP: /* xxx: copy last byte only? */
-            SUSPEND_OBUF(3); *out_p++ = next_byte;
-	    continue;
+	  case NOMAP:
+            {
+                const unsigned char *p = inchar_start;
+                writebuf_off = 0;
+                while (p < in_p) {
+                    TRANSCODING_WRITEBUF(tc)[writebuf_off++] = (unsigned char)*p++;
+                }
+                writebuf_len = writebuf_off;
+                writebuf_off = 0;
+                while (writebuf_off < writebuf_len) {
+                    SUSPEND_OBUF(3);
+                    *out_p++ = TRANSCODING_WRITEBUF(tc)[writebuf_off++];
+                }
+            }
+            continue;
 	  case 0x00: case 0x04: case 0x08: case 0x0C:
 	  case 0x10: case 0x14: case 0x18: case 0x1C:
             SUSPEND_AFTER_OUTPUT(25);
@@ -549,7 +566,7 @@ transcode_restartable0(const unsigned char **in_pos, unsigned char **out_pos,
                 SUSPEND(econv_source_buffer_empty, 5);
 	    }
 	    next_byte = (unsigned char)*in_p++;
-	    next_table = next_info;
+	    next_table = (unsigned int)next_info;
 	    goto follow_byte;
 	  case ZERObt: /* drop input */
 	    continue;
@@ -570,6 +587,12 @@ transcode_restartable0(const unsigned char **in_pos, unsigned char **out_pos,
             SUSPEND_OBUF(17); *out_p++ = getBT1(next_info);
             SUSPEND_OBUF(18); *out_p++ = getBT2(next_info);
             SUSPEND_OBUF(19); *out_p++ = getBT3(next_info);
+	    continue;
+	  case GB4bt:
+            SUSPEND_OBUF(29); *out_p++ = getGB4bt0(next_info);
+            SUSPEND_OBUF(30); *out_p++ = getGB4bt1(next_info);
+            SUSPEND_OBUF(31); *out_p++ = getGB4bt2(next_info);
+            SUSPEND_OBUF(32); *out_p++ = getGB4bt3(next_info);
 	    continue;
           case STR1:
             tc->output_index = 0;
@@ -645,8 +668,8 @@ transcode_restartable0(const unsigned char **in_pos, unsigned char **out_pos,
                 }
             }
             else {
-                int invalid_len; /* including the last byte which causes invalid */
-                int discard_len;
+                ssize_t invalid_len; /* including the last byte which causes invalid */
+                ssize_t discard_len;
                 invalid_len = tc->recognized_len + (in_p - inchar_start);
                 discard_len = ((invalid_len - 1) / unitlen) * unitlen;
                 readagain_len = invalid_len - discard_len;
@@ -741,10 +764,10 @@ rb_transcoding_open_by_transcoder(const rb_transcoder *tr, int flags)
     tc->readagain_len = 0;
     tc->writebuf_len = 0;
     tc->writebuf_off = 0;
-    if (sizeof(tc->readbuf.ary) < tr->max_input) {
+    if ((int)sizeof(tc->readbuf.ary) < tr->max_input) {
         tc->readbuf.ptr = xmalloc(tr->max_input);
     }
-    if (sizeof(tc->writebuf.ary) < tr->max_output) {
+    if ((int)sizeof(tc->writebuf.ary) < tr->max_output) {
         tc->writebuf.ptr = xmalloc(tr->max_output);
     }
     return tc;
@@ -771,11 +794,29 @@ rb_transcoding_close(rb_transcoding *tc)
     }
     if (TRANSCODING_STATE_EMBED_MAX < tr->state_size)
         xfree(tc->state.ptr);
-    if (sizeof(tc->readbuf.ary) < tr->max_input)
+    if ((int)sizeof(tc->readbuf.ary) < tr->max_input)
         xfree(tc->readbuf.ptr);
-    if (sizeof(tc->writebuf.ary) < tr->max_output)
+    if ((int)sizeof(tc->writebuf.ary) < tr->max_output)
         xfree(tc->writebuf.ptr);
     xfree(tc);
+}
+
+static size_t
+rb_transcoding_memsize(rb_transcoding *tc)
+{
+    size_t size = sizeof(rb_transcoding);
+    const rb_transcoder *tr = tc->transcoder;
+
+    if (TRANSCODING_STATE_EMBED_MAX < tr->state_size) {
+	size += tr->state_size;
+    }
+    if ((int)sizeof(tc->readbuf.ary) < tr->max_input) {
+	size += tr->max_input;
+    }
+    if ((int)sizeof(tc->writebuf.ary) < tr->max_output) {
+	size += tr->max_output;
+    }
+    return size;
 }
 
 static rb_econv_t *
@@ -1053,8 +1094,8 @@ trans_sweep(rb_econv_t *ec,
             }
             else {
                 if (te->out_buf_start != te->out_data_start) {
-                    int len = te->out_data_end - te->out_data_start;
-                    int off = te->out_data_start - te->out_buf_start;
+                    ssize_t len = te->out_data_end - te->out_data_start;
+                    ssize_t off = te->out_data_start - te->out_buf_start;
                     MEMMOVE(te->out_buf_start, te->out_data_start, unsigned char, len);
                     te->out_data_start = te->out_buf_start;
                     te->out_data_end -= off;
@@ -1261,13 +1302,13 @@ rb_econv_convert0(rb_econv_t *ec,
             memcpy(*output_ptr, data_start, len);
             *output_ptr += len;
             ec->elems[ec->num_trans-1].out_data_start =
-                ec->elems[ec->num_trans-1].out_data_end = 
+                ec->elems[ec->num_trans-1].out_data_end =
                 ec->elems[ec->num_trans-1].out_buf_start;
             has_output = 1;
         }
     }
 
-    if (ec->in_buf_start && 
+    if (ec->in_buf_start &&
         ec->in_data_start != ec->in_data_end) {
         res = rb_trans_conv(ec, (const unsigned char **)&ec->in_data_start, ec->in_data_end, output_ptr, output_stop,
                 (flags&~ECONV_AFTER_OUTPUT)|ECONV_PARTIAL_INPUT, &result_position);
@@ -1511,7 +1552,7 @@ allocate_converted_string(const char *sname, const char *dname,
 
 /* result: 0:success -1:failure */
 int
-rb_econv_insert_output(rb_econv_t *ec, 
+rb_econv_insert_output(rb_econv_t *ec,
     const unsigned char *str, size_t len, const char *str_encoding)
 {
     const char *insert_encoding = rb_econv_encoding_to_insert_output(ec);
@@ -1590,11 +1631,11 @@ rb_econv_insert_output(rb_econv_t *ec,
         *data_end_p = buf;
         *buf_end_p = buf+need;
     }
-    else if (*buf_end_p - *data_end_p < need) {
+    else if ((size_t)(*buf_end_p - *data_end_p) < need) {
         MEMMOVE(*buf_start_p, *data_start_p, unsigned char, *data_end_p - *data_start_p);
         *data_end_p = *buf_start_p + (*data_end_p - *data_start_p);
         *data_start_p = *buf_start_p;
-        if (*buf_end_p - *data_end_p < need) {
+        if ((size_t)(*buf_end_p - *data_end_p) < need) {
             unsigned char *buf;
             size_t s = (*data_end_p - *buf_start_p) + need;
             if (s < need)
@@ -1643,12 +1684,37 @@ rb_econv_close(rb_econv_t *ec)
     xfree(ec);
 }
 
+size_t
+rb_econv_memsize(rb_econv_t *ec)
+{
+    size_t size = sizeof(rb_econv_t);
+    int i;
+
+    if (ec->replacement_allocated) {
+	size += ec->replacement_len;
+    }
+    for (i = 0; i < ec->num_trans; i++) {
+	size += rb_transcoding_memsize(ec->elems[i].tc);
+
+	if (ec->elems[i].out_buf_start) {
+            size += ec->elems[i].out_buf_end - ec->elems[i].out_buf_start;
+	}
+    }
+    size += ec->in_buf_end - ec->in_buf_start;
+    size += sizeof(rb_econv_elem_t) * ec->num_allocated;
+
+    return size;
+}
+
 int
 rb_econv_putbackable(rb_econv_t *ec)
 {
     if (ec->num_trans == 0)
         return 0;
-    return ec->elems[0].tc->readagain_len;
+#if SIZEOF_SIZE_T > SIZEOF_INT
+    if (ec->elems[0].tc->readagain_len > INT_MAX) return INT_MAX;
+#endif
+    return (int)ec->elems[0].tc->readagain_len;
 }
 
 void
@@ -1697,7 +1763,7 @@ rb_econv_asciicompat_encoding(const char *ascii_incompat_name)
 
     /*
      * Assumption:
-     * There are at most one transcoder for
+     * There is at most one transcoder for
      * converting from ASCII incompatible encoding.
      *
      * For ISO-2022-JP, there is ISO-2022-JP -> stateless-ISO-2022-JP and no others.
@@ -1855,7 +1921,7 @@ rb_econv_binmode(rb_econv_t *ec)
         if (entry->transcoder)
             trs[n++] = entry->transcoder;
     }
-    
+
     num_trans = ec->num_trans;
     j = 0;
     for (i = 0; i < num_trans; i++) {
@@ -2001,13 +2067,45 @@ make_econv_exception(rb_econv_t *ec)
     if (ec->last_error.result == econv_undefined_conversion) {
         VALUE bytes = rb_str_new((const char *)ec->last_error.error_bytes_start,
                                  ec->last_error.error_bytes_len);
-        VALUE dumped;
+        VALUE dumped = Qnil;
         int idx;
-        dumped = rb_str_dump(bytes);
-        mesg = rb_sprintf("%s from %s to %s",
-                StringValueCStr(dumped),
-                ec->last_error.source_encoding,
-                ec->last_error.destination_encoding);
+        if (strcmp(ec->last_error.source_encoding, "UTF-8") == 0) {
+            rb_encoding *utf8 = rb_utf8_encoding();
+            const char *start, *end;
+            int n;
+            start = (const char *)ec->last_error.error_bytes_start;
+            end = start + ec->last_error.error_bytes_len;
+            n = rb_enc_precise_mbclen(start, end, utf8);
+            if (MBCLEN_CHARFOUND_P(n) &&
+                (size_t)MBCLEN_CHARFOUND_LEN(n) == ec->last_error.error_bytes_len) {
+                unsigned int cc = rb_enc_mbc_to_codepoint(start, end, utf8);
+                dumped = rb_sprintf("U+%04X", cc);
+            }
+        }
+        if (dumped == Qnil)
+            dumped = rb_str_dump(bytes);
+        if (strcmp(ec->last_error.source_encoding,
+                   ec->source_encoding_name) == 0 &&
+            strcmp(ec->last_error.destination_encoding,
+                   ec->destination_encoding_name) == 0) {
+            mesg = rb_sprintf("%s from %s to %s",
+                    StringValueCStr(dumped),
+                    ec->last_error.source_encoding,
+                    ec->last_error.destination_encoding);
+        }
+        else {
+            int i;
+            mesg = rb_sprintf("%s to %s in conversion from %s",
+                    StringValueCStr(dumped),
+                    ec->last_error.destination_encoding,
+                    ec->source_encoding_name);
+            for (i = 0; i < ec->num_trans; i++) {
+                const rb_transcoder *tr = ec->elems[i].tc->transcoder;
+                if (!DECORATOR_P(tr->src_encoding, tr->dst_encoding))
+                    rb_str_catf(mesg, " to %s",
+                                ec->elems[i].tc->transcoder->dst_encoding);
+            }
+        }
         exc = rb_exc_new3(rb_eUndefinedConversionError, mesg);
         idx = rb_enc_find_index(ec->last_error.source_encoding);
         if (0 <= idx)
@@ -2021,7 +2119,7 @@ make_econv_exception(rb_econv_t *ec)
 static void
 more_output_buffer(
         VALUE destination,
-        unsigned char *(*resize_destination)(VALUE, int, int),
+        unsigned char *(*resize_destination)(VALUE, size_t, size_t),
         int max_output,
         unsigned char **out_start_ptr,
         unsigned char **out_pos,
@@ -2121,7 +2219,7 @@ static void
 transcode_loop(const unsigned char **in_pos, unsigned char **out_pos,
 	       const unsigned char *in_stop, unsigned char *out_stop,
                VALUE destination,
-               unsigned char *(*resize_destination)(VALUE, int, int),
+               unsigned char *(*resize_destination)(VALUE, size_t, size_t),
                const char *src_encoding,
                const char *dst_encoding,
                int ecflags,
@@ -2166,7 +2264,7 @@ static void
 transcode_loop(const unsigned char **in_pos, unsigned char **out_pos,
 	       const unsigned char *in_stop, unsigned char *out_stop,
                VALUE destination,
-               unsigned char *(*resize_destination)(VALUE, int, int),
+               unsigned char *(*resize_destination)(VALUE, size_t, size_t),
                const char *src_encoding,
                const char *dst_encoding,
                int ecflags,
@@ -2239,7 +2337,7 @@ transcode_loop(const unsigned char **in_pos, unsigned char **out_pos,
  */
 
 static unsigned char *
-str_transcoding_resize(VALUE destination, int len, int new_len)
+str_transcoding_resize(VALUE destination, size_t len, size_t new_len)
 {
     rb_str_resize(destination, new_len);
     return (unsigned char *)RSTRING_PTR(destination);
@@ -2378,13 +2476,13 @@ enc_arg(volatile VALUE *arg, const char **name_p, rb_encoding **enc_p)
     int encidx;
     VALUE encval;
 
-    if ((encidx = rb_to_encoding_index(encval = *arg)) < 0) {
+    if (((encidx = rb_to_encoding_index(encval = *arg)) < 0) ||
+	!(enc = rb_enc_from_index(encidx))) {
 	enc = NULL;
 	encidx = 0;
 	n = StringValueCStr(*arg);
     }
     else {
-	enc = rb_enc_from_index(encidx);
 	n = rb_enc_name(enc);
     }
 
@@ -2441,7 +2539,8 @@ str_transcode0(int argc, VALUE *argv, VALUE *self, int ecflags, VALUE ecopts)
     if (argc == 0) {
 	arg1 = rb_enc_default_internal();
 	if (NIL_P(arg1)) {
-	    return -1;
+	    if (!ecflags) return -1;
+	    arg1 = rb_obj_encoding(str);
 	}
 	ecflags |= ECONV_INVALID_REPLACE | ECONV_UNDEF_REPLACE;
     }
@@ -2458,7 +2557,7 @@ str_transcode0(int argc, VALUE *argv, VALUE *self, int ecflags, VALUE ecopts)
                     ECONV_XML_ATTR_CONTENT_DECORATOR|
                     ECONV_XML_ATTR_QUOTE_DECORATOR)) == 0) {
         if (senc && senc == denc) {
-            return -1;
+            return NIL_P(arg2) ? -1 : dencidx;
         }
         if (senc && denc && rb_enc_asciicompat(senc) && rb_enc_asciicompat(denc)) {
             if (ENC_CODERANGE(str) == ENC_CODERANGE_7BIT) {
@@ -2466,7 +2565,7 @@ str_transcode0(int argc, VALUE *argv, VALUE *self, int ecflags, VALUE ecopts)
             }
         }
         if (encoding_equal(sname, dname)) {
-            return -1;
+            return NIL_P(arg2) ? -1 : dencidx;
         }
     }
     else {
@@ -2551,8 +2650,15 @@ str_encode_associate(VALUE str, int encidx)
 static VALUE
 str_encode_bang(int argc, VALUE *argv, VALUE str)
 {
-    VALUE newstr = str;
-    int encidx = str_transcode(argc, argv, &newstr);
+    VALUE newstr;
+    int encidx;
+
+    if (OBJ_FROZEN(str)) { /* in future, may use str_frozen_check from string.c, but that's currently static */
+	rb_raise(rb_eRuntimeError, "string frozen");
+    }
+
+    newstr = str;
+    encidx = str_transcode(argc, argv, &newstr);
 
     if (encidx < 0) return str;
     rb_str_shared_replace(str, newstr);
@@ -2569,10 +2675,43 @@ str_encode_bang(int argc, VALUE *argv, VALUE str)
  *  to encoding +encoding+.
  *  The second form returns a copy of <i>str</i> transcoded
  *  from src_encoding to dst_encoding.
- *  The options Hash gives details for conversion. Details
- *  to be added.
  *  The last form returns a copy of <i>str</i> transcoded to
  *  <code>Encoding.default_internal</code>.
+ *  By default, the first and second form raise
+ *  Encoding::UndefinedConversionError for characters that are
+ *  undefined in the destination encoding, and
+ *  Encoding::InvalidByteSequenceError for invalid byte sequences
+ *  in the source encoding. The last form by default does not raise
+ *  exceptions but uses replacement strings.
+ *  The <code>options</code> Hash gives details for conversion.
+ *
+ *  === options
+ *  The hash <code>options</code> can have the following keys:
+ *  :invalid ::
+ *    If the value is <code>:replace</code>, <code>#encode</code> replaces
+ *    invalid byte sequences in <code>str</code> with the replacement character.
+ *    The default is to raise the exception
+ *  :undef ::
+ *    If the value is <code>:replace</code>, <code>#encode</code> replaces
+ *    characters which are undefined in the destination encoding with
+ *    the replacement character.
+ *  :replace ::
+ *    Sets the replacement string to the value. The default replacement
+ *    string is "\uFFFD" for Unicode encoding forms, and "?" otherwise.
+ *  :xml ::
+ *    The value must be <code>:text</code> or <code>:attr</code>.
+ *    If the value is <code>:text</code> <code>#encode</code> replaces
+ *    undefined characters with their (upper-case hexadecimal) numeric
+ *    character references. '&', '<', and '>' are converted to "&amp;",
+ *    "&lt;", and "&gt;", respectively.
+ *    If the value is <code>:attr</code>, <code>#encode</code> also quotes
+ *    the replacement result (using '"'), and replaces '"' with "&quot;".
+ *  :cr_newline ::
+ *    Replaces LF ("\n") with CR ("\r") if value is true.
+ *  :crlf_newline ::
+ *    Replaces LF ("\n") with CRLF ("\r\n") if value is true.
+ *  :universal_newline ::
+ *    Replaces CRLF ("\r\n") and CR ("\r") with LF ("\n") if value is true.
  */
 
 static VALUE
@@ -2605,15 +2744,27 @@ rb_str_encode(VALUE str, VALUE to, int ecflags, VALUE ecopts)
 }
 
 static void
-econv_free(rb_econv_t *ec)
+econv_free(void *ptr)
 {
+    rb_econv_t *ec = ptr;
     rb_econv_close(ec);
 }
+
+static size_t
+econv_memsize(const void *ptr)
+{
+    return ptr ? sizeof(rb_econv_t) : 0;
+}
+
+static const rb_data_type_t econv_data_type = {
+    "econv",
+    NULL, econv_free, econv_memsize,
+};
 
 static VALUE
 econv_s_allocate(VALUE klass)
 {
-    return Data_Wrap_Struct(klass, NULL, econv_free, NULL);
+    return TypedData_Wrap_Struct(klass, &econv_data_type, NULL);
 }
 
 static rb_encoding *
@@ -2647,18 +2798,17 @@ make_encobj(const char *name)
  *   Encoding::Converter.asciicompat_encoding(string) => encoding or nil
  *   Encoding::Converter.asciicompat_encoding(encoding) => encoding or nil
  *
- * returns the corresponding ASCII compatible encoding.
+ * Returns the corresponding ASCII compatible encoding.
  *
- * It returns nil if the argument is an ASCII compatible encoding.
+ * Returns nil if the argument is an ASCII compatible encoding.
  *
  * "corresponding ASCII compatible encoding" is a ASCII compatible encoding which
- * represents same characters in the given ASCII incompatible encoding.
+ * can represents exactly the same characters as the given ASCII incompatible encoding.
+ * So, no conversion undefined error occurs when converting between the two encodings.
  *
- * So, no conversion undefined error occur between the ASCII compatible and incompatible encoding.
- *
- *   Encoding::Converter.stateless_encoding("ISO-2022-JP") #=> #<Encoding:stateless-ISO-2022-JP>
- *   Encoding::Converter.stateless_encoding("UTF-16BE") #=> #<Encoding:UTF-8>
- *   Encoding::Converter.stateless_encoding("UTF-8") #=> nil
+ *   Encoding::Converter.asciicompat_encoding("ISO-2022-JP") #=> #<Encoding:stateless-ISO-2022-JP>
+ *   Encoding::Converter.asciicompat_encoding("UTF-16BE") #=> #<Encoding:UTF-8>
+ *   Encoding::Converter.asciicompat_encoding("UTF-8") #=> nil
  *
  */
 static VALUE
@@ -2749,20 +2899,25 @@ decorate_convpath(VALUE convpath, int ecflags)
     if (num_decorators == -1)
         return -1;
 
-    len = n = RARRAY_LEN(convpath);
+    len = n = RARRAY_LENINT(convpath);
     if (n != 0) {
         VALUE pair = RARRAY_PTR(convpath)[n-1];
-        const char *sname = rb_enc_name(rb_to_encoding(RARRAY_PTR(pair)[0]));
-        const char *dname = rb_enc_name(rb_to_encoding(RARRAY_PTR(pair)[1]));
-        transcoder_entry_t *entry = get_transcoder_entry(sname, dname);
-        const rb_transcoder *tr = load_transcoder_entry(entry);
-        if (!tr)
-            return -1;
-        if (!DECORATOR_P(tr->src_encoding, tr->dst_encoding) &&
-             tr->asciicompat_type == asciicompat_encoder) {
-            n--;
-            rb_ary_store(convpath, len + num_decorators - 1, pair);
-        }
+	if (TYPE(pair) == T_ARRAY) {
+	    const char *sname = rb_enc_name(rb_to_encoding(RARRAY_PTR(pair)[0]));
+	    const char *dname = rb_enc_name(rb_to_encoding(RARRAY_PTR(pair)[1]));
+	    transcoder_entry_t *entry = get_transcoder_entry(sname, dname);
+	    const rb_transcoder *tr = load_transcoder_entry(entry);
+	    if (!tr)
+		return -1;
+	    if (!DECORATOR_P(tr->src_encoding, tr->dst_encoding) &&
+		    tr->asciicompat_type == asciicompat_encoder) {
+		n--;
+		rb_ary_store(convpath, len + num_decorators - 1, pair);
+	    }
+	}
+	else {
+	    rb_ary_store(convpath, len + num_decorators - 1, pair);
+	}
     }
 
     for (i = 0; i < num_decorators; i++)
@@ -2795,7 +2950,7 @@ search_convpath_i(const char *sname, const char *dname, int depth, void *arg)
  *   Encoding::Converter.search_convpath(source_encoding, destination_encoding)         -> ary
  *   Encoding::Converter.search_convpath(source_encoding, destination_encoding, opt)    -> ary
  *
- *  returns the conversion path.
+ *  Returns a conversion path.
  *
  *   p Encoding::Converter.search_convpath("ISO-8859-1", "EUC-JP")
  *   #=> [[#<Encoding:ISO-8859-1>, #<Encoding:UTF-8>],
@@ -2836,8 +2991,8 @@ econv_s_search_convpath(int argc, VALUE *argv, VALUE klass)
 }
 
 /*
- * check the existance of converter.
- * returns the count of the converting paths.
+ * Check the existence of a conversion path.
+ * Returns the number of converters in the conversion path.
  * result: >=0:success -1:failure
  */
 int
@@ -2855,7 +3010,8 @@ struct rb_econv_init_by_convpath_t {
     int ret;
 };
 
-void rb_econv_init_by_convpath_i(const char *sname, const char *dname, int depth, void *arg)
+static void
+rb_econv_init_by_convpath_i(const char *sname, const char *dname, int depth, void *arg)
 {
     struct rb_econv_init_by_convpath_t *a = (struct rb_econv_init_by_convpath_t *)arg;
     int ret;
@@ -2881,7 +3037,7 @@ rb_econv_init_by_convpath(VALUE self, VALUE convpath,
     rb_encoding *senc = 0, *denc = 0;
     const char *sname, *dname;
 
-    ec = rb_econv_alloc(RARRAY_LEN(convpath));
+    ec = rb_econv_alloc(RARRAY_LENINT(convpath));
     DATA_PTR(self) = ec;
 
     for (i = 0; i < RARRAY_LEN(convpath); i++) {
@@ -2913,7 +3069,7 @@ rb_econv_init_by_convpath(VALUE self, VALUE convpath,
             arg.ret = 0;
             ret = transcode_search_path(sname, dname, rb_econv_init_by_convpath_i, &arg);
             if (ret == -1 || arg.ret == -1)
-                rb_raise(rb_eArgError, "conversion add failed: %s to %s", sname, dname);
+                rb_raise(rb_eArgError, "adding conversion failed: %s to %s", sname, dname);
             if (first) {
                 first = 0;
                 *senc_p = senc;
@@ -2968,15 +3124,15 @@ rb_econv_init_by_convpath(VALUE self, VALUE convpath,
  *
  * Encoding::Converter.new creates an instance of Encoding::Converter.
  *
- * source_encoding and destination_encoding should be a string or
+ * Source_encoding and destination_encoding should be a string or
  * Encoding object.
  *
  * opt should be nil, a hash or an integer.
  *
  * convpath should be an array.
- * convpath should contains
- * - two-element array which contains encoding or encoding name, or
- * - a string of decorator name.
+ * convpath may contain
+ * - two-element arrays which contain encodings or encoding names, or
+ * - strings representing decorator names.
  *
  * Encoding::Converter.new optionally takes an option.
  * The option should be a hash or an integer.
@@ -2985,32 +3141,32 @@ rb_econv_init_by_convpath(VALUE self, VALUE convpath,
  * Encoding::Converter::INVALID_REPLACE, etc.
  *
  * [:invalid => nil]
- *   raise error on invalid byte sequence.  This is a default behavior.
+ *   Raise error on invalid byte sequence.  This is a default behavior.
  * [:invalid => :replace]
- *   replace invalid byte sequence as a replacement string.
+ *   Replace invalid byte sequence by replacement string.
  * [:undef => nil]
- *   raise error on conversion failure due to an character in source_encoding is not defined in destination_encoding.
+ *   Raise an error if a character in source_encoding is not defined in destination_encoding.
  *   This is a default behavior.
  * [:undef => :replace]
- *   replace undefined character in destination_encoding as a replacement string.
+ *   Replace undefined character in destination_encoding with replacement string.
  * [:replace => string]
- *   specify the replacement string.
+ *   Specify the replacement string.
  *   If not specified, "\uFFFD" is used for Unicode encodings and "?" for others.
  * [:universal_newline => true]
- *   convert CRLF and CR to LF.
+ *   Convert CRLF and CR to LF.
  * [:crlf_newline => true]
- *   convert LF to CRLF.
+ *   Convert LF to CRLF.
  * [:cr_newline => true]
- *   convert LF to CR.
+ *   Convert LF to CR.
  * [:xml => :text]
- *   escape as XML CharData.
+ *   Escape as XML CharData.
  *   This form can be used as a HTML 4.0 #PCDATA.
  *   - '&' -> '&amp;'
  *   - '<' -> '&lt;'
  *   - '>' -> '&gt;'
  *   - undefined characters in destination_encoding -> hexadecimal CharRef such as &#xHH;
  * [:xml => :attr]
- *   escape as XML AttValue.
+ *   Escape as XML AttValue.
  *   The converted result is quoted as "...".
  *   This form can be used as a HTML 4.0 attribute value.
  *   - '&' -> '&amp;'
@@ -3019,22 +3175,22 @@ rb_econv_init_by_convpath(VALUE self, VALUE convpath,
  *   - '"' -> '&quot;'
  *   - undefined characters in destination_encoding -> hexadecimal CharRef such as &#xHH;
  *
- * example:
+ * Examples:
  *   # UTF-16BE to UTF-8
  *   ec = Encoding::Converter.new("UTF-16BE", "UTF-8")
  *
- *   # Usually, decorators such as newline conversion are inserted at last.
+ *   # Usually, decorators such as newline conversion are inserted last.
  *   ec = Encoding::Converter.new("UTF-16BE", "UTF-8", :universal_newline => true)
  *   p ec.convpath #=> [[#<Encoding:UTF-16BE>, #<Encoding:UTF-8>],
  *                 #    "universal_newline"]
  *
- *   # But, if the last encoding is ASCII incompatible, 
+ *   # But, if the last encoding is ASCII incompatible,
  *   # decorators are inserted before the last conversion.
  *   ec = Encoding::Converter.new("UTF-8", "UTF-16BE", :crlf_newline => true)
  *   p ec.convpath #=> ["crlf_newline",
  *                 #    [#<Encoding:UTF-8>, #<Encoding:UTF-16BE>]]
  *
- *   # conversion path can be specified directly.
+ *   # Conversion path can be specified directly.
  *   ec = Encoding::Converter.new(["universal_newline", ["EUC-JP", "UTF-8"], ["UTF-8", "UTF-16BE"]])
  *   p ec.convpath #=> ["universal_newline",
  *                 #    [#<Encoding:EUC-JP>, #<Encoding:UTF-8>],
@@ -3051,7 +3207,7 @@ econv_init(int argc, VALUE *argv, VALUE self)
     int ecflags;
     VALUE convpath;
 
-    if (DATA_PTR(self)) {
+    if (rb_check_typeddata(self, &econv_data_type)) {
         rb_raise(rb_eTypeError, "already initialized");
     }
 
@@ -3098,8 +3254,9 @@ static VALUE
 econv_inspect(VALUE self)
 {
     const char *cname = rb_obj_classname(self);
-    rb_econv_t *ec = DATA_PTR(self);
+    rb_econv_t *ec;
 
+    TypedData_Get_Struct(self, rb_econv_t, &econv_data_type, ec);
     if (!ec)
         return rb_sprintf("#<%s: uninitialized>", cname);
     else {
@@ -3113,33 +3270,29 @@ econv_inspect(VALUE self)
     }
 }
 
-#define IS_ECONV(obj) (RDATA(obj)->dfree == (RUBY_DATA_FUNC)econv_free)
-
 static rb_econv_t *
 check_econv(VALUE self)
 {
-    Check_Type(self, T_DATA);
-    if (!IS_ECONV(self)) {
-        rb_raise(rb_eTypeError, "wrong argument type %s (expected Encoding::Converter)",
-                 rb_class2name(CLASS_OF(self)));
-    }
-    if (!DATA_PTR(self)) {
+    rb_econv_t *ec;
+
+    TypedData_Get_Struct(self, rb_econv_t, &econv_data_type, ec);
+    if (!ec) {
         rb_raise(rb_eTypeError, "uninitialized encoding converter");
     }
-    return DATA_PTR(self);
+    return ec;
 }
 
 /*
  * call-seq:
  *   ec.source_encoding -> encoding
  *
- * returns the source encoding as an Encoding object.
+ * Returns the source encoding as an Encoding object.
  */
 static VALUE
 econv_source_encoding(VALUE self)
 {
     rb_econv_t *ec = check_econv(self);
-    if (!ec->source_encoding) 
+    if (!ec->source_encoding)
         return Qnil;
     return rb_enc_from_encoding(ec->source_encoding);
 }
@@ -3148,13 +3301,13 @@ econv_source_encoding(VALUE self)
  * call-seq:
  *   ec.destination_encoding -> encoding
  *
- * returns the destination encoding as an Encoding object.
+ * Returns the destination encoding as an Encoding object.
  */
 static VALUE
 econv_destination_encoding(VALUE self)
 {
     rb_econv_t *ec = check_econv(self);
-    if (!ec->destination_encoding) 
+    if (!ec->destination_encoding)
         return Qnil;
     return rb_enc_from_encoding(ec->destination_encoding);
 }
@@ -3163,19 +3316,19 @@ econv_destination_encoding(VALUE self)
  * call-seq:
  *   ec.convpath        -> ary
  *
- * returns the conversion path of ec.
+ * Returns the conversion path of ec.
  *
  * The result is an array of conversions.
  *
- *   ec = Encoding::Converter.new("ISo-8859-1", "EUC-JP", crlf_newline: true)
+ *   ec = Encoding::Converter.new("ISO-8859-1", "EUC-JP", crlf_newline: true)
  *   p ec.convpath
  *   #=> [[#<Encoding:ISO-8859-1>, #<Encoding:UTF-8>],
  *   #    [#<Encoding:UTF-8>, #<Encoding:EUC-JP>],
  *   #    "crlf_newline"]
  *
- * A element of the array is a pair of encodings or a string.
- * The pair means encoding conversion.
- * The string means decorator.
+ * Each element of the array is a pair of encodings or a string.
+ * A pair means an encoding conversion.
+ * A string means a decorator.
  *
  * In the above example, [#<Encoding:ISO-8859-1>, #<Encoding:UTF-8>] means
  * a converter from ISO-8859-1 to UTF-8.
@@ -3293,17 +3446,17 @@ econv_result_to_symbol(rb_econv_result_t res)
  *
  * example:
  *   ec = Encoding::Converter.new("UTF-8", "UTF-16BE")
- *   ret = ec.primitive_convert(src="pi", dst="", 100)
+ *   ret = ec.primitive_convert(src="pi", dst="", nil, 100)
  *   p [ret, src, dst] #=> [:finished, "", "\x00p\x00i"]
  *
  *   ec = Encoding::Converter.new("UTF-8", "UTF-16BE")
- *   ret = ec.primitive_convert(src="pi", dst="", 1)
+ *   ret = ec.primitive_convert(src="pi", dst="", nil, 1)
  *   p [ret, src, dst] #=> [:destination_buffer_full, "i", "\x00"]
- *   ret = ec.primitive_convert(src, dst="", 1)
+ *   ret = ec.primitive_convert(src, dst="", nil, 1)
  *   p [ret, src, dst] #=> [:destination_buffer_full, "", "p"]
- *   ret = ec.primitive_convert(src, dst="", 1)
+ *   ret = ec.primitive_convert(src, dst="", nil, 1)
  *   p [ret, src, dst] #=> [:destination_buffer_full, "", "\x00"]
- *   ret = ec.primitive_convert(src, dst="", 1)
+ *   ret = ec.primitive_convert(src, dst="", nil, 1)
  *   p [ret, src, dst] #=> [:finished, "", "i"]
  *
  */
@@ -3419,11 +3572,11 @@ econv_primitive_convert(int argc, VALUE *argv, VALUE self)
  * call-seq:
  *   ec.convert(source_string) -> destination_string
  *
- * convert source_string and return destination_string.
+ * Convert source_string and return destination_string.
  *
  * source_string is assumed as a part of source.
  * i.e.  :partial_input=>true is specified internally.
- * finish method should be used at last.
+ * finish method should be used last.
  *
  *   ec = Encoding::Converter.new("utf-8", "euc-jp")
  *   puts ec.convert("\u3042").dump     #=> "\xA4\xA2"
@@ -3443,6 +3596,10 @@ econv_primitive_convert(int argc, VALUE *argv, VALUE self)
  * If a conversion error occur,
  * Encoding::UndefinedConversionError or
  * Encoding::InvalidByteSequenceError is raised.
+ * Encoding::Converter#convert doesn't supply methods to recover or restart
+ * from these exceptions.
+ * When you want to handle these conversion errors,
+ * use Encoding::Converter#primitive_convert.
  *
  */
 static VALUE
@@ -3488,8 +3645,8 @@ econv_convert(VALUE self, VALUE source_string)
  * call-seq:
  *   ec.finish -> string
  *
- * finishes the converter.
- * It returns the last part of converted string.
+ * Finishes the converter.
+ * It returns the last part of the converted string.
  *
  *   ec = Encoding::Converter.new("utf-8", "iso-2022-jp")
  *   p ec.convert("\u3042")     #=> "\e$B$\""
@@ -3532,8 +3689,8 @@ econv_finish(VALUE self)
  * call-seq:
  *   ec.primitive_errinfo -> array
  *
- * primitive_errinfo returns a precious information of the last error result
- * as a 5-elements array:
+ * primitive_errinfo returns important information regarding the last error
+ * as a 5-element array:
  *
  *   [result, enc1, enc2, error_bytes, readagain_bytes]
  *
@@ -3542,12 +3699,12 @@ econv_finish(VALUE self)
  * Other elements are only meaningful when result is
  * :invalid_byte_sequence, :incomplete_input or :undefined_conversion.
  *
- * enc1 and enc2 indicates a conversion step as pair of strings.
- * For example, a converter from EUC-JP to ISO-8859-1 converters
- * a string as EUC-JP -> UTF-8 -> ISO-8859-1.
- * So [enc1, enc2] is ["EUC-JP", "UTF-8"] or ["UTF-8", "ISO-8859-1"].
+ * enc1 and enc2 indicate a conversion step as a pair of strings.
+ * For example, a converter from EUC-JP to ISO-8859-1 converts
+ * a string as follows: EUC-JP -> UTF-8 -> ISO-8859-1.
+ * So [enc1, enc2] is either ["EUC-JP", "UTF-8"] or ["UTF-8", "ISO-8859-1"].
  *
- * error_bytes and readagain_bytes indicates the byte sequences which causes the error.
+ * error_bytes and readagain_bytes indicate the byte sequences which caused the error.
  * error_bytes is discarded portion.
  * readagain_bytes is buffered portion which is read again on next conversion.
  *
@@ -3555,7 +3712,7 @@ econv_finish(VALUE self)
  *
  *   # \xff is invalid as EUC-JP.
  *   ec = Encoding::Converter.new("EUC-JP", "Shift_JIS")
- *   ec.primitive_convert(src="\xff", dst="", nil, 10)                       
+ *   ec.primitive_convert(src="\xff", dst="", nil, 10)
  *   p ec.primitive_errinfo
  *   #=> [:invalid_byte_sequence, "EUC-JP", "UTF-8", "\xFF", ""]
  *
@@ -3576,7 +3733,7 @@ econv_finish(VALUE self)
  *   # Encoding::Converter::PARTIAL_INPUT prevents invalid errors by
  *   # partial characters.
  *   ec = Encoding::Converter.new("EUC-JP", "ISO-8859-1")
- *   ec.primitive_convert(src="\xa4", dst="", nil, 10, Encoding::Converter::PARTIAL_INPUT)                 
+ *   ec.primitive_convert(src="\xa4", dst="", nil, 10, Encoding::Converter::PARTIAL_INPUT)
  *   p ec.primitive_errinfo
  *   #=> [:source_buffer_empty, nil, nil, nil, nil]
  *
@@ -3633,14 +3790,14 @@ econv_primitive_errinfo(VALUE self)
  * call-seq:
  *   ec.insert_output(string) -> nil
  *
- * inserts string into the encoding converter.
- * The string will be converted into the destination encoding and
- * outputed on later conversions.
+ * Inserts string into the encoding converter.
+ * The string will be converted to the destination encoding and
+ * output on later conversions.
  *
  * If the destination encoding is stateful,
- * string is converted according to the state and update the state.
+ * string is converted according to the state and the state is updated.
  *
- * This method should be used only when a conversion error is occur.
+ * This method should be used only when a conversion error occurs.
  *
  *  ec = Encoding::Converter.new("utf-8", "iso-8859-1")
  *  src = "HIRAGANA LETTER A is \u{3042}."
@@ -3687,7 +3844,7 @@ econv_insert_output(VALUE self, VALUE string)
  *   ec.putback                    => string
  *   ec.putback(max_numbytes)      => string
  *
- * put back the bytes which will be converted.
+ * Put back the bytes which will be converted.
  *
  * The bytes are caused by invalid_byte_sequence error.
  * When invalid_byte_sequence error, some bytes are discarded and
@@ -3739,8 +3896,8 @@ econv_putback(int argc, VALUE *argv, VALUE self)
  * call-seq:
  *   ec.last_error -> exception or nil
  *
- * returns an exception object for the last conversion.
- * It returns nil if the last conversion is not an error. 
+ * Returns an exception object for the last conversion.
+ * Returns nil if the last conversion did not produce an error.
  *
  * "error" means that
  * Encoding::InvalidByteSequenceError and Encoding::UndefinedConversionError for
@@ -3771,7 +3928,7 @@ econv_last_error(VALUE self)
  * call-seq:
  *   ec.replacement -> string
  *
- * returns the replacement string.
+ * Returns the replacement string.
  *
  *  ec = Encoding::Converter.new("euc-jp", "us-ascii")
  *  p ec.replacement    #=> "?"
@@ -3799,7 +3956,7 @@ econv_get_replacement(VALUE self)
  * call-seq:
  *   ec.replacement = string
  *
- * sets the replacement string.
+ * Sets the replacement string.
  *
  *  ec = Encoding::Converter.new("utf-8", "us-ascii", :undef => :replace)
  *  ec.replacement = "<undef>"
@@ -3829,6 +3986,12 @@ econv_set_replacement(VALUE self, VALUE arg)
     return arg;
 }
 
+VALUE
+rb_econv_make_exception(rb_econv_t *ec)
+{
+    return make_econv_exception(ec);
+}
+
 void
 rb_econv_check_error(rb_econv_t *ec)
 {
@@ -3844,7 +4007,7 @@ rb_econv_check_error(rb_econv_t *ec)
  * call-seq:
  *   ecerr.source_encoding_name         -> string
  *
- * returns the source encoding name as a string.
+ * Returns the source encoding name as a string.
  */
 static VALUE
 ecerr_source_encoding_name(VALUE self)
@@ -3856,7 +4019,7 @@ ecerr_source_encoding_name(VALUE self)
  * call-seq:
  *   ecerr.source_encoding              -> encoding
  *
- * returns the source encoding as an encoding object.
+ * Returns the source encoding as an encoding object.
  *
  * Note that the result may not be equal to the source encoding of
  * the encoding converter if the conversion has multiple steps.
@@ -3882,7 +4045,7 @@ ecerr_source_encoding(VALUE self)
  * call-seq:
  *   ecerr.destination_encoding_name         -> string
  *
- * returns the destination encoding name as a string.
+ * Returns the destination encoding name as a string.
  */
 static VALUE
 ecerr_destination_encoding_name(VALUE self)
@@ -3894,7 +4057,7 @@ ecerr_destination_encoding_name(VALUE self)
  * call-seq:
  *   ecerr.destination_encoding         -> string
  *
- * returns the destination encoding as an encoding object.
+ * Returns the destination encoding as an encoding object.
  */
 static VALUE
 ecerr_destination_encoding(VALUE self)
@@ -3906,7 +4069,7 @@ ecerr_destination_encoding(VALUE self)
  * call-seq:
  *   ecerr.error_char         -> string
  *
- * returns the one-character string which cause Encoding::UndefinedConversionError.
+ * Returns the one-character string which cause Encoding::UndefinedConversionError.
  *
  *  ec = Encoding::Converter.new("ISO-8859-1", "EUC-JP")
  *  begin
@@ -3927,7 +4090,7 @@ ecerr_error_char(VALUE self)
  * call-seq:
  *   ecerr.error_bytes         -> string
  *
- * returns the discarded bytes when Encoding::InvalidByteSequenceError occur.
+ * Returns the discarded bytes when Encoding::InvalidByteSequenceError occurs.
  *
  *  ec = Encoding::Converter.new("EUC-JP", "ISO-8859-1")
  *  begin
@@ -3948,7 +4111,7 @@ ecerr_error_bytes(VALUE self)
  * call-seq:
  *   ecerr.readagain_bytes         -> string
  *
- * returns the bytes to be read again when Encoding::InvalidByteSequenceError occur.
+ * Returns the bytes to be read again when Encoding::InvalidByteSequenceError occurs.
  */
 static VALUE
 ecerr_readagain_bytes(VALUE self)
@@ -3960,7 +4123,7 @@ ecerr_readagain_bytes(VALUE self)
  * call-seq:
  *   ecerr.incomplete_input?         -> true or false
  *
- * returns true if the invalid byte sequence error is caused by
+ * Returns true if the invalid byte sequence error is caused by
  * premature end of string.
  *
  *  ec = Encoding::Converter.new("EUC-JP", "ISO-8859-1")
@@ -3995,7 +4158,6 @@ Init_transcode(void)
 
     sym_invalid = ID2SYM(rb_intern("invalid"));
     sym_undef = ID2SYM(rb_intern("undef"));
-    sym_ignore = ID2SYM(rb_intern("ignore"));
     sym_replace = ID2SYM(rb_intern("replace"));
     sym_xml = ID2SYM(rb_intern("xml"));
     sym_text = ID2SYM(rb_intern("text"));

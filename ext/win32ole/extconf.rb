@@ -19,7 +19,7 @@ end
 def create_win32ole_makefile
   if have_library("ole32") and
      have_library("oleaut32") and
-     have_library("uuid") and 
+     have_library("uuid") and
      have_library("user32") and
      have_library("kernel32") and
      have_library("advapi32") and
@@ -36,7 +36,7 @@ end
 
 
 case RUBY_PLATFORM
-when /mswin32/
+when /mswin/
   $CFLAGS += ' /W3'
 when /cygwin/, /mingw/
   $defs << '-DNONAMELESSUNION'

@@ -31,7 +31,7 @@ class CGICoreTest < Test::Unit::TestCase
     }
     ENV.update(@environ)
     cgi = CGI.new
-    assert_equal(["a","b","d"],cgi.keys.sort) if RUBY_VERSION>="1.9"
+    assert_equal(["a","b","c","d"],cgi.keys.sort) if RUBY_VERSION>="1.9"
     assert_equal("",cgi["d"])
   end
 
@@ -135,7 +135,7 @@ class CGICoreTest < Test::Unit::TestCase
       assert_equal({"str"=>"\xBE\xBE\xB9\xBE".force_encoding("UTF-8")},hash)
 
       $stdin.rewind
-      assert_raise(CGI::InvalidEncoding) do 
+      assert_raise(CGI::InvalidEncoding) do
         cgi = CGI.new(:accept_charset=>"UTF-8")
       end
 

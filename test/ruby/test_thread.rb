@@ -30,7 +30,7 @@ class TestThread < Test::Unit::TestCase
   def test_mutex_synchronize
     m = Mutex.new
     r = 0
-    max = 100
+    max = 10
     (1..max).map{
       Thread.new{
         i=0
@@ -108,7 +108,7 @@ class TestThread < Test::Unit::TestCase
     $:.unshift File.join(File.dirname(dir), 'ruby')
     require 'envutil'
     $:.shift
-    10.times {
+    3.times {
       result = `#{EnvUtil.rubybin} #{lbtest}`
       assert(!$?.coredump?, '[ruby-dev:30653]')
       assert_equal("exit.", result[/.*\Z/], '[ruby-dev:30653]')
@@ -124,6 +124,10 @@ class TestThread < Test::Unit::TestCase
     assert_equal(-1, t1.priority)
     assert_equal(-3, t2.priority)
     sleep 0.5
+    5.times do
+      break if c1 > c2
+      sleep 0.1
+    end
     t1.kill
     t2.kill
     assert(c1 > c2, "[ruby-dev:33124]")
@@ -311,11 +315,9 @@ class TestThread < Test::Unit::TestCase
     assert(c.stop?)
 
     d.kill
-    assert_equal("aborting", d.status)
-    assert(!d.stop?)
+    assert_equal(["aborting", false], [d.status, d.stop?])
 
-    assert_equal("run", e.status)
-    assert(!e.stop?)
+    assert_equal(["run", false], [e.status, e.stop?])
 
   ensure
     a.kill if a
@@ -438,13 +440,29 @@ class TestThread < Test::Unit::TestCase
     assert_equal(false, m3.locked?)
   end
 
-  def test_recursive_error
-    o = Object.new
-    def o.inspect
-      Thread.current[:__recursive_key__][:inspect] = nil
+  def test_mutex_trylock
+    m = Mutex.new
+    assert_equal(true, m.try_lock)
+    assert_equal(false, m.try_lock, '[ruby-core:20943]')
+
+    Thread.new{
+      assert_equal(false, m.try_lock)
+    }.join
+
+    m.unlock
+  end
+
+  def test_recursive_outer
+    arr = []
+    obj = Struct.new(:foo, :visited).new(arr, false)
+    arr << obj
+    def obj.hash
+      self[:visited] = true
       super
+      raise "recursive_outer should short circuit intermediate calls"
     end
-    assert_raise(TypeError) { [o].inspect }
+    assert_nothing_raised {arr.hash}
+    assert(obj[:visited])
   end
 end
 
@@ -503,5 +521,15 @@ class TestThreadGroup < Test::Unit::TestCase
     c = Class.new(Thread)
     c.class_eval { def initialize; end }
     assert_raise(ThreadError) { c.new.start }
+  end
+
+  def test_backtrace
+    Thread.new{
+      assert_equal(Array, Thread.main.backtrace.class)
+    }.join
+
+    t = Thread.new{}
+    t.join
+    assert_equal(nil, t.backtrace)
   end
 end

@@ -33,11 +33,13 @@ if have_header("arpa/inet.h")
 end
 
 ipv6 = false
-default_ipv6 = /cygwin|beos|haiku/ !~ RUBY_PLATFORM
+default_ipv6 = /mswin|cygwin|beos|haiku/ !~ RUBY_PLATFORM
 if enable_config("ipv6", default_ipv6)
   if checking_for("ipv6") {try_link(<<EOF)}
 #include <sys/types.h>
+#ifndef _WIN32
 #include <sys/socket.h>
+#endif
 int
 main()
 {
@@ -50,6 +52,9 @@ EOF
 end
 
 if ipv6
+  if $mingw
+    $CPPFLAGS << " -D_WIN32_WINNT=0x501"
+  end
   ipv6lib = nil
   class << (fmt = "unknown")
     def %(s) s || self end
@@ -92,8 +97,10 @@ end
 #   doug's fix, NOW add -Dss_family... only if required!
 doug = proc {have_struct_member("struct sockaddr_storage", "ss_family", headers)}
 if (doug[] or
-    with_cppflags($CPPFLAGS + " -Dss_family=__ss_family -Dss_len=__ss_len", &doug))
+    with_cppflags($CPPFLAGS + " -Dss_family=__ss_family", &doug))
   $defs[-1] = "-DHAVE_SOCKADDR_STORAGE"
+  doug = proc {have_struct_member("struct sockaddr_storage", "ss_len", headers)}
+  doug[] or with_cppflags($CPPFLAGS + " -Dss_len=__ss_len", &doug)
 end
 
 if have_struct_member("struct sockaddr", "sa_len", headers)
@@ -242,21 +249,59 @@ Fatal: invalid value for --with-lookup-order-hack (expected INET, INET6 or UNSPE
 EOS
 end
 
-$objs = ["socket.#{$OBJEXT}"]
+$objs = [
+  "init.#{$OBJEXT}",
+  "constants.#{$OBJEXT}",
+  "basicsocket.#{$OBJEXT}",
+  "socket.#{$OBJEXT}",
+  "ipsocket.#{$OBJEXT}",
+  "tcpsocket.#{$OBJEXT}",
+  "tcpserver.#{$OBJEXT}",
+  "sockssocket.#{$OBJEXT}",
+  "udpsocket.#{$OBJEXT}",
+  "unixsocket.#{$OBJEXT}",
+  "unixserver.#{$OBJEXT}",
+  "option.#{$OBJEXT}",
+  "ancdata.#{$OBJEXT}",
+  "raddrinfo.#{$OBJEXT}"
+]
 
-unless getaddr_info_ok and have_func("getnameinfo", "netdb.h") and have_func("getaddrinfo", "netdb.h")
+unless getaddr_info_ok and have_func("getnameinfo", headers) and have_func("getaddrinfo", headers)
   if have_struct_member("struct in6_addr", "s6_addr8", headers)
     $defs[-1] = "-DHAVE_ADDR8"
   end
   $CPPFLAGS="-I. "+$CPPFLAGS
   $objs += ["getaddrinfo.#{$OBJEXT}"]
   $objs += ["getnameinfo.#{$OBJEXT}"]
+  $defs << "-DGETADDRINFO_EMU"
   have_func("inet_ntop") or have_func("inet_ntoa")
   have_func("inet_pton") or have_func("inet_aton")
   have_func("getservbyport")
+  if have_func("gai_strerror")
+    unless checking_for("gai_strerror() returns const pointer") {!try_compile(<<EOF)}
+#{cpp_include(headers)}
+#include <stdlib.h>
+void
+conftest_gai_strerror_is_const()
+{
+    *gai_strerror(0) = 0;
+}
+EOF
+      $defs << "-DGAI_STRERROR_CONST"
+    end
+  end
   have_header("arpa/nameser.h")
   have_header("resolv.h")
 end
+
+have_header("ifaddrs.h")
+have_func("getifaddrs")
+have_header("sys/ioctl.h")
+have_header("sys/sockio.h")
+have_header("net/if.h", headers)
+
+have_header("sys/param.h", headers)
+have_header("sys/ucred.h", headers)
 
 unless have_type("socklen_t", headers)
   $defs << "-Dsocklen_t=int"
@@ -264,8 +309,30 @@ end
 
 have_header("sys/un.h")
 have_header("sys/uio.h")
+have_type("struct in_pktinfo", headers) {|src|
+  src.sub(%r'^/\*top\*/', '\1'"\n#if defined(IPPROTO_IP) && defined(IP_PKTINFO)") <<
+  "#else\n" << "#error\n" << ">>>>>> no in_pktinfo <<<<<<\n" << "#endif\n"
+}
+have_type("struct in6_pktinfo", headers) {|src|
+  src.sub(%r'^/\*top\*/', '\1'"\n#if defined(IPPROTO_IPV6) && defined(IPV6_PKTINFO)") <<
+  "#else\n" << "#error\n" << ">>>>>> no in6_pktinfo <<<<<<\n" << "#endif\n"
+}
+if have_struct_member("struct in_pktinfo", "ipi_spec_dst", headers)
+  $defs[-1] = "-DHAVE_IPI_SPEC_DST"
+end
 
-$distcleanfiles << "constants.h"
+have_type("struct sockcred", headers)
+have_type("struct cmsgcred", headers)
+
+have_func("getpeereid")
+
+have_header("ucred.h", headers)
+have_func("getpeerucred")
+
+# workaround for recent Windows SDK
+$defs << "-DIPPROTO_IPV6=IPPROTO_IPV6" if have_const("IPPROTO_IPV6") && !have_macro("IPPROTO_IPV6")
+
+$distcleanfiles << "constants.h" << "constdefs.*"
 
 if have_func(test_func)
   have_func("hsterror")
