@@ -1,3 +1,11 @@
+Wed Nov 11 18:20:36 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* gc.c (rb_objspace_free): finalizer should have been done already.
+
+	* vm.c (rb_vm_free): VM does not belong to any object spaces.
+
+	* vm.c (ruby_make_bare_vm): thread belongs to its VM object space.
+
 Wed Nov 11 12:54:02 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* hash.c (ruby_setenv): use ruby_strdup().

@@ -1501,12 +1501,12 @@ rb_vm_free(void *ptr)
 	}
 	ruby_native_thread_unlock(&vm->global_vm_lock);
 	ruby_native_thread_lock_destroy(&vm->global_vm_lock);
-	ruby_xfree(vm);
 #if defined(ENABLE_VM_OBJSPACE) && ENABLE_VM_OBJSPACE
 	if (objspace) {
 	    rb_objspace_free(objspace);
 	}
 #endif
+	free(vm);
     }
     RUBY_FREE_LEAVE("vm");
 }
@@ -2135,18 +2135,18 @@ ruby_make_bare_vm(void)
 {
     /* VM bootstrap: phase 1 */
     rb_vm_t *vm = malloc(sizeof(*vm));
-    rb_thread_t *th = malloc(sizeof(*th));
+    rb_thread_t *th;
 
-    if (!vm || !th) {
-	if (vm) free(vm);
-	if (th) free(th);
+    if (!vm) {
 	return 0;
     }
-    MEMZERO(th, rb_thread_t, 1);
 
+    vm_init2(vm);
+
+    th = rb_objspace_xmalloc(vm->objspace, sizeof(*th));
+    MEMZERO(th, rb_thread_t, 1);
     th->vm = vm;
     rb_thread_set_current_raw(th);
-    vm_init2(vm);
     vm->main_thread = th;
 
     th_init(th, 0);
