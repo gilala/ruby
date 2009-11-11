@@ -1829,10 +1829,9 @@ ruby_vm_process_options(rb_vm_t *vm, int argc, char **argv)
     struct cmdline_options opt;
     VALUE iseq;
 
-    if (argv[0]) {		/* for the time being */
-	RUBY_VM_OBJECT(vm, progname) = rb_tainted_str_new2(argv[0]);
+    if (argc > 0 && argv[0]) {		/* for the time being */
+	ruby_script(argv[0]);  /* for the time being */
     }
-    ruby_script(argv[0]);  /* for the time being */
     rb_argv0 = rb_str_new4(rb_progname);
     rb_gc_register_mark_object(rb_argv0);
     iseq = process_options(vm, argc, argv, cmdline_options_init(&opt));

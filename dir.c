@@ -2252,8 +2252,8 @@ rb_dir_fchown(int argc, VALUE *argv, VALUE dir)
 	rb_raise(rb_eArgError, "wrong number of argument (%d for 1)", argc);
     }
     argc -= 2;
-    arg.owner = NIL_P(*argv) ? -1 : NUM2UIDT(*argv); ++argv;
-    arg.group = NIL_P(*argv) ? -1 : NUM2GIDT(*argv); ++argv;
+    arg.owner = NIL_P(*argv) ? (rb_uid_t)-1 : NUM2UIDT(*argv); ++argv;
+    arg.group = NIL_P(*argv) ? (rb_gid_t)-1 : NUM2GIDT(*argv); ++argv;
     GetDIR(dir, dp);
     n = apply2filesat(dp, fchown_internal, argc, argv, &arg);
     return LONG2NUM(n);
@@ -2283,8 +2283,8 @@ rb_dir_lchown(int argc, VALUE *argv, VALUE dir)
 	rb_raise(rb_eArgError, "wrong number of argument (%d for 1)", argc);
     }
     argc -= 2;
-    arg.owner = NIL_P(*argv) ? -1 : NUM2UIDT(*argv); ++argv;
-    arg.group = NIL_P(*argv) ? -1 : NUM2GIDT(*argv); ++argv;
+    arg.owner = NIL_P(*argv) ? (rb_uid_t)-1 : NUM2UIDT(*argv); ++argv;
+    arg.group = NIL_P(*argv) ? (rb_gid_t)-1 : NUM2GIDT(*argv); ++argv;
     GetDIR(dir, dp);
     n = apply2filesat(dp, lchown_internal, argc, argv, &arg);
     return LONG2NUM(n);

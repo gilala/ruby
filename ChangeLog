@@ -1,3 +1,30 @@
+Wed Nov 11 12:54:02 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* hash.c (ruby_setenv): use ruby_strdup().
+
+Wed Nov 11 12:19:27 2009  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* hash.c (ruby_setenv): also set CRT workarea.  ref [ruby-core:25010]
+
+Wed Nov 11 09:36:02 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* marshal.c (w_object, r_object0): use RHASH_IFNONE but not ifnone
+	  directly.
+
+Wed Nov 11 08:32:45 2009  Tanaka Akira  <akr@fsij.org>
+
+	* thread.c (blocking_region_begin): define before BLOCKING_REGION.
+	  reported by Luis Lavena.  [ruby-core:26670]
+
+Wed Nov 11 08:22:19 2009  Tanaka Akira  <akr@fsij.org>
+
+	* util.c (ruby_strtod): use dval() consistently.
+
+Wed Nov 11 02:14:48 2009  Yuki Sonoda (Yugui)  <yugui@yugui.jp>
+
+	* test/matrix/test_matrix.rb (TestMatrix#test_rank):
+	  added a test method for r24969.
+
 Tue Nov 10 08:23:21 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* process.c (rb_f_exec, rb_f_system, rb_f_spawn): mentioned abou

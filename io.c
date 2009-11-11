@@ -4472,7 +4472,7 @@ sysopen_func(void *ptr)
     const struct sysopen_struct *data = ptr;
     const char *fname = RSTRING_PTR(data->fname);
 #if USE_OPENAT
-    return (VALUE)openat(data->base, data->fname, data->oflags, data->perm);
+    return (VALUE)openat(data->base, RSTRING_PTR(data->fname), data->oflags, data->perm);
 #else
 #ifdef _WIN32
     if (data->wchar)

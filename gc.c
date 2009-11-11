@@ -738,13 +738,19 @@ ruby_xmalloc(size_t size)
 }
 
 void *
-ruby_xmalloc2(size_t n, size_t size)
+rb_objspace_xmalloc2(rb_objspace_t *objspace, size_t n, size_t size)
 {
     size_t len = size * n;
     if (n != 0 && size != len / n) {
 	rb_raise(rb_eArgError, "malloc: possible integer overflow");
     }
-    return rb_objspace_xmalloc(&rb_objspace, len);
+    return rb_objspace_xmalloc(objspace, len);
+}
+
+void *
+ruby_xmalloc2(size_t n, size_t size)
+{
+    return rb_objspace_xmalloc2(&rb_objspace, n, size);
 }
 
 void *
@@ -763,13 +769,19 @@ ruby_xrealloc(void *ptr, size_t size)
 }
 
 void *
-ruby_xrealloc2(void *ptr, size_t n, size_t size)
+rb_objspace_xrealloc2(rb_objspace_t *objspace, void *ptr, size_t n, size_t size)
 {
     size_t len = size * n;
     if (n != 0 && size != len / n) {
 	rb_raise(rb_eArgError, "realloc: possible integer overflow");
     }
-    return ruby_xrealloc(ptr, len);
+    return rb_objspace_xrealloc(objspace, ptr, len);
+}
+
+void *
+ruby_xrealloc2(void *ptr, size_t n, size_t size)
+{
+    return rb_objspace_xrealloc2(&rb_objspace, ptr, n, size);
 }
 
 void
@@ -2283,19 +2295,6 @@ Init_stack(volatile VALUE *addr)
  *     Finalizer two on 537763480
  *
  */
-
-void
-Init_heap(void)
-{
-}
-
-void
-InitVM_heap(void)
-{
-#if !(defined(ENABLE_VM_OBJSPACE) && ENABLE_VM_OBJSPACE)
-    init_heap(vm->objspace);
-#endif
-}
 
 /*
  * rb_objspace_each_objects() is special C API to walk through

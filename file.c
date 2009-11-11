@@ -2341,8 +2341,7 @@ char *
 ruby_readlink(const char *path, ssize_t *len)
 {
     char *buf, *tmp;
-    int size = 100;
-    int rv;
+    ssize_t size = 100, rv;
  
     buf = malloc(size);
     if (!buf) return 0;
@@ -2377,7 +2376,7 @@ ruby_fd_getcwd(int fd)
 {
     static const char fdpat[] = "/proc/self/fd/%d";
     char fdname[sizeof(fdpat) + sizeof(int) * 5 / 2];
-    long len;
+    ssize_t len;
 
     snprintf(fdname, sizeof(fdname), fdpat, fd);
     return ruby_readlink(fdname, &len);

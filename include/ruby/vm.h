@@ -26,8 +26,10 @@ int ruby_vm_exec_node(ruby_vm_t *vm, void *n);
 int ruby_vm_start(ruby_vm_t *vm);
 int ruby_vm_join(ruby_vm_t *vm);
 int ruby_vm_destruct(ruby_vm_t *vm);
+void ruby_vm_die(ruby_vm_t *);
 
 /* initialize API */
+ruby_vm_t *ruby_init(void);
 int ruby_vm_init_add_argv(ruby_vm_t *vm, const char *arg);
 int ruby_vm_init_add_library(ruby_vm_t *vm, const char *lib);
 int ruby_vm_init_add_library_path(ruby_vm_t *vm, const char *path);
@@ -60,6 +62,8 @@ void ruby_init_stack(volatile void *);
 struct rb_objspace;
 void *rb_objspace_xmalloc(struct rb_objspace *objspace, size_t size);
 void *rb_objspace_xrealloc(struct rb_objspace *objspace, void *ptr, size_t size);
+void *rb_objspace_xmalloc2(struct rb_objspace *objspace, size_t n, size_t size);
+void *rb_objspace_xrealloc2(struct rb_objspace *objspace, void *ptr, size_t n, size_t size);
 void rb_objspace_xfree(struct rb_objspace *objspace, void *ptr);
 
 #endif /* RUBY_VM_H */

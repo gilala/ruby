@@ -37,27 +37,26 @@ void rb_vm_clear_trace_func(rb_vm_t *vm);
 void rb_thread_stop_timer_thread(void);
 
 void rb_call_inits(void);
-void Init_heap(void);
-void Init_BareVM(void);
+rb_vm_t *Init_BareVM(void);
 void rb_vm_call_inits(void);
-void InitVM_heap(void);
 void InitVM_ext(void);
 void ruby_vm_prog_init(rb_vm_t *vm);
 void *ruby_vm_process_options(rb_vm_t *vm, int argc, char **argv);
 static int ruby_vm_cleanup(rb_vm_t *vm, int ex);
 
-void
+rb_vm_t *
 ruby_init(void)
 {
     static int initialized = 0;
     int state;
+    rb_vm_t *vm;
 
     if (initialized)
-	return;
+	return 0;
     initialized = 1;
 
     ruby_init_stack((void *)&state);
-    Init_BareVM();
+    vm = Init_BareVM();
 
     PUSH_TAG();
     if ((state = EXEC_TAG()) == 0) {
@@ -70,14 +69,13 @@ ruby_init(void)
 	error_print();
 	exit(EXIT_FAILURE);
     }
+    return vm;
 }
 
 int
 ruby_vm_init(rb_vm_t *vm)
 {
     int state;
-
-    InitVM_heap();
 
     PUSH_TAG();
     if ((state = EXEC_TAG()) == 0) {
@@ -145,7 +143,7 @@ ruby_finalize(void)
 
 void rb_thread_stop_timer_thread(void);
 
-static int
+int
 ruby_vm_cleanup(rb_vm_t *vm, volatile int ex)
 {
     int state;
@@ -263,35 +261,32 @@ ruby_executable_node(void *n, int *status)
     return FALSE;
 }
 
+#define ruby_vm_exec_internal(vm, n) ruby_exec_internal((vm)->main_thread, n)
+
 int
 ruby_vm_exec_node(rb_vm_t *vm, void *n)
 {
     ruby_init_stack((void *)&n);
-    return ruby_exec_internal(vm->main_thread, n);
-}
-
-int
-ruby_vm_run_node(rb_vm_t *vm, void *n)
-{
-    int status;
-    if (!ruby_executable_node(n, &status)) {
-	ruby_vm_cleanup(vm, 0);
-	return status;
-    }
-    return ruby_vm_cleanup(vm, ruby_vm_exec_node(vm, n));
+    return ruby_vm_exec_internal(vm, n);
 }
 
 int
 ruby_vm_run(rb_vm_t *vm)
 {
     int status;
+    void *n;
 
     rb_thread_set_current_raw(vm->main_thread);
     Init_stack((void *)&vm);
     if ((status = ruby_vm_init(vm)) != 0) {
 	return ruby_vm_cleanup(vm, status);
     }
-    return ruby_vm_run_node(vm, ruby_vm_parse_options(vm));
+    n = ruby_vm_parse_options(vm);
+    if (!ruby_executable_node(n, &status)) {
+	ruby_vm_cleanup(vm, 0);
+	return status;
+    }
+    return ruby_vm_exec_internal(vm, n);
 }
 
 /*

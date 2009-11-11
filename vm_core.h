@@ -267,6 +267,7 @@ void rb_objspace_free(struct rb_objspace *);
 typedef struct rb_vm_struct {
     VALUE self;
 
+    rb_thread_cond_t global_vm_waiting;
     rb_thread_lock_t global_vm_lock;
 
     VALUE global_state_version;
@@ -669,6 +670,7 @@ VALUE rb_vm_invoke_proc(rb_thread_t *th, rb_proc_t *proc, VALUE self,
 			int argc, const VALUE *argv, const rb_block_t *blockptr);
 VALUE rb_vm_make_proc(rb_thread_t *th, const rb_block_t *block, VALUE klass);
 VALUE rb_vm_make_env_object(rb_thread_t *th, rb_control_frame_t *cfp);
+rb_vm_t *ruby_make_bare_vm(void);
 
 void *rb_thread_call_with_gvl(void *(*func)(void *), void *data1);
 int ruby_thread_has_gvl_p(void);
@@ -682,6 +684,12 @@ NOINLINE(void rb_gc_save_machine_context(rb_thread_t *));
 
 void rb_mark_end_proc(struct end_proc_data **);
 void rb_exec_end_proc(struct end_proc_data **);
+
+void *ruby_vm_xmalloc(struct rb_objspace *objspace, size_t size);
+void *ruby_vm_xmalloc2(struct rb_objspace *objspace, size_t n, size_t size);
+void *ruby_vm_xrealloc(struct rb_objspace *objspace, void *ptr, size_t size);
+void *ruby_vm_xrealloc2(struct rb_objspace *objspace, void *ptr, size_t n, size_t size);
+void ruby_vm_xfree(struct rb_objspace *objspace, void *ptr);
 
 #define sysstack_error rb_errSysStack
 

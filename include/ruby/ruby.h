@@ -1131,7 +1131,6 @@ NORETURN(void rb_throw_obj(VALUE,VALUE));
 VALUE rb_require(const char*);
 
 /* obsolete */
-void ruby_init(void);
 void *ruby_options(int, char**);
 int ruby_run_node(void *);
 int ruby_exec_node(void *);

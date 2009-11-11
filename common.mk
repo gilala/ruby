@@ -627,7 +627,7 @@ time.$(OBJEXT): {$(VPATH)}time.c $(RUBY_H_INCLUDES) \
 util.$(OBJEXT): {$(VPATH)}util.c $(RUBY_H_INCLUDES) {$(VPATH)}util.h
 variable.$(OBJEXT): {$(VPATH)}variable.c $(RUBY_H_INCLUDES) \
   {$(VPATH)}node.h {$(VPATH)}util.h {$(VPATH)}encoding.h \
-  {$(VPATH)}oniguruma.h {$(VPATH)}vm.h
+  {$(VPATH)}oniguruma.h {$(VPATH)}vm.h {$(VPATH)}vm_core.h
 version.$(OBJEXT): {$(VPATH)}version.c $(RUBY_H_INCLUDES) \
   {$(VPATH)}version.h $(srcdir)/revision.h {$(VPATH)}config.h
 
@@ -638,13 +638,15 @@ iseq.$(OBJEXT): {$(VPATH)}iseq.c {$(VPATH)}gc.h {$(VPATH)}iseq.h \
   $(RUBY_H_INCLUDES) $(VM_CORE_H_INCLUDES) {$(VPATH)}insns.inc \
   {$(VPATH)}insns_info.inc {$(VPATH)}node_name.inc {$(VPATH)}debug.h
 vm.$(OBJEXT): {$(VPATH)}vm.c {$(VPATH)}gc.h {$(VPATH)}iseq.h \
-  {$(VPATH)}eval_intern.h $(RUBY_H_INCLUDES) $(ENCODING_H_INCLUDES) \
+  {$(VPATH)}eval_intern.h {$(VPATH)}vm.h $(RUBY_H_INCLUDES) $(ENCODING_H_INCLUDES) \
   $(VM_CORE_H_INCLUDES) {$(VPATH)}vm_method.c {$(VPATH)}vm_eval.c \
   {$(VPATH)}vm_insnhelper.c {$(VPATH)}vm_insnhelper.h {$(VPATH)}vm_exec.c \
   {$(VPATH)}vm_exec.h {$(VPATH)}insns.def {$(VPATH)}vmtc.inc \
   {$(VPATH)}vm.inc {$(VPATH)}insns.inc {$(VPATH)}debug.h
 vm_dump.$(OBJEXT): {$(VPATH)}vm_dump.c $(RUBY_H_INCLUDES) \
   $(VM_CORE_H_INCLUDES) {$(VPATH)}debug.h
+mvm.$(OBJEXT): {$(VPATH)}mvm.c $(RUBY_H_INCLUDES) $(VM_CORE_H_INCLUDES) \
+  {$(VPATH)}vm.h {$(VPATH)}eval_intern.h
 debug.$(OBJEXT): {$(VPATH)}debug.c $(RUBY_H_INCLUDES) \
   $(ENCODING_H_INCLUDES) $(VM_CORE_H_INCLUDES) {$(VPATH)}eval_intern.h \
   {$(VPATH)}util.h {$(VPATH)}debug.h

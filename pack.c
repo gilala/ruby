@@ -1970,7 +1970,7 @@ pack_unpack(VALUE str, VALUE fmt)
 	    break;
 
 	  case 'P':
-	    if (sizeof(char *) <= send - s) {
+	    if (sizeof(char *) <= (size_t)(send - s)) {
 		VALUE tmp = Qnil;
 		char *t;
 
@@ -2010,7 +2010,7 @@ pack_unpack(VALUE str, VALUE fmt)
 	    if (len > (long)((send - s) / sizeof(char *)))
 		len = (send - s) / sizeof(char *);
 	    while (len-- > 0) {
-		if (send - s < sizeof(char *))
+		if ((size_t)(send - s) < sizeof(char *))
 		    break;
 		else {
 		    VALUE tmp = Qnil;

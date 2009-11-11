@@ -221,6 +221,11 @@ void ruby_native_thread_lock_destroy(rb_thread_lock_t *lock);
 void ruby_native_thread_lock(rb_thread_lock_t *lock);
 void ruby_native_thread_unlock(rb_thread_lock_t *lock);
 void ruby_native_thread_yield(void);
+void ruby_native_cond_signal(pthread_cond_t *cond);
+void ruby_native_cond_broadcast(pthread_cond_t *cond);
+void ruby_native_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex);
+void ruby_native_cond_initialize(pthread_cond_t *cond);
+void ruby_native_cond_destroy(pthread_cond_t *cond);
 
 VALUE ruby_vm_get_argv(rb_vm_t *vm);
 const char *ruby_vm_get_inplace_mode(rb_vm_t *vm);
