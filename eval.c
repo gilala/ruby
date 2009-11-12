@@ -286,7 +286,8 @@ ruby_vm_run(rb_vm_t *vm)
 	ruby_vm_cleanup(vm, 0);
 	return status;
     }
-    return ruby_vm_exec_internal(vm, n);
+    status = ruby_vm_exec_internal(vm, n);
+    return ruby_vm_cleanup(vm, status);
 }
 
 /*

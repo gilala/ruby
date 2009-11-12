@@ -1,4 +1,6 @@
-Thu Nov 12 16:34:49 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+Thu Nov 12 16:35:42 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* eval.c (ruby_vm_run): cleanup needed.
 
 	* vm.c (thread_recycle_stack, rb_thread_recycle_stack_release):
 	  stack belongs to no object space.
