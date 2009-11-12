@@ -1,3 +1,33 @@
+Thu Nov 12 14:33:21 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* thread_win32.c (thread_errno): CreateThread does not set errno.
+
+	* thread.c (thread_create_core): moved failure handling from
+	  native_thread_core().
+
+	* thread_pthread.c (native_thread_create): constified.
+
+Thu Nov 12 10:08:56 2009  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* .document: remove documents not in rdoc format until
+	  rdoc supports non rdoc files. [ruby-core:26459]
+
+Thu Nov 12 06:42:38 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/tempfile.rb (Tempfile#initialize): option hash may not be
+	  given.  [ruby-core:26681]
+
+Thu Nov 12 01:29:15 2009  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* enumerator.c (yielder_yield_push): Yielder#<< should return self.
+	  [ruby-dev:39660]
+
+Wed Nov 11 19:17:35 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/tempfile.rb (Tempfile#initialize): merge mode option.
+
+	* lib/tmpdir.rb (Dir::Tmpname#create): splat options.
+
 Wed Nov 11 18:20:36 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* gc.c (rb_objspace_free): finalizer should have been done already.

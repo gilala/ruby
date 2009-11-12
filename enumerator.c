@@ -1009,6 +1009,13 @@ yielder_yield(VALUE obj, VALUE args)
     return rb_proc_call(ptr->proc, args);
 }
 
+/* :nodoc: */
+static VALUE yielder_yield_push(VALUE obj, VALUE args)
+{
+    yielder_yield(obj, args);
+    return obj;
+}
+
 static VALUE
 yielder_yield_i(VALUE obj, VALUE memo, int argc, VALUE *argv)
 {
@@ -1231,7 +1238,7 @@ InitVM_Enumerator(void)
     rb_define_alloc_func(rb_cYielder, yielder_allocate);
     rb_define_method(rb_cYielder, "initialize", yielder_initialize, 0);
     rb_define_method(rb_cYielder, "yield", yielder_yield, -2);
-    rb_define_method(rb_cYielder, "<<", yielder_yield, -2);
+    rb_define_method(rb_cYielder, "<<", yielder_yield_push, -2);
 
     id_rewind = rb_intern("rewind");
     id_each = rb_intern("each");

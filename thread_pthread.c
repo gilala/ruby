@@ -515,11 +515,7 @@ native_thread_create(rb_thread_t *th)
     else {
 	pthread_attr_t attr;
 	const size_t stack_size = RUBY_STACK_MIN;
-#if HAVE_SIGALTSTACK
-	const size_t space = 0;
-#else
 	const size_t space = RUBY_STACK_SPACE;
-#endif
 
 	th->machine_stack_maxsize = stack_size - space;
 #ifdef __ia64
@@ -545,11 +541,6 @@ native_thread_create(rb_thread_t *th)
 
 	if (!err) {
 	    pthread_cond_init(&th->native_thread_data.sleep_cond, 0);
-	}
-	else {
-	    st_delete_wrap(th->vm->living_threads, th->self);
-	    th->status = THREAD_KILLED;
-	    rb_raise(rb_eThreadError, "can't create Thread (%d)", err);
 	}
     }
     return err;

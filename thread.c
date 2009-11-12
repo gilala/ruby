@@ -535,6 +535,7 @@ static VALUE
 thread_create_core(VALUE thval, VALUE args, VALUE (*fn)(ANYARGS))
 {
     rb_thread_t *th;
+    int err;
 
     if (OBJ_FROZEN(GET_THREAD()->thgroup)) {
 	rb_raise(rb_eThreadError,
@@ -558,7 +559,12 @@ thread_create_core(VALUE thval, VALUE args, VALUE (*fn)(ANYARGS))
 #else
     th->cwd.path = rb_str_new_shared(GET_THREAD()->cwd.path);
 #endif
-    native_thread_create(th);
+    err = native_thread_create(th);
+    if (err) {
+	st_delete_wrap(th->vm->living_threads, th->self);
+	th->status = THREAD_KILLED;
+	rb_raise(rb_eThreadError, "can't create Thread (%d)", err);
+    }
     return thval;
 }
 
