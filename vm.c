@@ -1559,12 +1559,12 @@ thread_recycle_stack(size_t size)
 	return thread_recycle_stack_slot[--thread_recycle_stack_count];
     }
     else {
-	return ALLOC_N(VALUE, size);
+	return malloc(sizeof(VALUE) * size);
     }
 }
 
 #else
-#define thread_recycle_stack(size) ALLOC_N(VALUE, (size))
+#define thread_recycle_stack(size) malloc(sizeof(VALUE) * (size))
 #endif
 
 void
@@ -1576,7 +1576,7 @@ rb_thread_recycle_stack_release(VALUE *stack)
 	return;
     }
 #endif
-    ruby_xfree(stack);
+    free(stack);
 }
 
 #ifdef USE_THREAD_RECYCLE
