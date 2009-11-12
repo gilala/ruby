@@ -501,9 +501,6 @@ enum {
 			RUBY_STACK_SPACE_LIMIT : RUBY_STACK_MIN/5)
 };
 
-#define CHECK_ERR(expr) \
-    {int err = (expr); if (err) {rb_bug("err: %d - %s", err, #expr);}}
-
 static int
 native_thread_create(rb_thread_t *th)
 {
