@@ -33,12 +33,13 @@ main(int argc, char **argv)
     ruby_sysinit(&argc, &argv);
     {
 	ruby_vm_t *vm;
-	int ret;
+	int ret, signo = 0;
 
 	RUBY_INIT_STACK;
 	vm = ruby_vm_new(argc, argv);
-	ret = ruby_vm_run(vm);
+	ret = ruby_vm_run(vm, &signo);
 	ruby_vm_destruct(vm);
+	if (signo) ruby_default_signal(signo);
 	return ret;
     }
 }

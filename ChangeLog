@@ -1,4 +1,8 @@
-Fri Nov 13 09:58:31 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+Fri Nov 13 10:14:11 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* eval.c (ruby_vm_cleanup): not destruct vm, nor re-send signal.
+
+	* eval.c (ruby_cleanup): destruct current vm and re-send signal.
 
 	* parse.y (Init_sym): use separate object space.
 

@@ -20,16 +20,18 @@ typedef struct rb_vm_struct ruby_vm_t;
 
 /* core API */
 ruby_vm_t *ruby_vm_new(int argc, char *argv[]);
-int ruby_vm_run(ruby_vm_t *vm);
+int ruby_vm_run(ruby_vm_t *vm, int *signo);
 int ruby_vm_run_node(ruby_vm_t *vm, void *n);
 int ruby_vm_exec_node(ruby_vm_t *vm, void *n);
 int ruby_vm_start(ruby_vm_t *vm);
 int ruby_vm_join(ruby_vm_t *vm);
+int ruby_vm_cleanup(ruby_vm_t *vm, int ex, int *signo);
 int ruby_vm_destruct(ruby_vm_t *vm);
 void ruby_vm_die(ruby_vm_t *);
 
 /* initialize API */
 ruby_vm_t *ruby_init(void);
+int ruby_vm_init(ruby_vm_t *vm);
 int ruby_vm_init_add_argv(ruby_vm_t *vm, const char *arg);
 int ruby_vm_init_add_library(ruby_vm_t *vm, const char *lib);
 int ruby_vm_init_add_library_path(ruby_vm_t *vm, const char *path);
