@@ -1,3 +1,11 @@
+Fri Nov 13 19:56:16 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* mvm.c (vm_join): does nothing when vm has died.
+
+	* vm.c (rb_vm_free): notify to waiting vm.
+
+	* vm.c (vm_create): global_vm_lock is already locked.
+
 Fri Nov 13 16:28:22 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* thread.c (ruby_native_thread_create): start new thread with

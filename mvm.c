@@ -236,9 +236,10 @@ vmmgr_add(rb_vm_t *vm)
 static void
 vmmgr_del(rb_vm_t *vm)
 {
-    struct vm_list_struct *entry = vm_manager.list, *prev = 0;
+    struct vm_list_struct *entry, *prev = 0;
 
     MVM_CRITICAL(vm_manager.lock, {
+	entry = vm_manager.list;
 	while (entry && entry->vm != vm) {
 	    prev = entry;
 	    entry = entry->next;
@@ -280,6 +281,11 @@ vm_join(rb_vm_t *vm)
 
     if (!living_threads) return 0;
     MVM_CRITICAL(vm_manager.lock, do {
+	struct vm_list_struct *entry = vm_manager.list;
+	while (entry && entry->vm != vm) {
+	    entry = entry->next;
+	}
+	if (!entry) break;
 	ruby_native_cond_wait(&vm->global_vm_waiting, &vm_manager.lock);
     } while (vm->living_threads));
     return 0;
