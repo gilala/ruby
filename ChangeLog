@@ -1,4 +1,4 @@
-Sat Nov 14 03:43:11 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+Sat Nov 14 03:49:07 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* thread_pthread.c (native_thread_init_stack): fixed stack star
 	  address.
