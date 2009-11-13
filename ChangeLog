@@ -1,4 +1,6 @@
-Sat Nov 14 08:39:28 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+Sat Nov 14 08:40:32 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm.c (rb_vm_mark, vm_memsize): ignore other VM.
 
 	* vm.c (rb_vm_initialize): add last NULL.
 

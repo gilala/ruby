@@ -1440,11 +1440,11 @@ void
 rb_vm_mark(void *ptr)
 {
     int i;
+    rb_vm_t *vm = ptr;
 
     RUBY_MARK_ENTER("vm");
     RUBY_GC_INFO("-------------------------------------------------\n");
-    if (ptr) {
-	rb_vm_t *vm = ptr;
+    if (vm && vm == GET_VM()) {
 	if (vm->living_threads) {
 	    st_foreach(vm->living_threads, vm_mark_each_thread_func, 0);
 	}
@@ -1516,9 +1516,9 @@ rb_vm_free(void *ptr)
 static size_t
 vm_memsize(const void *ptr)
 {
-    if (ptr) {
-	const rb_vm_t *vmobj = ptr;
-	return sizeof(rb_vm_t) + st_memsize(vmobj->living_threads);
+    const rb_vm_t *vm = ptr;
+    if (vm && vm == GET_VM()) {
+	return sizeof(rb_vm_t) + st_memsize(vm->living_threads);
     }
     else {
 	return 0;
