@@ -1,3 +1,8 @@
+Sat Nov 14 03:43:11 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* thread_pthread.c (native_thread_init_stack): fixed stack star
+	  address.
+
 Fri Nov 13 19:56:16 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* mvm.c (vm_join): does nothing when vm has died.

@@ -333,7 +333,7 @@ native_thread_init_stack(rb_thread_t *th)
     STACK_GROW_DIR_DETECTION;
     if (err) return err;
     size -= sizeof(VALUE);
-    th->machine_stack_start = (VALUE *)((char *)addr - STACK_DIR_UPPER(0, size));
+    th->machine_stack_start = (VALUE *)((char *)addr + STACK_DIR_UPPER(0, size));
     th->machine_stack_maxsize = size;
 #else
     th->machine_stack_start = native_main_thread.stack_start;
