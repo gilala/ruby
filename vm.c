@@ -1739,6 +1739,11 @@ thread_alloc(VALUE klass)
     rb_thread_t *th;
     obj = TypedData_Make_Struct(klass, rb_thread_t, &thread_data_type, th);
 #endif
+
+#ifdef HAVE_FCHDIR
+    th->cwd.fd = -1;
+#endif
+
     return obj;
 }
 
@@ -1966,15 +1971,15 @@ rb_vm_initialize(int argc, VALUE *argv, VALUE self)
 	--argc;
 	vm_parse_opt(vm, opt);
     }
-    if (argc > 0) {
+    if ((vm->argc = argc) > 0) {
 	int i;
 	char **args, *argp;
 	VALUE argsval = 0;
-	size_t len = rb_long2int(argc * sizeof(char *)), total = 0;
+	size_t len = rb_long2int(argc * sizeof(char *));
 	for (i = 0; i < argc; ++i) {
 	    StringValue(argv[i]);
 	    argv[i] = rb_str_new_frozen(argv[i]);
-	    rb_long2int(total += RSTRING_LEN(argv[i]) + 1);
+	    rb_long2int(len += RSTRING_LEN(argv[i]) + 1);
 	}
 	args = rb_objspace_xmalloc(vm->objspace, len);
 	argsval = rb_str_wrap((char *)args, len);
@@ -1989,6 +1994,45 @@ rb_vm_initialize(int argc, VALUE *argv, VALUE self)
 	}
     }
     return self;
+}
+
+static rb_thread_t *vm_make_main_thread(rb_vm_t *vm);
+
+static VALUE
+vm_create(void *arg)
+{
+    rb_vm_t *vm = arg;
+
+    ruby_native_thread_lock(&vm->global_vm_lock);
+    return (VALUE)ruby_vm_run(vm, 0);
+}
+
+static VALUE
+rb_vm_start(VALUE self)
+{
+    rb_vm_t *vm;
+    rb_thread_t *th;
+
+    GetVMPtr(self, vm);
+    if (vm->main_thread) rb_raise(rb_eArgError, "alread started");
+    th = vm_make_main_thread(vm);
+    th->first_func = vm_create;
+    th->first_proc = Qfalse;
+    th->first_args = (VALUE)vm;
+    ruby_native_thread_create(th);
+    ruby_native_thread_unlock(&vm->global_vm_lock);
+    return self;
+}
+
+static VALUE
+rb_vm_join(VALUE self)
+{
+    rb_vm_t *vm;
+    int status;
+
+    GetVMPtr(self, vm);
+    status = ruby_vm_join(vm);
+    return INT2NUM(status);
 }
 
 void
@@ -2007,6 +2051,8 @@ InitVM_VM(void)
     rb_cRubyVM = rb_define_class("RubyVM", rb_cObject);
     rb_define_alloc_func(rb_cRubyVM, rb_vm_s_alloc);
     rb_define_method(rb_cRubyVM, "initialize", rb_vm_initialize, -1);
+    rb_define_method(rb_cRubyVM, "start", rb_vm_start, 0);
+    rb_define_method(rb_cRubyVM, "join", rb_vm_join, 0);
 
     /* ::VM::FrozenCore */
     fcore = rb_class_new(rb_cBasicObject);
@@ -2102,12 +2148,16 @@ InitVM_VM(void)
 
 	rb_gc_register_mark_object(iseqval);
 #ifdef HAVE_FCHDIR
+	if (th->cwd.fd == -1) {
 # ifdef AT_FDCWD
-	th->cwd.fd = AT_FDCWD;
+	    th->cwd.fd = AT_FDCWD;
 # endif
-	th->cwd.fd = ruby_dirfd(".");
+	    th->cwd.fd = ruby_dirfd(".");
+	}
 #else
-	th->cwd.path = ruby_getcwd();
+	if (!th->cwd.path) {
+	    th->cwd.path = rb_str_new_cstr(ruby_getcwd());
+	}
 #endif
 	GetISeqPtr(iseqval, iseq);
 	th->cfp->iseq = iseq;
@@ -2143,16 +2193,25 @@ ruby_make_bare_vm(void)
 
     vm_init2(vm);
 
-    th = rb_objspace_xmalloc(vm->objspace, sizeof(*th));
-    MEMZERO(th, rb_thread_t, 1);
-    th->vm = vm;
+    th = vm_make_main_thread(vm);
     rb_thread_set_current_raw(th);
-    vm->main_thread = th;
-
-    th_init(th, 0);
     ruby_thread_init_stack(th);
 
     return vm;
+}
+
+static rb_thread_t *
+vm_make_main_thread(rb_vm_t *vm)
+{
+    rb_thread_t *th;
+
+    th = rb_objspace_xmalloc(vm->objspace, sizeof(*th));
+    MEMZERO(th, rb_thread_t, 1);
+    th->vm = vm;
+    vm->main_thread = th;
+    th_init(th, 0);
+
+    return th;
 }
 
 rb_vm_t *

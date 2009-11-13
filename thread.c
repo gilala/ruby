@@ -417,6 +417,21 @@ ruby_thread_init_stack(rb_thread_t *th)
     native_thread_init_stack(th);
 }
 
+int
+ruby_native_thread_create(rb_thread_t *th)
+{
+    native_mutex_initialize(&th->interrupt_lock);
+    th->priority = GET_THREAD()->priority;
+    th->thgroup = GET_THREAD()->thgroup;
+
+#ifdef HAVE_FCHDIR
+    th->cwd.fd = ruby_dirfd(".");
+#else
+    th->cwd.path = rb_str_new_shared(GET_THREAD()->cwd.path);
+#endif
+    return native_thread_create(th);
+}
+
 static int
 thread_start_func_2(rb_thread_t *th, VALUE *stack_start, VALUE *register_stack_start)
 {
@@ -548,18 +563,9 @@ thread_create_core(VALUE thval, VALUE args, VALUE (*fn)(ANYARGS))
     th->first_proc = fn ? Qfalse : rb_block_proc();
     th->first_args = args; /* GC: shouldn't put before above line */
 
-    th->priority = GET_THREAD()->priority;
-    th->thgroup = GET_THREAD()->thgroup;
-
-    native_mutex_initialize(&th->interrupt_lock);
     /* kick thread */
     st_insert(th->vm->living_threads, thval, (st_data_t) th->thread_id);
-#ifdef HAVE_FCHDIR
-    th->cwd.fd = ruby_dirfd(".");
-#else
-    th->cwd.path = rb_str_new_shared(GET_THREAD()->cwd.path);
-#endif
-    err = native_thread_create(th);
+    err = ruby_native_thread_create(th);
     if (err) {
 	st_delete_wrap(th->vm->living_threads, th->self);
 	th->status = THREAD_KILLED;

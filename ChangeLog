@@ -1,3 +1,13 @@
+Fri Nov 13 16:28:22 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* thread.c (ruby_native_thread_create): start new thread with
+	  rb_thread_t.  split from thread_create_core.
+
+	* vm.c (rb_vm_start, rb_vm_join): new methods, #start and #join.
+
+	* vm.c (vm_make_main_thread): make bare main thread.  split from
+	  ruby_make_bare_vm.
+
 Fri Nov 13 16:22:00 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* thread.c (thread_start_func_2): see first_func, not first_proc,
