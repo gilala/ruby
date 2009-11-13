@@ -80,4 +80,8 @@ VALUE rb_objspace_gc_disable(struct rb_objspace *objspace);
 VALUE rb_objspace_gc_enable(struct rb_objspace *objspace);
 VALUE rb_newobj_from_heap(struct rb_objspace *objspace);
 
+struct st_table;
+void rb_objspace_mark_tbl(struct rb_objspace *objspace, struct st_table *tbl);
+void rb_objspace_mark_locations(struct rb_objspace *objspace, VALUE *start, VALUE *end);
+
 #endif /* RUBY_GC_H */

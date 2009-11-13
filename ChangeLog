@@ -1,3 +1,7 @@
+Fri Nov 13 09:58:31 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* parse.y (Init_sym): use separate object space.
+
 Thu Nov 12 16:35:42 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* eval.c (ruby_vm_run): cleanup needed.

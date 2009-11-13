@@ -9324,7 +9324,8 @@ Init_sym(void)
 {
     ruby_native_thread_lock_initialize(&global_symbols.lock);
     ruby_native_thread_lock(&global_symbols.lock);
-    global_symbols.objspace = GET_VM()->objspace;
+    global_symbols.objspace = rb_objspace_alloc();
+    rb_objspace_gc_disable(global_symbols.objspace);
     global_symbols.sym_id = st_init_table_with_size(&symhash, 1000);
     global_symbols.id_str = st_init_numtable_with_size(1000);
     Init_id();
@@ -9347,9 +9348,9 @@ void
 rb_gc_mark_symbols(void)
 {
 #if 0
-    rb_mark_tbl(global_symbols.id_str);
-    rb_gc_mark_locations(global_symbols.op_sym,
-			 global_symbols.op_sym + tLAST_TOKEN);
+    rb_objspace_mark_tbl(global_symbols.objspace, global_symbols.id_str);
+    rb_objspace_mark_locations(global_symbols.objspace, global_symbols.op_sym,
+			       global_symbols.op_sym + tLAST_TOKEN);
 #endif
 }
 #endif /* !RIPPER */
