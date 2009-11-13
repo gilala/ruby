@@ -1979,7 +1979,7 @@ rb_vm_initialize(int argc, VALUE *argv, VALUE self)
 	int i;
 	char **args, *argp;
 	VALUE argsval = 0;
-	size_t len = rb_long2int(argc * sizeof(char *));
+	size_t len = rb_long2int((argc + 1) * sizeof(char *));
 	for (i = 0; i < argc; ++i) {
 	    StringValue(argv[i]);
 	    argv[i] = rb_str_new_frozen(argv[i]);
@@ -1997,6 +1997,7 @@ rb_vm_initialize(int argc, VALUE *argv, VALUE self)
 	    argp += n;
 	    *argp++ = '\0';
 	}
+	args[argc] = 0;
     }
     return self;
 }
