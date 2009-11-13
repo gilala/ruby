@@ -216,7 +216,7 @@ Init_vmmgr(void)
 }
 
 int
-rb_vm_alone(void)
+ruby_vm_alone(void)
 {
     int alone = 0;
     MVM_CRITICAL(vm_manager.lock, {
@@ -227,7 +227,7 @@ rb_vm_alone(void)
 }
 
 int
-rb_vm_main_p(rb_vm_t *vm)
+ruby_vm_main_p(rb_vm_t *vm)
 {
     return vm == vm_manager.main;
 }
