@@ -682,7 +682,7 @@ rb_objspace_xrealloc(rb_objspace_t *objspace, void *ptr, size_t size)
     if ((ssize_t)size < 0) {
 	negative_size_allocation_error("negative re-allocation size");
     }
-    if (!ptr) return ruby_xmalloc(size);
+    if (!ptr) return rb_objspace_xmalloc(objspace, size);
     if (size == 0) {
 	rb_objspace_xfree(objspace, ptr);
 	return 0;
