@@ -27,7 +27,9 @@ int ruby_vm_start(ruby_vm_t *vm);
 int ruby_vm_join(ruby_vm_t *vm);
 int ruby_vm_cleanup(ruby_vm_t *vm, int ex, int *signo);
 int ruby_vm_destruct(ruby_vm_t *vm);
-void ruby_vm_die(ruby_vm_t *);
+int ruby_vm_alone(void);
+int ruby_vm_main_p(ruby_vm_t *vm);
+void ruby_vm_die(ruby_vm_t *vm);
 
 /* initialize API */
 ruby_vm_t *ruby_init(void);

@@ -1,4 +1,8 @@
-Sat Nov 14 08:40:32 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+Sat Nov 14 08:45:47 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* mvm.c (rb_vm_alone, rb_vm_main_p): new functions.
+
+	* thread.c (thread_start_func_2): ignore signals on sub VMs.
 
 	* vm.c (rb_vm_mark, vm_memsize): ignore other VM.
 

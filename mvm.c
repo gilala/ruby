@@ -215,6 +215,23 @@ Init_vmmgr(void)
     specific_key.last = (ruby_builtin_object_count + 8) & ~7;
 }
 
+int
+rb_vm_alone(void)
+{
+    int alone = 0;
+    MVM_CRITICAL(vm_manager.lock, {
+	struct vm_list_struct *entry = vm_manager.list;
+	if (entry && !entry->next) alone = 1;
+    });
+    return alone;
+}
+
+int
+rb_vm_main_p(rb_vm_t *vm)
+{
+    return vm == vm_manager.main;
+}
+
 static void
 vmmgr_add(rb_vm_t *vm)
 {
@@ -223,11 +240,11 @@ vmmgr_add(rb_vm_t *vm)
 
     entry->vm = vm;
 
-    if (vm_manager.main == 0) {
-	vm_manager.main = vm;
-    }
-
     MVM_CRITICAL(vm_manager.lock, {
+	if (vm_manager.main == 0) {
+	    vm_manager.main = vm;
+	}
+
 	entry->next = vm_manager.list;
 	vm_manager.list = entry;
     });
