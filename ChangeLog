@@ -1,3 +1,7 @@
+Sun Nov 15 07:01:13 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* marshal.c (marshal_dump): needs to set compat_allocator_tbl.
+
 Sat Nov 14 08:48:38 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* mvm.c (ruby_vm_alone, ruby_vm_main_p): new functions.

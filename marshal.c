@@ -923,6 +923,7 @@ marshal_dump(int argc, VALUE *argv)
     arg->data    = st_init_numtable();
     arg->taint   = FALSE;
     arg->untrust = FALSE;
+    arg->compat_allocator_tbl = DATA_PTR(rb_compat_allocator_tbl);
     arg->compat_tbl = st_init_numtable();
     arg->encodings = 0;
     arg->str = rb_str_tmp_new(0);
