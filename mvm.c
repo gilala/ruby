@@ -27,8 +27,7 @@ ruby_vm_new(int argc, char *argv[])
 {
     rb_vm_t *vm = ruby_init();
 
-    if (!vm) return 0;
-    if (!(vm = ruby_make_bare_vm())) return 0;
+    if (!vm && !(vm = ruby_make_bare_vm())) return 0;
     vm->argc = argc;
     vm->argv = argv;
     vmmgr_add(vm);

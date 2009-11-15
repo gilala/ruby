@@ -541,11 +541,13 @@ thread_start_func_2(rb_thread_t *th, VALUE *stack_start, VALUE *register_stack_s
     if (th->vm->main_thread == th) {
 	int signo = 0;
 	ruby_vm_cleanup(th->vm, state, &signo);
-	if (signo && !ruby_vm_alone()) signo = 0;
+	if (signo && !ruby_vm_main_p(th->vm)) signo = 0;
 	ruby_vm_destruct(th->vm);
 	if (signo) ruby_default_signal(signo);
     }
-    native_mutex_unlock(&th->vm->global_vm_lock);
+    else {
+	native_mutex_unlock(&th->vm->global_vm_lock);
+    }
 
     return 0;
 }
