@@ -600,7 +600,7 @@ rb_thread_create_timer_thread(void)
 static int
 native_stop_timer_thread(void)
 {
-    int stopped = --system_working <= 0;
+    int stopped = --system_working == 0;
     if (stopped) {
 	SetEvent(timer_thread_lock);
 	native_thread_join(timer_thread_id);

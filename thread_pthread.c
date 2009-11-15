@@ -844,7 +844,7 @@ native_stop_timer_thread(void)
 {
     int stopped;
     native_mutex_lock(&timer_thread_lock);
-    stopped = --system_working <= 0;
+    stopped = --system_working == 0;
     if (stopped) {
 	native_cond_signal(&timer_thread_cond);
     }
