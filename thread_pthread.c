@@ -116,9 +116,12 @@ native_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
 }
 
 int
-native_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, struct timespec *ts)
+native_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timeval *tv)
 {
-    return pthread_cond_timedwait(cond, mutex, ts);
+    struct timespec ts;
+    ts.tv_sec = tv->tv_sec;
+    ts.tv_nsec = tv->tv_usec * 1000;
+    return pthread_cond_timedwait(cond, mutex, &ts) == ETIMEDOUT;
 }
 
 
@@ -782,7 +785,7 @@ thread_timer(void *dummy)
 
     native_mutex_lock(&timer_thread_lock);
     native_cond_broadcast(&timer_thread_cond);
-#define WAIT_FOR_10MS() native_cond_timedwait(&timer_thread_cond, &timer_thread_lock, get_ts(&ts, PER_NANO/100))
+#define WAIT_FOR_10MS() pthread_cond_timedwait(&timer_thread_cond, &timer_thread_lock, get_ts(&ts, PER_NANO/100))
     while (system_working > 0) {
 	int err = WAIT_FOR_10MS();
 	if (err == ETIMEDOUT);

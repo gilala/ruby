@@ -21,15 +21,15 @@
 
 static volatile DWORD ruby_native_thread_key = TLS_OUT_OF_INDEXES;
 
-static int native_mutex_lock(rb_thread_lock_t *);
-static int native_mutex_unlock(rb_thread_lock_t *);
-static int native_mutex_trylock(rb_thread_lock_t *);
+int native_mutex_lock(rb_thread_lock_t *);
+int native_mutex_unlock(rb_thread_lock_t *);
+int native_mutex_trylock(rb_thread_lock_t *);
 
-static void native_cond_signal(rb_thread_cond_t *cond);
-static void native_cond_broadcast(rb_thread_cond_t *cond);
-static void native_cond_wait(rb_thread_cond_t *cond, rb_thread_lock_t *mutex);
-static void native_cond_initialize(rb_thread_cond_t *cond);
-static void native_cond_destroy(rb_thread_cond_t *cond);
+void native_cond_signal(rb_thread_cond_t *cond);
+void native_cond_broadcast(rb_thread_cond_t *cond);
+void native_cond_wait(rb_thread_cond_t *cond, rb_thread_lock_t *mutex);
+void native_cond_initialize(rb_thread_cond_t *cond);
+void native_cond_destroy(rb_thread_cond_t *cond);
 
 rb_thread_t *
 ruby_thread_from_native(void)
@@ -255,8 +255,8 @@ native_sleep(rb_thread_t *th, struct timeval *tv)
     GVL_UNLOCK_END();
 }
 
-static int
-native_mutex_lock(rb_thread_lock_t *lock)
+int
+ruby_native_mutex_lock(rb_thread_lock_t *lock)
 {
 #if USE_WIN32_MUTEX
     DWORD result;
@@ -292,13 +292,7 @@ native_mutex_lock(rb_thread_lock_t *lock)
 }
 
 int
-ruby_native_thread_lock(rb_thread_lock_t *lock)
-{
-    return native_mutex_lock(lock);
-}
-
-static int
-native_mutex_unlock(rb_thread_lock_t *lock)
+ruby_native_thread_unlock(rb_thread_lock_t *lock)
 {
 #if USE_WIN32_MUTEX
     thread_debug("release mutex: %p\n", *lock);
@@ -310,13 +304,7 @@ native_mutex_unlock(rb_thread_lock_t *lock)
 }
 
 int
-ruby_native_thread_unlock(rb_thread_lock_t *lock)
-{
-    return native_mutex_unlock(lock);
-}
-
-static int
-native_mutex_trylock(rb_thread_lock_t *lock)
+ruby_native_mutex_trylock(rb_thread_lock_t *lock)
 {
 #if USE_WIN32_MUTEX
     int result;
@@ -369,8 +357,8 @@ struct rb_thread_cond_struct {
     struct cond_event_entry *last;
 };
 
-static void
-native_cond_signal(rb_thread_cond_t *cond)
+void
+ruby_native_cond_signal(rb_thread_cond_t *cond)
 {
     /* cond is guarded by mutex */
     struct cond_event_entry *e = cond->next;
@@ -384,8 +372,8 @@ native_cond_signal(rb_thread_cond_t *cond)
     }
 }
 
-static void
-native_cond_broadcast(rb_thread_cond_t *cond)
+void
+ruby_native_cond_broadcast(rb_thread_cond_t *cond)
 {
     /* cond is guarded by mutex */
     struct cond_event_entry *e = cond->next;
@@ -397,8 +385,8 @@ native_cond_broadcast(rb_thread_cond_t *cond)
     }
 }
 
-static void
-native_cond_wait(rb_thread_cond_t *cond, rb_thread_lock_t *mutex)
+static int
+native_cond_wait(rb_thread_cond_t *cond, rb_thread_lock_t *mutex, ULONG timeout)
 {
     DWORD r;
     struct cond_event_entry entry;
@@ -418,25 +406,42 @@ native_cond_wait(rb_thread_cond_t *cond, rb_thread_lock_t *mutex)
 
     native_mutex_unlock(mutex);
     {
-	r = WaitForSingleObject(entry.event, INFINITE);
-	if (r != WAIT_OBJECT_0) {
+	r = WaitForSingleObject(entry.event, timeout);
+	if (r != WAIT_OBJECT_0 && r != WAIT_TIMEOUT) {
 	    rb_bug("native_cond_wait: WaitForSingleObject returns %lu", r);
 	}
     }
     native_mutex_lock(mutex);
 
     w32_close_handle(entry.event);
+    return r;
 }
 
-static void
-native_cond_initialize(rb_thread_cond_t *cond)
+void
+ruby_native_cond_wait(rb_thread_cond_t *cond, rb_thread_lock_t *mutex)
+{
+    native_cond_wait(cond, mutex, INFINITE);
+}
+
+int
+ruby_native_cond_timedwait(rb_thread_cond_t *cond, rb_thread_lock_t *mutex, const struct timeval *tv)
+{
+    ULONG timeout = INFINITE;
+    if (tv) {
+	timeout = tv->tv_sec * 1000000 + (tv->tv_nsec + 500) / 1000;
+    }
+    return native_cond_wait(cond, mutex, timeout) == WAIT_TIMEOUT;
+}
+
+void
+ruby_native_cond_initialize(rb_thread_cond_t *cond)
 {
     cond->next = 0;
     cond->last = 0;
 }
 
-static void
-native_cond_destroy(rb_thread_cond_t *cond)
+void
+ruby_native_cond_destroy(rb_thread_cond_t *cond)
 {
     /* */
 }
