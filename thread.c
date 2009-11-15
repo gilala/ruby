@@ -875,6 +875,9 @@ getclockofday(struct timeval *tp)
     }
 }
 
+static void add_tv(struct timeval *to, const struct timeval *from);
+static int subtract_tv(struct timeval *to, const struct timeval *from);
+
 static void
 sleep_timeval(rb_thread_t *th, struct timeval tv)
 {
@@ -882,27 +885,18 @@ sleep_timeval(rb_thread_t *th, struct timeval tv)
     enum rb_thread_status prev_status = th->status;
 
     getclockofday(&to);
-    to.tv_sec += tv.tv_sec;
-    if ((to.tv_usec += tv.tv_usec) >= 1000000) {
-	to.tv_sec++;
-	to.tv_usec -= 1000000;
-    }
+    add_tv(&to, &tv);
 
     th->status = THREAD_STOPPED;
     do {
 	native_sleep(th, &tv);
 	RUBY_VM_CHECK_INTS();
+	tv = to;
 	getclockofday(&tvn);
-	if (to.tv_sec < tvn.tv_sec) break;
-	if (to.tv_sec == tvn.tv_sec && to.tv_usec <= tvn.tv_usec) break;
+	if (!subtract_tv(&tv, &tvn)) break;
 	thread_debug("sleep_timeval: %ld.%.6ld > %ld.%.6ld\n",
 		     (long)to.tv_sec, (long)to.tv_usec,
 		     (long)tvn.tv_sec, (long)tvn.tv_usec);
-	tv.tv_sec = to.tv_sec - tvn.tv_sec;
-	if ((tv.tv_usec = to.tv_usec - tvn.tv_usec) < 0) {
-	    --tv.tv_sec;
-	    tv.tv_usec += 1000000;
-	}
     } while (th->status == THREAD_STOPPED);
     th->status = prev_status;
 }
@@ -1136,6 +1130,7 @@ rb_thread_blocking_region(
 void
 rb_queue_initialize(rb_queue_t *que)
 {
+    native_cond_initialize(&que->wait);
     ruby_native_thread_lock_initialize(&que->lock);
     que->head = 0;
     que->tail = &que->head;
@@ -1154,6 +1149,7 @@ rb_queue_destroy(rb_queue_t *que)
     que->tail = 0;
     ruby_native_thread_unlock(&que->lock);
     native_mutex_destroy(&que->lock);
+    native_cond_destroy(&que->wait);
 }
 
 int
@@ -1166,8 +1162,45 @@ rb_queue_push(rb_queue_t *que, void *value)
     ruby_native_thread_lock(&que->lock);
     *que->tail = e;
     que->tail = &e->next;
+    ruby_native_cond_signal(&que->wait);
     ruby_native_thread_unlock(&que->lock);
     return Qtrue;
+}
+
+#define QUEUE_SHIFT(e, que) (	       \
+	(e = que->head) != 0 &&	       \
+	((que->head = e->next) != 0 || \
+	 (que->tail = &que->head, 1)))
+
+int
+rb_queue_shift_wait(rb_queue_t *que, void **value, const struct timeval *tv)
+{
+    rb_queue_element_t *e;
+    struct timeval to, td, tvn;
+
+    if (tv) {
+	getclockofday(&to);
+	add_tv(&to, tv);
+    }
+    ruby_native_thread_lock(&que->lock);
+    while (!QUEUE_SHIFT(e, que) &&
+	   native_cond_timedwait(&que->wait, &que->lock, tv) == ETIMEDOUT) {
+	if (tv) {
+	    if (QUEUE_SHIFT(e, que)) break;
+	    td = to;
+	    getclockofday(&tvn);
+	    if (!subtract_tv(&td, &tvn)) break;
+	    tv = &td;
+	}
+    }
+    ruby_native_thread_unlock(&que->lock);
+    if (!e) {
+	errno = ETIMEDOUT;
+	return FALSE;
+    }
+    *value = e->value;
+    free(e);
+    return TRUE;
 }
 
 int
@@ -2478,6 +2511,7 @@ cmp_tv(const struct timeval *a, const struct timeval *b)
     long d = (a->tv_sec - b->tv_sec);
     return (d != 0) ? d : (a->tv_usec - b->tv_usec);
 }
+#endif
 
 static int
 subtract_tv(struct timeval *rest, const struct timeval *wait)
@@ -2493,7 +2527,16 @@ subtract_tv(struct timeval *rest, const struct timeval *wait)
     rest->tv_usec -= wait->tv_usec;
     return 1;
 }
-#endif
+
+static void
+add_tv(struct timeval *to, const struct timeval *ta)
+{
+    to->tv_sec += ta->tv_sec;
+    if ((to->tv_usec += ta->tv_usec) >= 1000000) {
+	to->tv_sec++;
+	to->tv_usec -= 1000000;
+    }
+}
 
 static int
 do_select(int n, fd_set *read, fd_set *write, fd_set *except,

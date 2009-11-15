@@ -1,3 +1,13 @@
+Mon Nov 16 01:36:50 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* thread.c (rb_queue_shift_wait): added.
+
+	* vm.c (rb_vm_send, rb_vm_recv): new methods.
+
+	* vm_core.h (rb_queue_t): added condition variable.
+
+	* vm_core.h (rb_vm_t): moved message queue from rb_thread_t.
+
 Mon Nov 16 01:14:02 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* vm.c (rb_vm_current): new method RubyVM.current.

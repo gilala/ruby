@@ -264,6 +264,17 @@ struct rb_objspace;
 void rb_objspace_free(struct rb_objspace *);
 #endif
 
+typedef struct rb_queue_element {
+    struct rb_queue_element *next;
+    void *value;
+} rb_queue_element_t;
+
+typedef struct rb_queue {
+    rb_thread_lock_t lock;
+    rb_thread_cond_t wait;
+    rb_queue_element_t *head, **tail;
+} rb_queue_t;
+
 typedef struct rb_vm_struct {
     VALUE self;
 
@@ -309,6 +320,10 @@ typedef struct rb_vm_struct {
 	VALUE cmd;
 	int safe;
     } trap_list[RUBY_NSIG];
+
+    struct {
+	rb_queue_t message;
+    } queue;
 
     /* hook */
     rb_event_hook_t *event_hooks;
@@ -396,20 +411,11 @@ struct rb_unblock_callback {
 
 struct rb_mutex_struct;
 
-typedef struct rb_queue_element {
-    struct rb_queue_element *next;
-    void *value;
-} rb_queue_element_t;
-
-typedef struct rb_queue {
-    rb_thread_lock_t lock;
-    rb_queue_element_t *head, **tail;
-} rb_queue_t;
-
 void rb_queue_initialize(rb_queue_t *);
 void rb_queue_destroy(rb_queue_t *);
 int rb_queue_push(rb_queue_t *, void *);
 int rb_queue_shift(rb_queue_t *, void **);
+int rb_queue_shift_wait(rb_queue_t *, void **, const struct timeval *);
 int rb_queue_empty_p(const rb_queue_t *);
 
 typedef struct rb_thread_struct
@@ -457,7 +463,7 @@ typedef struct rb_thread_struct
     VALUE thrown_errinfo;
 
     struct {
-	rb_queue_t signal, message;
+	rb_queue_t signal;
     } queue;
 
     int interrupt_flag;

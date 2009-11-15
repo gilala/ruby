@@ -1503,6 +1503,7 @@ rb_vm_free(void *ptr)
 	ruby_native_thread_lock_destroy(&vm->global_vm_lock);
 	ruby_native_cond_signal(&vm->global_vm_waiting);
 	ruby_native_cond_destroy(&vm->global_vm_waiting);
+	rb_queue_destroy(&vm->queue.message);
 #if defined(ENABLE_VM_OBJSPACE) && ENABLE_VM_OBJSPACE
 	if (objspace) {
 	    rb_objspace_free(objspace);
@@ -1537,6 +1538,7 @@ vm_init2(rb_vm_t *vm)
     vm->argc = -1;
     ruby_native_thread_lock_initialize(&vm->global_vm_lock);
     ruby_native_cond_initialize(&vm->global_vm_waiting);
+    rb_queue_initialize(&vm->queue.message);
     vm->objspace = rb_objspace_alloc();
     vm->src_encoding_index = -1;
     vm->global_state_version = 1;
@@ -1688,7 +1690,6 @@ thread_free(void *ptr)
 	}
 #endif
 
-	rb_queue_destroy(&th->queue.message);
 	rb_queue_destroy(&th->queue.signal);
 
 	if (th->vm && th->vm->main_thread == th) {
@@ -1756,7 +1757,6 @@ th_init(rb_thread_t *th, VALUE self)
     th->self = self;
 
     rb_queue_initialize(&th->queue.signal);
-    rb_queue_initialize(&th->queue.message);
 
     /* allocate thread stack */
     th->stack_size = RUBY_VM_THREAD_STACK_SIZE;
@@ -2061,6 +2061,48 @@ rb_vm_join(VALUE self)
     return INT2NUM(status);
 }
 
+VALUE
+rb_vm_send(VALUE self, VALUE val)
+{
+    rb_vm_t *vm;
+
+    GetVMPtr(self, vm);
+    if (!rb_special_const_p(val) && vm->objspace != GET_VM()->objspace) {
+	rb_raise(rb_eTypeError, "expected special constants");
+    }
+    if (!rb_queue_push(&vm->queue.message, (void *)val))
+	rb_sys_fail(0);
+    return (VALUE)val;
+}
+
+VALUE
+rb_vm_recv(VALUE self, const struct timeval *tv)
+{
+    rb_vm_t *vm;
+    void *val;
+
+    GetVMPtr(self, vm);
+    if (!rb_queue_shift_wait(&vm->queue.message, &val, tv))
+	rb_sys_fail(0);
+    if (!rb_special_const_p((VALUE)val)) {
+	rb_raise(rb_eTypeError, "expected special constants");
+    }
+    return (VALUE)val;
+}
+
+struct timeval rb_time_interval(VALUE);
+
+static VALUE
+rb_vm_recv_m(int argc, VALUE *argv, VALUE self)
+{
+    struct timeval timeout = {0, 0}, *t = 0;
+    if (rb_scan_args(argc, argv, "01", 0)) {
+	timeout = rb_time_interval(argv[0]);
+	t = &timeout;
+    }
+    return rb_vm_recv(self, t);
+}
+
 void
 Init_VM(void)
 {
@@ -2079,6 +2121,8 @@ InitVM_VM(void)
     rb_define_method(rb_cRubyVM, "initialize", rb_vm_initialize, -1);
     rb_define_method(rb_cRubyVM, "to_s", rb_vm_to_s, 0);
     rb_define_method(rb_cRubyVM, "start", rb_vm_start, 0);
+    rb_define_method(rb_cRubyVM, "send", rb_vm_send, 1);
+    rb_define_method(rb_cRubyVM, "recv", rb_vm_recv_m, -1);
     rb_define_method(rb_cRubyVM, "join", rb_vm_join, 0);
     rb_define_singleton_method(rb_cRubyVM, "current", rb_vm_current, 0);
 
