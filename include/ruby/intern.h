@@ -401,11 +401,6 @@ int rb_env_path_tainted(void);
 VALUE rb_env_clear(void);
 /* io.c */
 #define rb_defout rb_stdout
-RUBY_EXTERN VALUE rb_fs;
-RUBY_EXTERN VALUE rb_output_fs;
-RUBY_EXTERN VALUE rb_rs;
-RUBY_EXTERN VALUE rb_default_rs;
-RUBY_EXTERN VALUE rb_output_rs;
 VALUE rb_io_write(VALUE, VALUE);
 VALUE rb_io_gets(VALUE);
 VALUE rb_io_getbyte(VALUE);

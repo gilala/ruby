@@ -187,6 +187,17 @@ enum ruby_public_object_vmkey {
     rb_vmkey_progname,
 #define ruby_progname (*rb_vm_specific_ptr(rb_vmkey_progname))
 
+    rb_vmkey_fs,
+#define rb_fs (*rb_vm_specific_ptr(rb_vmkey_fs))
+    rb_vmkey_output_fs,
+#define rb_output_fs (*rb_vm_specific_ptr(rb_vmkey_output_fs))
+    rb_vmkey_rs,
+#define rb_rs (*rb_vm_specific_ptr(rb_vmkey_rs))
+    rb_vmkey_output_rs,
+#define rb_output_rs (*rb_vm_specific_ptr(rb_vmkey_output_rs))
+    rb_vmkey_default_rs,
+#define rb_default_rs (*rb_vm_specific_ptr(rb_vmkey_default_rs))
+
     ruby_public_object_count
 };
 

@@ -1512,8 +1512,6 @@ rb_ary_resurrect(VALUE ary)
     return rb_ary_new4(RARRAY_LEN(ary), RARRAY_PTR(ary));
 }
 
-extern VALUE rb_output_fs;
-
 static void ary_join_1(VALUE obj, VALUE ary, VALUE sep, long i, VALUE result);
 
 static VALUE

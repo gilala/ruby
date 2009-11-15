@@ -132,8 +132,6 @@ single_byte_optimizable(VALUE str)
     return 0;
 }
 
-VALUE rb_fs;
-
 static inline const char *
 search_nonascii(const char *p, const char *e)
 {

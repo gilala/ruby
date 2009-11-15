@@ -1,4 +1,8 @@
-Mon Nov 16 01:02:45 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+Mon Nov 16 01:04:25 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby/public_object.h (ruby_public_object_vmkey): moved
+	  rb_fs, rb_output_fs, rb_rs, rb_default_rs, rb_output_rs to VM
+	  specific.
 
 	* common.mk (RUBY_H_INCLUDES): include private_object.h.
 

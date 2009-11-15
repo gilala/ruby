@@ -112,13 +112,8 @@ extern void InitVM_File(void);
 
 #define numberof(array) (int)(sizeof(array) / sizeof((array)[0]))
 
-VALUE rb_deferr;		/* rescue VIM plugin */
-static VALUE orig_stdout, orig_stderr;
-
-VALUE rb_output_fs;
-VALUE rb_rs;
-VALUE rb_output_rs;
-VALUE rb_default_rs;
+#define orig_stdout (*rb_vm_specific_ptr(rb_vmkey_orig_stdout))
+#define orig_stderr (*rb_vm_specific_ptr(rb_vmkey_orig_stderr))
 
 static ID id_write, id_read, id_getc, id_flush, id_readpartial;
 static VALUE sym_mode, sym_perm, sym_extenc, sym_intenc, sym_encoding, sym_open_args;
@@ -9985,7 +9980,7 @@ InitVM_IO(void)
     rb_stderr = prep_stdio(stderr, FMODE_WRITABLE|FMODE_SYNC, rb_cIO, "<STDERR>");
     rb_define_hooked_variable("$>", &rb_stdout, 0, stdout_setter);
     orig_stdout = rb_stdout;
-    rb_deferr = orig_stderr = rb_stderr;
+    orig_stderr = rb_stderr;
 
     /* constants to hold original stdin/stdout/stderr */
     rb_define_global_const("STDIN", rb_stdin);
