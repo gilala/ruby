@@ -1,3 +1,9 @@
+Mon Nov 16 01:14:02 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm.c (rb_vm_current): new method RubyVM.current.
+
+	* vm.c (rb_vm_to_s): include address of rb_vm_t in RubyVM#to_s.
+
 Mon Nov 16 01:11:02 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* mvm.c (ruby_vm_new): create new vm unless initial vm.

@@ -2002,6 +2002,24 @@ rb_vm_initialize(int argc, VALUE *argv, VALUE self)
     return self;
 }
 
+static VALUE
+rb_vm_current(VALUE self)
+{
+    return GET_VM()->self;
+}
+
+static VALUE
+rb_vm_to_s(VALUE self)
+{
+    rb_vm_t *vm;
+    VALUE str = rb_call_super(0, 0);
+
+    rb_str_set_len(str, RSTRING_LEN(str)-1);
+    GetVMPtr(self, vm);
+    rb_str_catf(str, ":(%p)>", vm);
+    return str;
+}
+
 static rb_thread_t *vm_make_main_thread(rb_vm_t *vm);
 
 static VALUE
@@ -2059,8 +2077,10 @@ InitVM_VM(void)
     rb_cRubyVM = rb_define_class("RubyVM", rb_cObject);
     rb_define_alloc_func(rb_cRubyVM, rb_vm_s_alloc);
     rb_define_method(rb_cRubyVM, "initialize", rb_vm_initialize, -1);
+    rb_define_method(rb_cRubyVM, "to_s", rb_vm_to_s, 0);
     rb_define_method(rb_cRubyVM, "start", rb_vm_start, 0);
     rb_define_method(rb_cRubyVM, "join", rb_vm_join, 0);
+    rb_define_singleton_method(rb_cRubyVM, "current", rb_vm_current, 0);
 
     /* ::VM::FrozenCore */
     fcore = rb_class_new(rb_cBasicObject);
