@@ -2268,6 +2268,11 @@ ruby_make_bare_vm(void)
     th = vm_make_main_thread(vm);
     rb_thread_set_current_raw(th);
     ruby_thread_init_stack(th);
+#ifdef HAVE_FCHDIR
+    th->cwd.fd = ruby_dirfd(".");
+#else
+    rb_str_wrap_cstr(ruby_sys_getcwd())
+#endif
 
     return vm;
 }

@@ -758,20 +758,31 @@ dir_fchdir(int dir, VALUE path)
 }
 #endif
 
+enum {
+    DIR_OPEN_MODE =
+#ifdef O_LARGEFILE
+    O_LARGEFILE|
+#endif
+#ifdef O_DIRECTORY
+    O_DIRECTORY|
+#endif
+    O_RDONLY
+};
+
 #ifdef HAVE_FCHDIR
 int
 ruby_dirfd(const char *path)
 {
 # if USE_OPENAT
     rb_thread_t *th = GET_THREAD();
-    return openat(th->cwd.fd, path, O_RDONLY);
+    return openat(th->cwd.fd, path, DIR_OPEN_MODE);
 # elif defined HAVE_DIRFD
     DIR *cwd = opendir(path);
     int fd = dup(dirfd(cwd));
     closedir(cwd);
     return fd;
 # elif defined O_DIRECTORY
-    return open(path, O_RDONLY|O_DIRECTORY);
+    return open(path, DIR_OPEN_MODE);
 # else
 #   error do not know how to open directory.
 # endif
@@ -1117,7 +1128,7 @@ do_opendir(const struct dir_data *dp, const char *path, int flags)
     DIR *dirp = NULL;
     if (dp) {
 #if USE_OPENAT
-	int base = openat(dirfd(dp->dir), path, O_RDONLY|O_LARGEFILE|O_DIRECTORY);
+	int base = openat(dirfd(dp->dir), path, DIR_OPEN_MODE);
 	if (base != -1 && !(dirp = fdopendir(base))) {
 	    preserving_errno(close(base));
 	}
