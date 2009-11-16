@@ -1,3 +1,7 @@
+Mon Nov 16 18:55:30 2009    <nobu@ruby-lang.org>
+
+	* thread_pthread.c (get_stack): fixed stack start address on the
+	  platforms using pthread_attr_t.
 Mon Nov 16 01:36:50 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* thread.c (rb_queue_shift_wait): added.

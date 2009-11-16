@@ -230,28 +230,25 @@ get_stack(void **addr, size_t *size)
 
 # ifdef HAVE_PTHREAD_GETATTR_NP
     CHECK_ERR(pthread_getattr_np(pthread_self(), &attr));
-#   ifdef HAVE_PTHREAD_ATTR_GETSTACK
+# else
+    CHECK_ERR(pthread_attr_init(&attr));
+    CHECK_ERR(pthread_attr_get_np(pthread_self(), &attr));
+# endif
+# ifdef HAVE_PTHREAD_ATTR_GETSTACK
     CHECK_ERR(pthread_attr_getstack(&attr, addr, size));
-#   else
+# else
     CHECK_ERR(pthread_attr_getstackaddr(&attr, addr));
     CHECK_ERR(pthread_attr_getstacksize(&attr, size));
-#   endif
+# endif
     if (pthread_attr_getguardsize(&attr, &guard) == 0) {
 	STACK_GROW_DIR_DETECTION;
 	STACK_DIR_UPPER((void)0, *addr = (char *)*addr + guard);
 	*size -= guard;
     }
-# else
-    CHECK_ERR(pthread_attr_init(&attr));
-    CHECK_ERR(pthread_attr_get_np(pthread_self(), &attr));
-    CHECK_ERR(pthread_attr_getstackaddr(&attr, addr));
-    CHECK_ERR(pthread_attr_getstacksize(&attr, size));
-# endif
-    CHECK_ERR(pthread_attr_getguardsize(&attr, &guard));
+    STACK_DIR_UPPER((void)0, *addr = (char *)*addr + *size);
 # ifndef HAVE_PTHREAD_GETATTR_NP
     pthread_attr_destroy(&attr);
 # endif
-    size -= guard;
 #elif defined HAVE_PTHREAD_GET_STACKADDR_NP && defined HAVE_PTHREAD_GET_STACKSIZE_NP
     pthread_t th = pthread_self();
     *addr = pthread_get_stackaddr_np(th);
