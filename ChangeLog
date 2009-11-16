@@ -1,3 +1,6 @@
+Mon Nov 16 22:24:57 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* regint.h (USE_PARSE_TREE_NODE_RECYCLE): disabled.
 Mon Nov 16 19:18:37 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* dir.c (ruby_dirfd): need O_DIRECTORY and O_LARGEFILE.
