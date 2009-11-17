@@ -297,6 +297,8 @@ typedef struct rb_vm_struct {
     unsigned long trace_flag;
     volatile int sleeper;
 
+    int ref_count;
+
     /* object management */
     VALUE mark_object_ary;
 
@@ -696,6 +698,8 @@ void *ruby_objspace_xmalloc2(struct rb_objspace *objspace, size_t n, size_t size
 void *ruby_objspace_xrealloc(struct rb_objspace *objspace, void *ptr, size_t size);
 void *ruby_objspace_xrealloc2(struct rb_objspace *objspace, void *ptr, size_t n, size_t size);
 void ruby_objspace_xfree(struct rb_objspace *objspace, void *ptr);
+
+int ruby_vm_free(rb_vm_t *vm);
 
 #define sysstack_error rb_errSysStack
 

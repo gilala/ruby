@@ -1477,31 +1477,34 @@ rb_vm_mark(void *ptr)
 struct rb_objspace *rb_objspace_alloc(void);
 #endif
 
-#define vm_free 0
-
-void
-rb_vm_free(void *ptr)
+int
+ruby_vm_free(rb_vm_t *vm)
 {
-    rb_vm_t *vm = ptr;
+    if (!vm) return FALSE;
 
-    RUBY_FREE_ENTER("vm");
-    if (vm && vm == GET_VM()) {
-	rb_thread_t *th = vm->main_thread;
+    if (vm == GET_VM()) {
+	if (vm->self) {
+	    vm->self = 0;
+	}
+	else {
+	    rb_thread_t *th = vm->main_thread;
+	    vm->main_thread = 0;
+	    if (th) {
+		thread_free(th);
+	    }
+	    if (vm->living_threads) {
+		st_free_table(vm->living_threads);
+		vm->living_threads = 0;
+	    }
+	    ruby_native_thread_unlock(&vm->global_vm_lock);
+	    ruby_native_cond_signal(&vm->global_vm_waiting);
+	}
+    }
+    if (!--vm->ref_count) {
 #if defined(ENABLE_VM_OBJSPACE) && ENABLE_VM_OBJSPACE
 	struct rb_objspace *objspace = vm->objspace;
 #endif
-	rb_gc_force_recycle(vm->self);
-	vm->main_thread = 0;
-	if (th) {
-	    thread_free(th);
-	}
-	if (vm->living_threads) {
-	    st_free_table(vm->living_threads);
-	    vm->living_threads = 0;
-	}
-	ruby_native_thread_unlock(&vm->global_vm_lock);
 	ruby_native_thread_lock_destroy(&vm->global_vm_lock);
-	ruby_native_cond_signal(&vm->global_vm_waiting);
 	ruby_native_cond_destroy(&vm->global_vm_waiting);
 	rb_queue_destroy(&vm->queue.message);
 #if defined(ENABLE_VM_OBJSPACE) && ENABLE_VM_OBJSPACE
@@ -1509,8 +1512,18 @@ rb_vm_free(void *ptr)
 	    rb_objspace_free(objspace);
 	}
 #endif
-	free(vm);
+	return TRUE;
     }
+    return FALSE;
+}
+
+static void
+vm_free(void *ptr)
+{
+    rb_vm_t *vm = ptr;
+
+    RUBY_FREE_ENTER("vm");
+    ruby_vm_destruct(vm);
     RUBY_FREE_LEAVE("vm");
 }
 
@@ -1535,6 +1548,7 @@ static void
 vm_init2(rb_vm_t *vm)
 {
     MEMZERO(vm, rb_vm_t, 1);
+    vm->ref_count = 1;
     vm->argc = -1;
     ruby_native_thread_lock_initialize(&vm->global_vm_lock);
     ruby_native_cond_initialize(&vm->global_vm_waiting);
@@ -2028,6 +2042,7 @@ vm_create(void *arg)
     rb_vm_t *vm = arg;
     int status;
     ruby_native_thread_unlock(&vm->global_vm_lock);
+    vm->ref_count++;
     status = ruby_vm_run(vm, 0);
     ruby_native_cond_signal(&vm->global_vm_waiting);
     return (VALUE)status;
@@ -2069,6 +2084,9 @@ rb_vm_send(VALUE self, VALUE val)
     GetVMPtr(self, vm);
     if (!rb_special_const_p(val) && vm->objspace != GET_VM()->objspace) {
 	rb_raise(rb_eTypeError, "expected special constants");
+    }
+    if (!vm->self) {
+	rb_raise(rb_eArgError, "terminated VM");
     }
     if (!rb_queue_push(&vm->queue.message, (void *)val))
 	rb_sys_fail(0);
@@ -2205,6 +2223,7 @@ InitVM_VM(void)
 
 	/* create vm object */
 	vm->self = TypedData_Wrap_Struct(rb_cRubyVM, &vm_data_type, vm);
+	vm->ref_count++;
 
 	/* create main thread */
 	th_self = th->self = TypedData_Wrap_Struct(rb_cThread, &thread_data_type, th);

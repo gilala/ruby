@@ -1,3 +1,12 @@
+Tue Nov 17 12:00:56 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm_core.h (rb_vm_t): manage references from other VMs.
+
+	* mvm.c (ruby_vm_destruct): ditto.
+
+	* vm.c (ruby_vm_free, vm_init2, vm_create, InitVM_VM): ditto.
+
+	* vm.c (rb_vm_send): reject terminated VM.
 Mon Nov 16 22:24:57 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* regint.h (USE_PARSE_TREE_NODE_RECYCLE): disabled.
