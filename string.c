@@ -7538,4 +7538,23 @@ InitVM_String(void)
     rb_define_method(rb_cSymbol, "swapcase", sym_swapcase, 0);
 
     rb_define_method(rb_cSymbol, "encoding", sym_encoding, 0);
+
+struct rb_objspace;
+VALUE rb_newobj_from_heap(struct rb_objspace*);
+void *rb_objspace_xmalloc(struct rb_objspace*, size_t);
+
+VALUE
+rb_str_copy_to_vm(VALUE str, struct rb_objspace *objspace)
+{
+    VALUE copy = rb_newobj_from_heap(objspace);
+    *RSTRING(copy) = *RSTRING(str);
+    if (!STR_EMBED_P(copy)) {
+	const long size = RSTRING(copy)->as.heap.len;
+	char *const ptr = rb_objspace_xmalloc(objspace, size);
+	RSTRING(copy)->as.heap.ptr = ptr;
+	memcpy(ptr, RSTRING(str)->as.heap.ptr, size);
+	ptr[size] = 0;
+    }
+    return copy;
+}
 }

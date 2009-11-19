@@ -2079,11 +2079,13 @@ rb_vm_join(VALUE self)
 VALUE
 rb_vm_send(VALUE self, VALUE val)
 {
+    VALUE rb_str_copy_to_vm(VALUE str, struct rb_objspace *objspace);
     rb_vm_t *vm;
 
     GetVMPtr(self, vm);
     if (!rb_special_const_p(val) && vm->objspace != GET_VM()->objspace) {
-	rb_raise(rb_eTypeError, "expected special constants");
+	StringValue(val);
+	val = rb_str_copy_to_vm(val, vm->objspace);
     }
     if (!vm->self) {
 	rb_raise(rb_eArgError, "terminated VM");
@@ -2103,7 +2105,8 @@ rb_vm_recv(VALUE self, const struct timeval *tv)
     if (!rb_queue_shift_wait(&vm->queue.message, &val, tv))
 	rb_sys_fail(0);
     if (!rb_special_const_p((VALUE)val)) {
-	rb_raise(rb_eTypeError, "expected special constants");
+	Check_Type((VALUE)val, T_STRING);
+	RBASIC(val)->klass = rb_cString;
     }
     return (VALUE)val;
 }

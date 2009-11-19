@@ -1,3 +1,7 @@
+Fri Nov 20 04:39:40 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm.c (rb_vm_send, rb_vm_recv): supported strings.
+
 Fri Nov 20 04:38:44 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* thread.c (rb_queue_shift_wait): fixed the case of no-timeout.
