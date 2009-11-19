@@ -1,3 +1,7 @@
+Fri Nov 20 04:38:44 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* thread.c (rb_queue_shift_wait): fixed the case of no-timeout.
+
 Tue Nov 17 12:00:56 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* vm_core.h (rb_vm_t): manage references from other VMs.

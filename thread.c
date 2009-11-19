@@ -1172,6 +1172,9 @@ rb_queue_push(rb_queue_t *que, void *value)
 	((que->head = e->next) != 0 || \
 	 (que->tail = &que->head, 1)))
 
+#define COND_WAIT(wt, lk, tv) \
+    (tv ?  : native_cond_wait(wt, lk))
+
 int
 rb_queue_shift_wait(rb_queue_t *que, void **value, const struct timeval *tv)
 {
@@ -1183,14 +1186,17 @@ rb_queue_shift_wait(rb_queue_t *que, void **value, const struct timeval *tv)
 	add_tv(&to, tv);
     }
     ruby_native_thread_lock(&que->lock);
-    while (!QUEUE_SHIFT(e, que) &&
-	   native_cond_timedwait(&que->wait, &que->lock, tv) == ETIMEDOUT) {
+    while (!QUEUE_SHIFT(e, que)) {
 	if (tv) {
+	    if (native_cond_timedwait(&que->wait, &que->lock, tv) != ETIMEDOUT) break;
 	    if (QUEUE_SHIFT(e, que)) break;
 	    td = to;
 	    getclockofday(&tvn);
 	    if (!subtract_tv(&td, &tvn)) break;
 	    tv = &td;
+	}
+	else {
+	    native_cond_wait(&que->wait, &que->lock);
 	}
     }
     ruby_native_thread_unlock(&que->lock);
