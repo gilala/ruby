@@ -35,13 +35,6 @@ ruby_vm_new(int argc, char *argv[])
 }
 
 int
-ruby_vm_start(rb_vm_t *vm)
-{
-    rb_bug("unsupporeted");
-    return 0;
-}
-
-int
 ruby_vm_join(rb_vm_t *vm)
 {
     return vm_join(vm);
@@ -230,6 +223,12 @@ int
 ruby_vm_main_p(rb_vm_t *vm)
 {
     return vm == vm_manager.main;
+}
+
+void
+ruby_vmmgr_add(rb_vm_t *vm)
+{
+    vmmgr_add(vm);
 }
 
 static void

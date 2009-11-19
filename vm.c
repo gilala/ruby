@@ -2036,16 +2036,34 @@ rb_vm_to_s(VALUE self)
 
 static rb_thread_t *vm_make_main_thread(rb_vm_t *vm);
 
+struct vm_create_args {
+    rb_vm_t *vm;
+    rb_thread_lock_t lock;
+    rb_thread_cond_t waiting;
+    volatile int initialized;
+};
+
+void ruby_vmmgr_add(rb_vm_t *);
+
 static VALUE
 vm_create(void *arg)
 {
-    rb_vm_t *vm = arg;
+    int ruby_executable_node(void *, int *);
+    void *ruby_vm_parse_options(rb_vm_t *);
+    struct vm_create_args *args = (void *)arg;
+    rb_vm_t *vm = args->vm;
     int status;
-    ruby_native_thread_unlock(&vm->global_vm_lock);
+
     vm->ref_count++;
-    status = ruby_vm_run(vm, 0);
-    ruby_native_cond_signal(&vm->global_vm_waiting);
-    return (VALUE)status;
+    ruby_native_thread_lock(&args->lock);
+    ruby_native_thread_unlock(&vm->global_vm_lock);
+    status = ruby_vm_init(vm);
+    if (!status) ruby_vmmgr_add(vm);
+    args->initialized = 1;
+    ruby_native_cond_signal(&args->waiting);
+    ruby_native_thread_unlock(&args->lock);
+
+    return (VALUE)ruby_vm_start(vm, status, 0);
 }
 
 static VALUE
@@ -2053,15 +2071,31 @@ rb_vm_start(VALUE self)
 {
     rb_vm_t *vm;
     rb_thread_t *th;
+    struct vm_create_args args;
 
     GetVMPtr(self, vm);
     if (vm->main_thread) rb_raise(rb_eArgError, "alread started");
+
     th = vm_make_main_thread(vm);
     th->first_func = vm_create;
     th->first_proc = Qfalse;
-    th->first_args = (VALUE)vm;
+    th->first_args = (VALUE)&args;
+
+    args.vm = vm;
+    args.initialized = 0;
+    ruby_native_thread_lock_initialize(&args.lock);
+    ruby_native_cond_initialize(&args.waiting);
+    ruby_native_thread_lock(&args.lock);
+
     ruby_native_thread_create(th);
     ruby_native_thread_unlock(&vm->global_vm_lock);
+
+    while (!args.initialized) {
+	ruby_native_cond_wait(&args.waiting, &args.lock);
+    }
+    ruby_native_thread_unlock(&args.lock);
+    ruby_native_cond_destroy(&args.waiting);
+    ruby_native_thread_lock_destroy(&args.lock);
     return self;
 }
 

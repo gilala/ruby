@@ -76,6 +76,8 @@ ruby_vm_init(rb_vm_t *vm)
 {
     int state;
 
+    if (vm->running) return 0;
+
     PUSH_TAG();
     if ((state = EXEC_TAG()) == 0) {
 	rb_vm_call_inits();
@@ -275,12 +277,17 @@ ruby_vm_exec_node(rb_vm_t *vm, void *n)
 int
 ruby_vm_run(rb_vm_t *vm, int *signo)
 {
-    int status;
+    return ruby_vm_start(vm, ruby_vm_init(vm), signo);
+}
+
+int
+ruby_vm_start(rb_vm_t *vm, int status, int *signo)
+{
     void *n;
 
     rb_thread_set_current_raw(vm->main_thread);
     Init_stack((void *)&vm);
-    if ((status = ruby_vm_init(vm)) != 0) {
+    if (status != 0) {
 	return ruby_vm_cleanup(vm, status, signo);
     }
     n = ruby_vm_parse_options(vm);
