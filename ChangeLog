@@ -1,3 +1,7 @@
+Fri Nov 20 08:14:53 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* string.c (rb_str_copy_to_vm): reset instance variables.
+
 Fri Nov 20 04:39:40 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* vm.c (rb_vm_send, rb_vm_recv): supported strings.

@@ -7550,6 +7550,8 @@ rb_str_copy_to_vm(VALUE str, struct rb_objspace *objspace)
 {
     VALUE copy = rb_newobj_from_heap(objspace);
     *RSTRING(copy) = *RSTRING(str);
+    RBASIC(copy)->flags &= ~FL_FINALIZE|FL_EXIVAR;
+    RBASIC(copy)->flags |= FL_FREEZE;
     if (!STR_EMBED_P(copy)) {
 	const long size = RSTRING(copy)->as.heap.len;
 	char *const ptr = rb_objspace_xmalloc(objspace, size);
