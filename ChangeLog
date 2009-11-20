@@ -1,4 +1,7 @@
-Sat Nov 21 00:44:53 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+Sat Nov 21 01:00:09 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm.c (rb_vm_s_parent, rb_vm_parent): new methods to return the
+	  parent VM.
 
 	* file.c (Init_File): initialize key for separator only once.
 

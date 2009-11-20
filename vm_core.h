@@ -277,6 +277,7 @@ typedef struct rb_queue {
 
 typedef struct rb_vm_struct {
     VALUE self;
+    VALUE parent;
 
     rb_thread_cond_t global_vm_waiting;
     rb_thread_lock_t global_vm_lock;

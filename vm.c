@@ -1448,6 +1448,7 @@ rb_vm_mark(void *ptr)
 	if (vm->living_threads) {
 	    st_foreach(vm->living_threads, vm_mark_each_thread_func, 0);
 	}
+	RUBY_MARK_UNLESS_NULL(vm->parent);
 	RUBY_MARK_UNLESS_NULL(vm->thgroup_default);
 	RUBY_MARK_UNLESS_NULL(vm->mark_object_ary);
 	RUBY_MARK_UNLESS_NULL(vm->load_path);
@@ -2017,9 +2018,24 @@ rb_vm_initialize(int argc, VALUE *argv, VALUE self)
 }
 
 static VALUE
-rb_vm_current(VALUE self)
+rb_vm_s_current(VALUE self)
 {
     return GET_VM()->self;
+}
+
+static VALUE
+rb_vm_s_parent(VALUE self)
+{
+    return GET_VM()->parent;
+}
+
+static VALUE
+rb_vm_parent(VALUE self)
+{
+    rb_vm_t *vm;
+
+    GetVMPtr(self, vm);
+    return vm->parent;
 }
 
 static VALUE
@@ -2038,7 +2054,8 @@ static rb_thread_t *vm_make_main_thread(rb_vm_t *vm);
 
 struct vm_create_args {
     rb_vm_t *vm;
-    rb_thread_lock_t lock;
+    rb_vm_t *parent;
+    rb_thread_lock_t *lock;
     rb_thread_cond_t waiting;
     volatile int initialized;
 };
@@ -2050,18 +2067,20 @@ vm_create(void *arg)
 {
     int ruby_executable_node(void *, int *);
     void *ruby_vm_parse_options(rb_vm_t *);
-    struct vm_create_args *args = (void *)arg;
+    struct vm_create_args *args = arg;
     rb_vm_t *vm = args->vm;
     int status;
 
     vm->ref_count++;
-    ruby_native_thread_lock(&args->lock);
     ruby_native_thread_unlock(&vm->global_vm_lock);
     status = ruby_vm_init(vm);
+    ruby_native_thread_lock(args->lock);
+    vm->parent = TypedData_Wrap_Struct(rb_cRubyVM, &vm_data_type, args->parent);
+    args->parent->ref_count++;
     if (!status) ruby_vmmgr_add(vm);
     args->initialized = 1;
     ruby_native_cond_signal(&args->waiting);
-    ruby_native_thread_unlock(&args->lock);
+    ruby_native_thread_unlock(args->lock);
 
     return (VALUE)ruby_vm_start(vm, status, 0);
 }
@@ -2082,20 +2101,18 @@ rb_vm_start(VALUE self)
     th->first_args = (VALUE)&args;
 
     args.vm = vm;
+    args.parent = GET_VM();
     args.initialized = 0;
-    ruby_native_thread_lock_initialize(&args.lock);
+    args.lock = &GET_VM()->global_vm_lock;
     ruby_native_cond_initialize(&args.waiting);
-    ruby_native_thread_lock(&args.lock);
 
     ruby_native_thread_create(th);
     ruby_native_thread_unlock(&vm->global_vm_lock);
 
     while (!args.initialized) {
-	ruby_native_cond_wait(&args.waiting, &args.lock);
+	ruby_native_cond_wait(&args.waiting, args.lock);
     }
-    ruby_native_thread_unlock(&args.lock);
     ruby_native_cond_destroy(&args.waiting);
-    ruby_native_thread_lock_destroy(&args.lock);
     return self;
 }
 
@@ -2179,7 +2196,9 @@ InitVM_VM(void)
     rb_define_method(rb_cRubyVM, "send", rb_vm_send, 1);
     rb_define_method(rb_cRubyVM, "recv", rb_vm_recv_m, -1);
     rb_define_method(rb_cRubyVM, "join", rb_vm_join, 0);
-    rb_define_singleton_method(rb_cRubyVM, "current", rb_vm_current, 0);
+    rb_define_method(rb_cRubyVM, "parent", rb_vm_parent, 0);
+    rb_define_singleton_method(rb_cRubyVM, "current", rb_vm_s_current, 0);
+    rb_define_singleton_method(rb_cRubyVM, "parent", rb_vm_s_parent, 0);
 
     /* ::VM::FrozenCore */
     fcore = rb_class_new(rb_cBasicObject);
