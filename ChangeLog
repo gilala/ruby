@@ -1,4 +1,6 @@
-Sat Nov 21 01:00:09 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+Sat Nov 21 01:03:39 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* thread.c (rb_queue_mark): mark possible objects.
 
 	* vm.c (rb_vm_s_parent, rb_vm_parent): new methods to return the
 	  parent VM.

@@ -1167,6 +1167,18 @@ rb_queue_push(rb_queue_t *que, void *value)
     return Qtrue;
 }
 
+void
+rb_queue_mark(rb_queue_t *que)
+{
+    rb_queue_element_t *e = que->head;
+    ruby_native_thread_lock(&que->lock);
+    while (e) {
+	rb_gc_mark_maybe((VALUE)e->value);
+	e = e->next;
+    }
+    ruby_native_thread_unlock(&que->lock);
+}
+
 #define QUEUE_SHIFT(e, que) (	       \
 	(e = que->head) != 0 &&	       \
 	((que->head = e->next) != 0 || \

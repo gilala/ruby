@@ -420,6 +420,7 @@ int rb_queue_push(rb_queue_t *, void *);
 int rb_queue_shift(rb_queue_t *, void **);
 int rb_queue_shift_wait(rb_queue_t *, void **, const struct timeval *);
 int rb_queue_empty_p(const rb_queue_t *);
+void rb_queue_mark(rb_queue_t *);
 
 typedef struct rb_thread_struct
 {
