@@ -1,3 +1,7 @@
+Sat Nov 21 00:44:53 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* file.c (Init_File): initialize key for separator only once.
+
 Fri Nov 20 08:15:45 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* vm.c (rb_vm_start): handshake.

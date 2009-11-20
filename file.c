@@ -4853,6 +4853,7 @@ define_filetest_function(const char *name, VALUE (*func)(ANYARGS), int argc)
 void
 Init_File(void)
 {
+    vmkey_separator = rb_vm_key_create();
 }
 
 void
@@ -4925,7 +4926,6 @@ InitVM_File(void)
     rb_define_singleton_method(rb_cFile, "path", rb_file_s_path, 1);
 
     separator = rb_obj_freeze(rb_usascii_str_new2("/"));
-    vmkey_separator = rb_vm_key_create();
     *rb_vm_specific_ptr(vmkey_separator) = separator;
     rb_define_const(rb_cFile, "Separator", separator);
     rb_define_const(rb_cFile, "SEPARATOR", separator);
