@@ -1379,7 +1379,7 @@ rb_threadptr_execute_interrupts_rec(rb_thread_t *th, int sched_depth)
     rb_vm_t *vm = GET_VM();
 
     if (vm->main_thread == th) {
-	while (rb_signal_buff_size() && !(th->interrupt_flag & 0x08)) {
+	while (rb_signal_buff_size() && !(th->interrupt_flag & ruby_vm_signal_bit)) {
 	    native_thread_yield();
 	}
     }
@@ -1388,8 +1388,8 @@ rb_threadptr_execute_interrupts_rec(rb_thread_t *th, int sched_depth)
 
     while (th->interrupt_flag) {
 	enum rb_thread_status status = th->status;
-	int timer_interrupt = th->interrupt_flag & 0x01;
-	int finalizer_interrupt = th->interrupt_flag & 0x04;
+	int timer_interrupt = th->interrupt_flag & ruby_vm_timer_bit;
+	int finalizer_interrupt = th->interrupt_flag & ruby_vm_finalizer_bit;
 	void *exec_signal;
 
 	th->status = THREAD_RUNNABLE;
@@ -2806,11 +2806,11 @@ ruby_vm_send_signal(rb_vm_t *vm, int sig)
 
     if (sig <= 0 || sig >= RUBY_NSIG) return -1;
     mth = vm->main_thread;
-    if (mth->interrupt_flag) return -1;
+    if (mth->interrupt_flag & ruby_vm_signal_bit) return -1;
     prev_status = mth->status;
     thread_debug("main_thread: %s, sig: %d\n",
 		 thread_status_name(prev_status), sig);
-    mth->interrupt_flag |= 0x08;
+    mth->interrupt_flag |= ruby_vm_signal_bit;
     rb_queue_push(&mth->queue.signal, (void *)INT2FIX(sig));
     if (mth->status != THREAD_KILLED) mth->status = THREAD_RUNNABLE;
     rb_threadptr_interrupt(mth);

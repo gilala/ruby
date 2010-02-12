@@ -1,3 +1,7 @@
+Sat Feb 13 07:11:57 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* (ruby_vm_send_signal): deal with signals properly.
+
 Sat Nov 21 01:03:39 2009  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* thread.c (rb_queue_mark): mark possible objects.

@@ -733,10 +733,17 @@ int ruby_thread_set_native(rb_thread_t *th);
 #error "unsupported thread model"
 #endif
 
-#define RUBY_VM_SET_INTERRUPT(th) ((th)->interrupt_flag |= 0x02)
-#define RUBY_VM_SET_TIMER_INTERRUPT(th) ((th)->interrupt_flag |= 0x01)
-#define RUBY_VM_SET_FINALIZER_INTERRUPT(th) ((th)->interrupt_flag |= 0x04)
-#define RUBY_VM_INTERRUPTED(th) ((th)->interrupt_flag & 0x02)
+enum {
+    ruby_vm_timer_bit = 0x01,
+    ruby_vm_interrupt_bit = 0x02,
+    ruby_vm_finalizer_bit = 0x04,
+    ruby_vm_signal_bit = 0x08
+};
+
+#define RUBY_VM_SET_INTERRUPT(th) ((th)->interrupt_flag |= ruby_vm_interrupt_bit)
+#define RUBY_VM_SET_TIMER_INTERRUPT(th) ((th)->interrupt_flag |= ruby_vm_timer_bit)
+#define RUBY_VM_SET_FINALIZER_INTERRUPT(th) ((th)->interrupt_flag |= ruby_vm_finalizer_bit)
+#define RUBY_VM_INTERRUPTED(th) ((th)->interrupt_flag & ruby_vm_interrupt_bit)
 
 void rb_threadptr_signal_raise(rb_thread_t *th, int sig);
 void rb_threadptr_signal_exit(rb_thread_t *th);
