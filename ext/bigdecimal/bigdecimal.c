@@ -473,9 +473,11 @@ BigDecimal_check_num(Real *p)
     }
 }
 
+static VALUE BigDecimal_split(VALUE self);
+
 /* Returns the value as an integer (Fixnum or Bignum).
  *
- * If the BigNumber is infinity or NaN, returns nil.
+ * If the BigNumber is infinity or NaN, raises FloatDomainError.
  */
 static VALUE
 BigDecimal_to_i(VALUE self)
@@ -497,31 +499,24 @@ BigDecimal_to_i(VALUE self)
         e = VpGetSign(p)*p->frac[0];
         return INT2FIX(e);
     }
-    str = rb_str_new(0, e+nf+2);
-    psz = RSTRING_PTR(str);
+    else {
+	VALUE a = BigDecimal_split(self);
+	VALUE digits = RARRAY_PTR(a)[1];
+	VALUE numerator = rb_funcall(digits, rb_intern("to_i"), 0);
+	int dpower = e - RSTRING_LEN(digits);
 
-    n = (e+nf-1)/nf;
-    pch = psz;
-    if(VpGetSign(p)<0) *pch++ = '-';
-    for(i=0;i<n;++i) {
-        b = VpBaseVal()/10;
-        if(i>=(int)p->Prec) {
-            while(b) {
-                *pch++ = '0';
-                b /= 10;
-            }
-            continue;
-        }
-        v = p->frac[i];
-        while(b) {
-            j = v/b;
-            *pch++ = (char)(j + '0');
-            v -= j*b;
-            b /= 10;
-        }
+	if (VpGetSign(p) < 0) {
+	    numerator = rb_funcall(numerator, '*', 1, INT2FIX(-1));
+	}
+	if (dpower < 0) {
+	    return rb_funcall(numerator, rb_intern("div"), 1,
+			      rb_funcall(INT2FIX(10), rb_intern("**"), 1,
+					 INT2FIX(-dpower)));
+	}
+        return rb_funcall(numerator, '*', 1,
+			  rb_funcall(INT2FIX(10), rb_intern("**"), 1,
+				     INT2FIX(dpower)));
     }
-    *pch++ = 0;
-    return rb_cstr2inum(psz,10);
 }
 
 /* Returns a new Float object having approximately the same value as the
@@ -555,8 +550,6 @@ BigDecimal_to_f(VALUE self)
     return rb_float_new(d);
 }
 
-
-static VALUE BigDecimal_split(VALUE self);
 
 /* Converts a BigDecimal to a Rational.
  */
@@ -724,23 +717,21 @@ BigDecimalCmp(VALUE self, VALUE r,char op)
 
 	switch(op)
 	{
-	  case '*': f = rb_intern("<=>");break;
-	  case '=': f = rb_intern("=="); break;
-	  case '!': f = rb_intern("!="); break;
+	  case '*': return rb_num_coerce_cmp(self,r,rb_intern("<=>"));
+	  case '=': return RTEST(rb_num_coerce_cmp(self,r,rb_intern("=="))) ? Qtrue : Qfalse;
 	  case 'G': f = rb_intern(">="); break;
 	  case 'L': f = rb_intern("<="); break;
 	  case '>': case '<': f = (ID)op; break;
 	}
-	return rb_num_coerce_cmp(self,r,f);
+	return rb_num_coerce_relop(self,r,f);
     }
     SAVE(b);
     e = VpComp(a, b);
-    if(e==999) return Qnil;
+    if(e==999) return (op == '*') ? Qnil : Qfalse;
     switch(op)
     {
     case '*': return   INT2FIX(e); /* any op */
     case '=': if(e==0) return Qtrue ; return Qfalse;
-    case '!': if(e!=0) return Qtrue ; return Qfalse;
     case 'G': if(e>=0) return Qtrue ; return Qfalse;
     case '>': if(e> 0) return Qtrue ; return Qfalse;
     case 'L': if(e<=0) return Qtrue ; return Qfalse;
@@ -891,7 +882,9 @@ BigDecimal_divide(Real **c, Real **res, Real **div, VALUE self, VALUE r)
     if(!b) return DoSomeOne(self,r,'/');
     SAVE(b);
     *div = b;
-    mx =(a->MaxPrec + b->MaxPrec + 1) * VpBaseFig();
+    mx = a->Prec+abs(a->exponent);
+    if(mx<b->Prec+abs(b->exponent)) mx = b->Prec+abs(b->exponent);
+    mx =(mx + 1) * VpBaseFig();
     GUARD_OBJ((*c),VpCreateRbObject(mx, "#0"));
     GUARD_OBJ((*res),VpCreateRbObject((mx+1) * 2 +(VpBaseFig() + 1), "#0"));
     VpDivd(*c, *res, a, b);
@@ -949,24 +942,38 @@ BigDecimal_DoDivmod(VALUE self, VALUE r, Real **div, Real **mod)
 
     GUARD_OBJ(a,GetVpValue(self,1));
     b = GetVpValue(r,0);
-    if(!b) return DoSomeOne(self,r,rb_intern("divmod"));
+    if(!b) return Qfalse;
     SAVE(b);
 
     if(VpIsNaN(a) || VpIsNaN(b)) goto NaN;
-    if(VpIsInf(a) || VpIsInf(b)) goto NaN;
+    if(VpIsInf(a) && VpIsInf(b)) goto NaN;
     if(VpIsZero(b)) {
 	rb_raise(rb_eZeroDivError, "divided by 0");
+    }
+    if(VpIsInf(a)) {
+       GUARD_OBJ(d,VpCreateRbObject(1, "0"));
+       VpSetInf(d,(S_INT)(VpGetSign(a) == VpGetSign(b) ? 1 : -1));
+       GUARD_OBJ(c,VpCreateRbObject(1, "NaN"));
+       *div = d;
+       *mod = c;
+       return Qtrue;
+    }
+    if(VpIsInf(b)) {
+       GUARD_OBJ(d,VpCreateRbObject(1, "0"));
+       *div = d;
+       *mod = a;
+       return Qtrue;
     }
     if(VpIsZero(a)) {
        GUARD_OBJ(c,VpCreateRbObject(1, "0"));
        GUARD_OBJ(d,VpCreateRbObject(1, "0"));
        *div = d;
        *mod = c;
-       return (VALUE)0;
+       return Qtrue;
     }
 
-    mx = a->Prec;
-    if(mx<b->Prec) mx = b->Prec;
+    mx = a->Prec+abs(a->exponent);
+    if(mx<b->Prec+abs(b->exponent)) mx = b->Prec+abs(b->exponent);
     mx =(mx + 1) * VpBaseFig();
     GUARD_OBJ(c,VpCreateRbObject(mx, "0"));
     GUARD_OBJ(res,VpCreateRbObject((mx+1) * 2 +(VpBaseFig() + 1), "#0"));
@@ -978,6 +985,7 @@ BigDecimal_DoDivmod(VALUE self, VALUE r, Real **div, Real **mod)
     VpAddSub(c,a,res,-1);
     if(!VpIsZero(c) && (VpGetSign(a)*VpGetSign(b)<0)) {
         VpAddSub(res,d,VpOne(),-1);
+	GUARD_OBJ(d,VpCreateRbObject(GetAddSubPrec(c, b)*(VpBaseFig() + 1), "0"));
         VpAddSub(d  ,c,b,       1);
         *div = res;
         *mod = d;
@@ -985,14 +993,14 @@ BigDecimal_DoDivmod(VALUE self, VALUE r, Real **div, Real **mod)
         *div = d;
         *mod = c;
     }
-    return (VALUE)0;
+    return Qtrue;
 
 NaN:
     GUARD_OBJ(c,VpCreateRbObject(1, "NaN"));
     GUARD_OBJ(d,VpCreateRbObject(1, "NaN"));
     *div = d;
     *mod = c;
-    return (VALUE)0;
+    return Qtrue;
 }
 
 /* call-seq:
@@ -1008,10 +1016,11 @@ BigDecimal_mod(VALUE self, VALUE r) /* %: a%b = a - (a.to_f/b).floor * b */
     VALUE obj;
     Real *div=NULL, *mod=NULL;
 
-    obj = BigDecimal_DoDivmod(self,r,&div,&mod);
-    if(obj!=(VALUE)0) return obj;
-    SAVE(div);SAVE(mod);
-    return ToValue(mod);
+    if(BigDecimal_DoDivmod(self,r,&div,&mod)) {
+	SAVE(div); SAVE(mod);
+	return ToValue(mod);
+    }
+    return DoSomeOne(self,r,'%');
 }
 
 static VALUE
@@ -1091,11 +1100,11 @@ BigDecimal_divmod(VALUE self, VALUE r)
     VALUE obj;
     Real *div=NULL, *mod=NULL;
 
-    obj = BigDecimal_DoDivmod(self,r,&div,&mod);
-    if(obj!=(VALUE)0) return obj;
-    SAVE(div);SAVE(mod);
-    obj = rb_assoc_new(BigDecimal_to_i(ToValue(div)), ToValue(mod));
-    return obj;
+    if(BigDecimal_DoDivmod(self,r,&div,&mod)) {
+	SAVE(div); SAVE(mod);
+	return rb_assoc_new(ToValue(div), ToValue(mod));
+    }
+    return DoSomeOne(self,r,rb_intern("divmod"));
 }
 
 static VALUE
@@ -1108,9 +1117,10 @@ BigDecimal_div2(int argc, VALUE *argv, VALUE self)
        VALUE obj;
        Real *div=NULL;
        Real *mod;
-       obj = BigDecimal_DoDivmod(self,b,&div,&mod);
-       if(obj!=(VALUE)0) return obj;
-       return BigDecimal_to_i(ToValue(div));
+       if(BigDecimal_DoDivmod(self,b,&div,&mod)) {
+	  return BigDecimal_to_i(ToValue(div));
+       }
+       return DoSomeOne(self,b,rb_intern("div"));
     } else {    /* div in BigDecimal sense */
        U_LONG ix = (U_LONG)GetPositiveInt(n);
        if(ix==0) return BigDecimal_div(self,b);
@@ -4011,13 +4021,14 @@ VpCtoV(Real *a, const char *int_chr, U_LONG ni, const char *frac, U_LONG nf, con
     U_LONG i, j, ind_a, ma, mi, me;
     U_LONG loc;
     S_INT  e,es, eb, ef;
-    S_INT  sign, signe;
+    S_INT  sign, signe, exponent_overflow;
     /* get exponent part */
     e = 0;
     ma = a->MaxPrec;
     mi = ni;
     me = ne;
     signe = 1;
+    exponent_overflow = 0;
     memset(a->frac, 0, ma * sizeof(U_LONG));
     if(ne > 0) {
         i = 0;
@@ -4033,12 +4044,8 @@ VpCtoV(Real *a, const char *int_chr, U_LONG ni, const char *frac, U_LONG nf, con
             es = e*((S_INT)BASE_FIG);
             e = e * 10 + exp_chr[i] - '0';
             if(es>e*((S_INT)BASE_FIG)) {
-                VpException(VP_EXCEPTION_INFINITY,"exponent overflow",0);
-                sign = 1;
-                if(int_chr[0] == '-') sign = -1;
-                if(signe > 0) VpSetInf(a, sign);
-                else VpSetZero(a, sign);
-                return 1;
+		exponent_overflow = 1;
+		break;
             }
             ++i;
         }
@@ -4079,6 +4086,18 @@ VpCtoV(Real *a, const char *int_chr, U_LONG ni, const char *frac, U_LONG nf, con
     }
 
     eb = e / ((S_INT)BASE_FIG);
+
+    if(exponent_overflow) {
+	int zero = 1;
+	for(     ; i < mi && zero; i++) zero = int_chr[i] == '0';
+	for(i = 0; i < nf && zero; i++) zero = frac[i] == '0';
+	if(!zero && signe > 0) {
+	    VpSetInf(a, sign);
+	    VpException(VP_EXCEPTION_INFINITY,"exponent overflow",0);
+	}
+	else VpSetZero(a, sign);
+	return 1;
+    }
 
     ind_a = 0;
     while(i < mi) {

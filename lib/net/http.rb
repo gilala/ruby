@@ -26,6 +26,7 @@
 #++
 
 require 'net/protocol'
+autoload :OpenSSL, 'openssl'
 require 'uri'
 
 module Net   #:nodoc:
@@ -442,15 +443,51 @@ module Net   #:nodoc:
       BufferedIO
     end
 
+    # call-seq:
+    #   HTTP.start(address, port, p_addr, p_port, p_user, p_pass, &block)
+    #   HTTP.start(address, port=nil, p_addr=nil, p_port=nil, p_user=nil, p_pass=nil, opt, &block)
+    #
     # creates a new Net::HTTP object and opens its TCP connection and
-    # HTTP session.  If the optional block is given, the newly
+    # HTTP session.
+    #
+    # Argments are following:
+    # _address_ :: hostname or IP address of the server
+    # _port_    :: port of the server
+    # _p_addr_  :: address of proxy
+    # _p_port_  :: port of proxy
+    # _p_user_  :: user of proxy
+    # _p_pass_  :: pass of proxy
+    # _opt_     :: optional hash
+    #
+    # _opt_ sets following values by its accessor.
+    # The keys are ca_file, ca_path, cert, cert_store, ciphers,
+    # close_on_empty_response, key, open_timeout, read_timeout, ssl_timeout,
+    # ssl_version, use_ssl, verify_callback, verify_depth and verify_mode.
+    # If you set :use_ssl as true, you can use https and default value of
+    # verify_mode is set as OpenSSL::SSL::VERIFY_PEER.
+    #
+    # If the optional block is given, the newly
     # created Net::HTTP object is passed to it and closed when the
     # block finishes.  In this case, the return value of this method
     # is the return value of the block.  If no block is given, the
     # return value of this method is the newly created Net::HTTP object
     # itself, and the caller is responsible for closing it upon completion.
-    def HTTP.start(address, port = nil, p_addr = nil, p_port = nil, p_user = nil, p_pass = nil, &block) # :yield: +http+
-      new(address, port, p_addr, p_port, p_user, p_pass).start(&block)
+    def HTTP.start(address, *arg, &block) # :yield: +http+
+      arg.pop if opt = Hash.try_convert(arg[-1])
+      port, p_addr, p_port, p_user, p_pass = *arg
+      port = https_default_port if !port && opt && opt[:use_ssl]
+      http = new(address, port, p_addr, p_port, p_user, p_pass)
+
+      if opt
+        opt = {verify_mode: OpenSSL::SSL::VERIFY_PEER}.update(opt) if opt[:use_ssl]
+        http.methods.grep(/\A(\w+)=\z/) do |meth|
+          key = $1.to_sym
+          opt.key?(key) or next
+          http.__send__(meth, opt[key])
+        end
+      end
+
+      http.start(&block)
     end
 
     class << HTTP
@@ -544,7 +581,33 @@ module Net   #:nodoc:
 
     # returns true if use SSL/TLS with HTTP.
     def use_ssl?
-      false   # redefined in net/https
+      @use_ssl
+    end
+
+    # Turn on/off SSL.
+    # This flag must be set before starting session.
+    # If you change use_ssl value after session started,
+    # a Net::HTTP object raises IOError.
+    def use_ssl=(flag)
+      flag = (flag ? true : false)
+      if started? and @use_ssl != flag
+        raise IOError, "use_ssl value changed, but session already started"
+      end
+      @use_ssl = flag
+    end
+
+    SSL_ATTRIBUTES = %w(
+      ssl_version key cert ca_file ca_path cert_store ciphers
+      verify_mode verify_callback verify_depth ssl_timeout
+    )
+    attr_accessor(*SSL_ATTRIBUTES)
+
+    # return the X.509 certificates the server presented.
+    def peer_cert
+      if not use_ssl? or not @socket
+        return nil
+      end
+      @socket.io.peer_cert
     end
 
     # Opens TCP connection and HTTP session.
@@ -1457,13 +1520,13 @@ module Net   #:nodoc:
       return nil unless @header['content-range']
       m = %r<bytes\s+(\d+)-(\d+)/(\d+|\*)>i.match(self['Content-Range']) or
           raise HTTPHeaderSyntaxError, 'wrong Content-Range format'
-      m[1].to_i .. m[2].to_i + 1
+      m[1].to_i .. m[2].to_i
     end
 
     # The length of the range represented in Content-Range: header.
     def range_length
       r = content_range() or return nil
-      r.end - r.begin
+      r.end - r.begin + 1
     end
 
     # Returns a content type string such as "text/html".

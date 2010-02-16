@@ -33,7 +33,7 @@ ruby_native_thread_lock(pthread_mutex_t *lock)
 {
     int r;
     if ((r = pthread_mutex_lock(lock)) != 0) {
-	rb_bug("pthread_mutex_lock: %d", r);
+	rb_bug_errno("pthread_mutex_lock", r);
     }
 }
 
@@ -42,7 +42,7 @@ ruby_native_thread_unlock(pthread_mutex_t *lock)
 {
     int r;
     if ((r = pthread_mutex_unlock(lock)) != 0) {
-	rb_bug("native_mutex_unlock return non-zero: %d", r);
+	rb_bug_errno("pthread_mutex_unlock", r);
     }
 }
 
@@ -55,7 +55,7 @@ native_mutex_trylock(pthread_mutex_t *lock)
 	    return EBUSY;
 	}
 	else {
-	    rb_bug("native_mutex_trylock return non-zero: %d", r);
+	    rb_bug_errno("pthread_mutex_trylock", r);
 	}
     }
     return 0;
@@ -66,16 +66,21 @@ ruby_native_thread_lock_initialize(pthread_mutex_t *lock)
 {
     int r = pthread_mutex_init(lock, 0);
     if (r != 0) {
-	rb_bug("native_mutex_initialize return non-zero: %d", r);
+	rb_bug_errno("pthread_mutex_init", r);
     }
 }
+
+#define native_mutex_reinitialize_atfork(lock) (\
+	native_mutex_unlock(lock), \
+	native_mutex_initialize(lock), \
+	native_mutex_lock(lock))
 
 void
 ruby_native_thread_lock_destroy(pthread_mutex_t *lock)
 {
     int r = pthread_mutex_destroy(lock);
     if (r != 0) {
-	rb_bug("native_mutex_destroy return non-zero: %d", r);
+	rb_bug_errno("pthread_mutex_destroy", r);
     }
 }
 
@@ -84,7 +89,7 @@ ruby_native_cond_initialize(pthread_cond_t *cond)
 {
     int r = pthread_cond_init(cond, 0);
     if (r != 0) {
-	rb_bug("native_cond_initialize return non-zero: %d", r);
+	rb_bug_errno("pthread_cond_init", r);
     }
 }
 
@@ -93,7 +98,7 @@ native_cond_destroy(pthread_cond_t *cond)
 {
     int r = pthread_cond_destroy(cond);
     if (r != 0) {
-	rb_bug("native_cond_destroy return non-zero: %d", r);
+	rb_bug_errno("pthread_cond_destroy", r);
     }
 }
 
@@ -246,6 +251,7 @@ get_stack(void **addr, size_t *size)
 	*size -= guard;
     }
     STACK_DIR_UPPER((void)0, *addr = (char *)*addr + *size);
+    *size -= guard;
 # ifndef HAVE_PTHREAD_GETATTR_NP
     pthread_attr_destroy(&attr);
 # endif
@@ -306,35 +312,46 @@ ruby_init_stack(volatile void *addr
         native_main_thread.register_stack_start = (VALUE*)bsp;
     }
 #endif
-#ifdef HAVE_GETRLIMIT
     {
+	size_t size = 0;
+	size_t space = 0;
+#if defined(HAVE_PTHREAD_ATTR_GET_NP)
+	void* addr;
+	get_stack(&addr, &size);
+#elif defined(HAVE_GETRLIMIT)
 	struct rlimit rlim;
-
 	if (getrlimit(RLIMIT_STACK, &rlim) == 0) {
-	    size_t space = (size_t)(rlim.rlim_cur/5);
-
-	    if (space > 1024*1024) space = 1024*1024;
-	    native_main_thread.stack_maxsize = (size_t)rlim.rlim_cur - space;
+	    size = (size_t)rlim.rlim_cur;
 	}
-    }
 #endif
+	space = size > 5 * 1024 * 1024 ? 1024 * 1024 : size / 5;
+	native_main_thread.stack_maxsize = size - space;
+    }
 }
 
 #define CHECK_ERR(expr) \
-    {int err = (expr); if (err) {rb_bug("err: %d - %s", err, #expr);}}
+    {int err = (expr); if (err) {rb_bug_errno(#expr, err);}}
 
 static int
 native_thread_init_stack(rb_thread_t *th)
 {
+    rb_thread_id_t curr = pthread_self();
+
+    if (pthread_equal(curr, native_main_thread.id)) {
+	th->machine_stack_start = native_main_thread.stack_start;
+	th->machine_stack_maxsize = native_main_thread.stack_maxsize;
+    }
+    else {
 #ifdef STACKADDR_AVAILABLE
-    void *addr;
-    size_t size;
-    int err = get_stack(&addr, &size);
-    STACK_GROW_DIR_DETECTION;
-    if (err) return err;
-    size -= sizeof(VALUE);
-    th->machine_stack_start = (VALUE*)addr - STACK_DIR_UPPER(0, 1);
-    th->machine_stack_maxsize = size;
+	void *start;
+	size_t size;
+
+	if (get_stack(&start, &size) == 0) {
+	    STACK_GROW_DIR_DETECTION;
+	    size -= sizeof(VALUE);
+	    th->machine_stack_start = start;
+	    th->machine_stack_maxsize = size;
+	}
 #else
     th->machine_stack_start = native_main_thread.stack_start;
     th->machine_stack_maxsize = native_main_thread.stack_maxsize;
@@ -491,15 +508,17 @@ enum {
 #else
     RUBY_STACK_MIN_LIMIT = 512 * 1024, /* 512KB */
 #endif
-    RUBY_STACK_MIN = (
-#ifdef PTHREAD_STACK_MIN
-	(RUBY_STACK_MIN_LIMIT < PTHREAD_STACK_MIN) ? PTHREAD_STACK_MIN * 2 :
-#endif
-	RUBY_STACK_MIN_LIMIT),
-    RUBY_STACK_SPACE_LIMIT = 1024 * 1024,
-    RUBY_STACK_SPACE = (RUBY_STACK_MIN/5 > RUBY_STACK_SPACE_LIMIT ?
-			RUBY_STACK_SPACE_LIMIT : RUBY_STACK_MIN/5)
+    RUBY_STACK_SPACE_LIMIT = 1024 * 1024
 };
+
+#ifdef PTHREAD_STACK_MIN
+#define RUBY_STACK_MIN ((RUBY_STACK_MIN_LIMIT < PTHREAD_STACK_MIN) ? \
+			PTHREAD_STACK_MIN * 2 : RUBY_STACK_MIN_LIMIT)
+#else
+#define RUBY_STACK_MIN (RUBY_STACK_MIN_LIMIT)
+#endif
+#define RUBY_STACK_SPACE (RUBY_STACK_MIN/5 > RUBY_STACK_SPACE_LIMIT ? \
+			  RUBY_STACK_SPACE_LIMIT : RUBY_STACK_MIN/5)
 
 static int
 native_thread_create(rb_thread_t *th)
@@ -647,7 +666,7 @@ native_sleep(rb_thread_t *th, struct timeval *tv)
 		thread_debug("native_sleep: pthread_cond_wait start\n");
 		r = pthread_cond_wait(&th->native_thread_data.sleep_cond,
 				      &th->interrupt_lock);
-                if (r) rb_bug("pthread_cond_wait: %d", r);
+                if (r) rb_bug_errno("pthread_cond_wait", r);
 		thread_debug("native_sleep: pthread_cond_wait end\n");
 	    }
 	    else {
@@ -656,7 +675,7 @@ native_sleep(rb_thread_t *th, struct timeval *tv)
 			     (unsigned long)ts.tv_sec, ts.tv_nsec);
 		r = pthread_cond_timedwait(&th->native_thread_data.sleep_cond,
 					   &th->interrupt_lock, &ts);
-		if (r && r != ETIMEDOUT) rb_bug("pthread_cond_timedwait: %d", r);
+		if (r && r != ETIMEDOUT) rb_bug_errno("pthread_cond_timedwait", r);
 
 		thread_debug("native_sleep: pthread_cond_timedwait end (%d)\n", r);
 	    }
@@ -789,7 +808,7 @@ thread_timer(void *dummy)
 	else if (err == 0 || err == EINTR) {
 	    if (rb_signal_buff_size() == 0) break;
 	}
-	else rb_bug("thread_timer/timedwait: %d", err);
+	else rb_bug_errno("thread_timer/timedwait", err);
 
 #if !defined(__CYGWIN__) && !defined(__SYMBIAN32__)
 	if (signal_thread_list_anchor.next) {

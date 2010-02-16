@@ -17,7 +17,7 @@ static inline VALUE vm_yield_with_cref(rb_thread_t *th, int argc, const VALUE *a
 static inline VALUE vm_yield(rb_thread_t *th, int argc, const VALUE *argv);
 static inline VALUE vm_backtrace(rb_thread_t *th, int lev);
 static int vm_backtrace_each(rb_thread_t *th, int lev, rb_backtrace_iter_func *iter, void *arg);
-static NODE *vm_cref_push(rb_thread_t *th, VALUE klass, int noex);
+static NODE *vm_cref_push(rb_thread_t *th, VALUE klass, int noex, rb_block_t *blockptr);
 static VALUE vm_exec(rb_thread_t *th);
 static void vm_set_eval_stack(rb_thread_t * th, VALUE iseqval, const NODE *cref);
 static int vm_collect_local_variables_in_heap(rb_thread_t *th, VALUE *dfp, VALUE ary);
@@ -257,10 +257,9 @@ check_funcall_exec(struct rescue_funcall_args *args)
 static VALUE
 check_funcall_failed(struct rescue_funcall_args *args, VALUE e)
 {
-    VALUE sym = rb_funcall(e, rb_intern("name"), 0, 0);
-
-    if (args->sym != sym)
+    if (rb_respond_to(args->recv, SYM2ID(args->sym))) {
 	rb_exc_raise(e);
+    }
     return Qundef;
 }
 
@@ -278,6 +277,7 @@ check_funcall(VALUE recv, ID mid, int argc, VALUE *argv)
 	else {
 	    struct rescue_funcall_args args;
 
+	    th->method_missing_reason = 0;
 	    args.recv = recv;
 	    args.sym = ID2SYM(mid);
 	    args.argc = argc;
@@ -297,18 +297,80 @@ rb_check_funcall(VALUE recv, ID mid, int argc, VALUE *argv)
     return check_funcall(recv, mid, argc, argv);
 }
 
+static const char *
+rb_type_str(enum ruby_value_type type)
+{
+#define type_case(t) case t: return #t;
+    switch (type) {
+      type_case(T_NONE)
+      type_case(T_OBJECT)
+      type_case(T_CLASS)
+      type_case(T_MODULE)
+      type_case(T_FLOAT)
+      type_case(T_STRING)
+      type_case(T_REGEXP)
+      type_case(T_ARRAY)
+      type_case(T_HASH)
+      type_case(T_STRUCT)
+      type_case(T_BIGNUM)
+      type_case(T_FILE)
+      type_case(T_DATA)
+      type_case(T_MATCH)
+      type_case(T_COMPLEX)
+      type_case(T_RATIONAL)
+      type_case(T_NIL)
+      type_case(T_TRUE)
+      type_case(T_FALSE)
+      type_case(T_SYMBOL)
+      type_case(T_FIXNUM)
+      type_case(T_UNDEF)
+      type_case(T_NODE)
+      type_case(T_ICLASS)
+      type_case(T_ZOMBIE)
+      default: return NULL;
+    }
+#undef type_case
+}
+
 static inline rb_method_entry_t *
 rb_search_method_entry(VALUE recv, ID mid)
 {
     VALUE klass = CLASS_OF(recv);
 
     if (!klass) {
-        const char *adj = "terminated";
-        if (!IMMEDIATE_P(recv) && RBASIC(recv)->flags != 0)
-            adj = "hidden";
-	rb_raise(rb_eNotImpError,
-		 "method `%s' called on %s object (%p)",
-		 rb_id2name(mid), adj, (void *)recv);
+        VALUE flags, klass;
+        if (IMMEDIATE_P(recv)) {
+            rb_raise(rb_eNotImpError,
+                     "method `%s' called on unexpected immediate object (%p)",
+                     rb_id2name(mid), (void *)recv);
+        }
+        flags = RBASIC(recv)->flags;
+        klass = RBASIC(recv)->klass;
+        if (flags == 0) {
+            rb_raise(rb_eNotImpError,
+                     "method `%s' called on terminated object"
+                     " (%p flags=0x%"PRIxVALUE" klass=0x%"PRIxVALUE")",
+                     rb_id2name(mid), (void *)recv, flags, klass);
+        }
+        else {
+            int type = BUILTIN_TYPE(recv);
+            const char *typestr = rb_type_str(type);
+            if (typestr && T_OBJECT <= type && type < T_NIL)
+                rb_raise(rb_eNotImpError,
+                         "method `%s' called on hidden %s object"
+                         " (%p flags=0x%"PRIxVALUE" klass=0x%"PRIxVALUE")",
+                         rb_id2name(mid), typestr, (void *)recv, flags, klass);
+            if (typestr)
+                rb_raise(rb_eNotImpError,
+                         "method `%s' called on unexpected %s object"
+                         " (%p flags=0x%"PRIxVALUE" klass=0x%"PRIxVALUE")",
+                         rb_id2name(mid), typestr, (void *)recv, flags, klass);
+            else
+                rb_raise(rb_eNotImpError,
+                         "method `%s' called on broken T_???" "(0x%02x) object"
+                         " (%p flags=0x%"PRIxVALUE" klass=0x%"PRIxVALUE")",
+                         rb_id2name(mid), type, (void *)recv, flags, klass);
+        }
     }
     return rb_method_entry(klass, mid);
 }
@@ -345,7 +407,7 @@ rb_method_call_status(rb_thread_t *th, rb_method_entry_t *me, call_type scope, V
 		if (self == Qundef) {
 		    self = th->cfp->self;
 		}
-		if (!rb_obj_is_kind_of(self, rb_class_real(defined_class))) {
+		if (!rb_obj_is_kind_of(self, defined_class)) {
 		    return NOEX_PROTECTED;
 		}
 	    }
@@ -754,6 +816,9 @@ rb_f_loop(VALUE self)
     return Qnil;		/* dummy */
 }
 
+static const char *
+vm_frametype_name(const rb_control_frame_t *cfp);
+
 VALUE
 rb_iterate(VALUE (* it_proc) (VALUE), VALUE data1,
 	   VALUE (* bl_proc) (ANYARGS), VALUE data2)
@@ -769,9 +834,15 @@ rb_iterate(VALUE (* it_proc) (VALUE), VALUE data1,
     if (state == 0) {
       iter_retry:
 	{
-	    rb_block_t *blockptr = RUBY_VM_GET_BLOCK_PTR_IN_CFP(th->cfp);
-	    blockptr->iseq = (void *)node;
-	    blockptr->proc = 0;
+	    rb_block_t *blockptr;
+	    if (bl_proc) {
+		blockptr = RUBY_VM_GET_BLOCK_PTR_IN_CFP(th->cfp);
+		blockptr->iseq = (void *)node;
+		blockptr->proc = 0;
+	    }
+	    else {
+		blockptr = GC_GUARDED_PTR_REF(th->cfp->lfp[0]);
+	    }
 	    th->passed_block = blockptr;
 	}
 	retval = (*it_proc) (data1);
@@ -786,7 +857,17 @@ rb_iterate(VALUE (* it_proc) (VALUE), VALUE data1,
 		state = 0;
 		th->state = 0;
 		th->errinfo = Qnil;
-		th->cfp = cfp;
+
+		/* check skipped frame */
+		while (th->cfp != cfp) {
+		    /* printf("skipped frame: %s\n", vm_frametype_name(th->cfp)); */
+		    if (UNLIKELY(VM_FRAME_TYPE(th->cfp) == VM_FRAME_MAGIC_CFUNC)) {
+			const rb_method_entry_t *me = th->cfp->me;
+			EXEC_EVENT_HOOK(th, RUBY_EVENT_C_RETURN, th->cfp->self, me->called_id, me->klass);
+		    }
+
+		    th->cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(th->cfp);
+		}
 	    }
 	    else{
 		/* SDR(); printf("%p, %p\n", cdfp, escape_dfp); */
@@ -1102,16 +1183,18 @@ yield_under(VALUE under, VALUE self, VALUE values)
 {
     rb_thread_t *th = GET_THREAD();
     rb_block_t block, *blockptr;
-    NODE *cref = vm_cref_push(th, under, NOEX_PUBLIC);
+    NODE *cref;
 
     if ((blockptr = GC_GUARDED_PTR_REF(th->cfp->lfp[0])) != 0) {
 	block = *blockptr;
 	block.self = self;
 	th->cfp->lfp[0] = GC_GUARDED_PTR(&block);
     }
+    cref = vm_cref_push(th, under, NOEX_PUBLIC, blockptr);
+    cref->flags |= NODE_FL_CREF_PUSHED_BY_EVAL;
 
     if (values == Qundef) {
-	return vm_yield_with_cref(th, 0, 0, cref);
+	return vm_yield_with_cref(th, 1, &self, cref);
     }
     else {
 	return vm_yield_with_cref(th, RARRAY_LENINT(values), RARRAY_PTR(values), cref);
@@ -1122,7 +1205,7 @@ yield_under(VALUE under, VALUE self, VALUE values)
 static VALUE
 eval_under(VALUE under, VALUE self, VALUE src, const char *file, int line)
 {
-    NODE *cref = vm_cref_push(GET_THREAD(), under, NOEX_PUBLIC);
+    NODE *cref = vm_cref_push(GET_THREAD(), under, NOEX_PUBLIC, NULL);
 
     if (rb_safe_level() >= 4) {
 	StringValue(src);
@@ -1496,7 +1579,7 @@ print_backtrace(void *arg, VALUE file, int line, VALUE method)
 void
 rb_backtrace(void)
 {
-    vm_backtrace_each(GET_THREAD(), -1, print_backtrace, stdout);
+    vm_backtrace_each(GET_THREAD(), -1, print_backtrace, stderr);
 }
 
 VALUE

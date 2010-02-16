@@ -1,11 +1,9 @@
 
-require 'rbconfig'
+require './rbconfig'
 require 'fileutils'
 require 'pp'
 
-Ruby = ENV['RUBY'] ||
-  File.join(RbConfig::CONFIG["bindir"],
-            RbConfig::CONFIG["ruby_install_name"] + RbConfig::CONFIG["EXEEXT"])
+Ruby = ENV['RUBY'] || RbConfig.ruby
 #
 
 OPTIONS = %w{

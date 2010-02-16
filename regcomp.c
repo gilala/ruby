@@ -4792,7 +4792,7 @@ optimize_node_left(Node* node, NodeOptInfo* opt, OptEnv* env)
 	  copy_node_opt_info(opt, &nopt);
 	  if (nopt.exb.len > 0) {
 	    if (nopt.exb.reach_end) {
-	      for (i = 2; i < qn->lower &&
+	      for (i = 2; i <= qn->lower &&
 		          ! is_full_opt_exact_info(&opt->exb); i++) {
 		concat_opt_exact_info(&opt->exb, &nopt.exb, env->enc);
 	      }
@@ -5046,7 +5046,7 @@ static void print_enc_string(FILE* fp, OnigEncoding enc,
 	fputc((int )code, fp);
       }
 
-      p += enclen(enc, p);
+      p += enclen(enc, p, end);
     }
   }
   else {
@@ -5357,7 +5357,7 @@ onig_compile(regex_t* reg, const UChar* pattern, const UChar* pattern_end,
 
   int r, init_size;
   Node*  root;
-  ScanEnv  scan_env;
+  ScanEnv  scan_env = {0};
 #ifdef USE_SUBEXP_CALL
   UnsetAddrList  uslist;
 #endif
@@ -5885,7 +5885,7 @@ p_len_string(FILE* f, LengthType len, int mb_len, UChar* s)
 }
 
 extern void
-onig_print_compiled_byte_code(FILE* f, UChar* bp, UChar** nextp,
+onig_print_compiled_byte_code(FILE* f, UChar* bp, UChar* bpend, UChar** nextp,
                               OnigEncoding enc)
 {
   int i, n, arg_type;
@@ -5984,7 +5984,7 @@ onig_print_compiled_byte_code(FILE* f, UChar* bp, UChar** nextp,
       break;
 
     case OP_EXACT1_IC:
-      len = enclen(enc, bp);
+      len = enclen(enc, bp, bpend);
       p_string(f, len, bp);
       bp += len;
       break;
@@ -6146,7 +6146,7 @@ print_compiled_byte_code_list(FILE* f, regex_t* reg)
       else
 	fputs(" ", f);
     }
-    onig_print_compiled_byte_code(f, bp, &bp, reg->enc);
+    onig_print_compiled_byte_code(f, bp, end, &bp, reg->enc);
   }
 
   fprintf(f, "\n");

@@ -76,12 +76,21 @@ rb_digest_s_hexencode(VALUE klass, VALUE str)
     return hexencode_str_new(str);
 }
 
+NORETURN(static void rb_digest_instance_method_unimpl(VALUE self, const char *method));
+
 /*
  * Document-module: Digest::Instance
  *
  * This module provides instance methods for a digest implementation
  * object to calculate message digest values.
  */
+
+static void
+rb_digest_instance_method_unimpl(VALUE self, const char *method)
+{
+    rb_raise(rb_eRuntimeError, "%s does not implement %s()",
+	     rb_obj_classname(self), method);
+}
 
 /*
  * call-seq:
@@ -97,7 +106,7 @@ rb_digest_s_hexencode(VALUE klass, VALUE str)
 static VALUE
 rb_digest_instance_update(VALUE self, VALUE str)
 {
-    rb_raise(rb_eRuntimeError, "%s does not implement update()", RSTRING_PTR(rb_inspect(self)));
+    rb_digest_instance_method_unimpl(self, "update");
 }
 
 /*
@@ -115,7 +124,7 @@ rb_digest_instance_update(VALUE self, VALUE str)
 static VALUE
 rb_digest_instance_finish(VALUE self)
 {
-    rb_raise(rb_eRuntimeError, "%s does not implement finish()", RSTRING_PTR(rb_inspect(self)));
+    rb_digest_instance_method_unimpl(self, "finish");
 }
 
 /*
@@ -129,7 +138,7 @@ rb_digest_instance_finish(VALUE self)
 static VALUE
 rb_digest_instance_reset(VALUE self)
 {
-    rb_raise(rb_eRuntimeError, "%s does not implement reset()", RSTRING_PTR(rb_inspect(self)));
+    rb_digest_instance_method_unimpl(self, "reset");
 }
 
 /*
@@ -170,10 +179,7 @@ rb_digest_instance_digest(int argc, VALUE *argv, VALUE self)
         value = rb_funcall(self, id_finish, 0);
         rb_funcall(self, id_reset, 0);
     } else {
-        VALUE clone = rb_obj_clone(self);
-
-        value = rb_funcall(clone, id_finish, 0);
-        rb_funcall(clone, id_reset, 0);
+        value = rb_funcall(rb_obj_clone(self), id_finish, 0);
     }
 
     return value;
@@ -218,10 +224,7 @@ rb_digest_instance_hexdigest(int argc, VALUE *argv, VALUE self)
         value = rb_funcall(self, id_finish, 0);
         rb_funcall(self, id_reset, 0);
     } else {
-        VALUE clone = rb_obj_clone(self);
-
-        value = rb_funcall(clone, id_finish, 0);
-        rb_funcall(clone, id_reset, 0);
+        value = rb_funcall(rb_obj_clone(self), id_finish, 0);
     }
 
     return hexencode_str_new(value);
@@ -231,8 +234,8 @@ rb_digest_instance_hexdigest(int argc, VALUE *argv, VALUE self)
  * call-seq:
  *     digest_obj.hexdigest! -> string
  *
- * Returns the resulting hash value and resets the digest to the
- * initial state.
+ * Returns the resulting hash value in a hex-encoded form and resets
+ * the digest to the initial state.
  */
 static VALUE
 rb_digest_instance_hexdigest_bang(VALUE self)
@@ -358,7 +361,7 @@ rb_digest_instance_length(VALUE self)
 static VALUE
 rb_digest_instance_block_length(VALUE self)
 {
-    rb_raise(rb_eRuntimeError, "%s does not implement block_length()", RSTRING_PTR(rb_inspect(self)));
+    rb_digest_instance_method_unimpl(self, "block_length");
 }
 
 /*

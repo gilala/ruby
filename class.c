@@ -150,6 +150,9 @@ rb_mod_init_copy(VALUE clone, VALUE orig)
     if (RCLASS_IV_TBL(orig)) {
 	ID id;
 
+	if (RCLASS_IV_TBL(clone)) {
+	    st_free_table(RCLASS_IV_TBL(clone));
+	}
 	RCLASS_IV_TBL(clone) = st_copy(RCLASS_IV_TBL(orig));
 	CONST_ID(id, "__classpath__");
 	st_delete(RCLASS_IV_TBL(clone), (st_data_t*)&id, 0);
@@ -158,6 +161,11 @@ rb_mod_init_copy(VALUE clone, VALUE orig)
     }
     if (RCLASS_M_TBL(orig)) {
 	struct clone_method_data data;
+
+	if (RCLASS_M_TBL(clone)) {
+	    extern void rb_free_m_table(st_table *tbl);
+	    rb_free_m_table(RCLASS_M_TBL(clone));
+	}
 	data.tbl = RCLASS_M_TBL(clone) = st_init_numtable();
 	data.klass = clone;
 	st_foreach(RCLASS_M_TBL(orig), clone_method,
@@ -171,7 +179,10 @@ rb_mod_init_copy(VALUE clone, VALUE orig)
 VALUE
 rb_class_init_copy(VALUE clone, VALUE orig)
 {
-    if (RCLASS_SUPER(clone) != 0) {
+    if (orig == rb_cBasicObject) {
+	rb_raise(rb_eTypeError, "can't copy the root class");
+    }
+    if (RCLASS_SUPER(clone) != 0 || clone == rb_cBasicObject) {
 	rb_raise(rb_eTypeError, "already initialized class");
     }
     if (FL_TEST(orig, FL_SINGLETON)) {
@@ -434,7 +445,7 @@ rb_define_class(const char *name, VALUE super)
 	    rb_raise(rb_eTypeError, "%s is not a class", name);
 	}
 	if (rb_class_real(RCLASS_SUPER(klass)) != super) {
-	    rb_name_error(id, "%s is already defined", name);
+	    rb_raise(rb_eTypeError, "superclass mismatch for class %s", name);
 	}
 	return klass;
     }

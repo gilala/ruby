@@ -399,7 +399,7 @@ class TestEncodingConverter < Test::Unit::TestCase
     src << "abc\r\ndef"; check_ec("abc\ndef",                             "", :source_buffer_empty, *a)
     src << "ghi\njkl";   check_ec("abc\ndefghi\njkl",                     "", :source_buffer_empty, *a)
     src << "mno\rpqr";   check_ec("abc\ndefghi\njklmno\npqr",             "", :source_buffer_empty, *a)
-    src << "stu\r";      check_ec("abc\ndefghi\njklmno\npqrstu\n",        "", :source_buffer_empty, *a)
+    src << "stu\r";      check_ec("abc\ndefghi\njklmno\npqrstu",          "", :source_buffer_empty, *a)
     src << "\nvwx";      check_ec("abc\ndefghi\njklmno\npqrstu\nvwx",     "", :source_buffer_empty, *a)
     src << "\nyz";       check_ec("abc\ndefghi\njklmno\npqrstu\nvwx\nyz", "", :source_buffer_empty, *a)
   end
@@ -410,9 +410,23 @@ class TestEncodingConverter < Test::Unit::TestCase
     src << "abc\r\ndef"; check_ec("abc\ndef",                             "", :source_buffer_empty, *a)
     src << "ghi\njkl";   check_ec("abc\ndefghi\njkl",                     "", :source_buffer_empty, *a)
     src << "mno\rpqr";   check_ec("abc\ndefghi\njklmno\npqr",             "", :source_buffer_empty, *a)
-    src << "stu\r";      check_ec("abc\ndefghi\njklmno\npqrstu\n",        "", :source_buffer_empty, *a)
+    src << "stu\r";      check_ec("abc\ndefghi\njklmno\npqrstu",          "", :source_buffer_empty, *a)
     src << "\nvwx";      check_ec("abc\ndefghi\njklmno\npqrstu\nvwx",     "", :source_buffer_empty, *a)
     src << "\nyz";       check_ec("abc\ndefghi\njklmno\npqrstu\nvwx\nyz", "", :source_buffer_empty, *a)
+  end
+
+  def test_universal_newline3
+    ec = Encoding::Converter.new("", "", universal_newline: true)
+    a = ["", src="", ec, nil, 50, :partial_input=>true]
+    src << "abc\r\ndef"; check_ec("abc\ndef",                               "", :source_buffer_empty, *a)
+    src << "ghi\njkl";   check_ec("abc\ndefghi\njkl",                       "", :source_buffer_empty, *a)
+    src << "mno\rpqr";   check_ec("abc\ndefghi\njklmno\npqr",               "", :source_buffer_empty, *a)
+    src << "stu\r";      check_ec("abc\ndefghi\njklmno\npqrstu",            "", :source_buffer_empty, *a)
+    src << "\nvwx";      check_ec("abc\ndefghi\njklmno\npqrstu\nvwx",       "", :source_buffer_empty, *a)
+    src << "\nyz";       check_ec("abc\ndefghi\njklmno\npqrstu\nvwx\nyz",   "", :source_buffer_empty, *a)
+    src << "\r";         check_ec("abc\ndefghi\njklmno\npqrstu\nvwx\nyz",   "", :source_buffer_empty, *a)
+    a[-1] = nil
+    src << "";           check_ec("abc\ndefghi\njklmno\npqrstu\nvwx\nyz\n", "", :finished, *a)
   end
 
   def test_crlf_newline
@@ -872,7 +886,7 @@ class TestEncodingConverter < Test::Unit::TestCase
                  Encoding::Converter.search_convpath("ISO-8859-1", "UTF-32BE", universal_newline: true))
   end
 
-  def test_invalid_replace
+  def test_invalid_replace2
     assert_raise(ArgumentError) {
       broken = "\x80".force_encoding("euc-jp")
       "".encode("euc-jp", :undef => :replace, :replace => broken)

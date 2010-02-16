@@ -322,7 +322,8 @@ rb_mod_nesting(void)
 
     while (cref && cref->nd_next) {
 	VALUE klass = cref->nd_clss;
-	if (!NIL_P(klass)) {
+	if (!(cref->flags & NODE_FL_CREF_PUSHED_BY_EVAL) &&
+	    !NIL_P(klass)) {
 	    rb_ary_push(ary, klass);
 	}
 	cref = cref->nd_next;
@@ -399,11 +400,10 @@ rb_frozen_class_p(VALUE klass)
 NORETURN(static void rb_longjmp(int, volatile VALUE));
 
 static void
-rb_longjmp(int tag, volatile VALUE mesg)
+setup_exception(rb_thread_t *th, int tag, volatile VALUE mesg)
 {
     VALUE at;
     VALUE e;
-    rb_thread_t *th = GET_THREAD();
     const char *file;
     volatile int line = 0;
 
@@ -472,10 +472,15 @@ rb_longjmp(int tag, volatile VALUE mesg)
     rb_trap_restore_mask();
 
     if (tag != TAG_FATAL) {
-	EXEC_EVENT_HOOK(th, RUBY_EVENT_RAISE, th->cfp->self,
-			0 /* TODO: id */, 0 /* TODO: klass */);
+	EXEC_EVENT_HOOK(th, RUBY_EVENT_RAISE, th->cfp->self, 0, 0);
     }
+}
 
+static void
+rb_longjmp(int tag, volatile VALUE mesg)
+{
+    rb_thread_t *th = GET_THREAD();
+    setup_exception(th, tag, mesg);
     rb_thread_raised_clear(th);
     JUMP_TAG(tag);
 }
@@ -606,9 +611,18 @@ void
 rb_raise_jump(VALUE mesg)
 {
     rb_thread_t *th = GET_THREAD();
+    rb_control_frame_t *cfp = th->cfp;
+    VALUE klass = cfp->me->klass;
+    VALUE self = cfp->self;
+    ID mid = cfp->me->called_id;
+
     th->cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(th->cfp);
-    /* TODO: fix me */
-    rb_longjmp(TAG_RAISE, mesg);
+
+    setup_exception(th, TAG_RAISE, mesg);
+
+    EXEC_EVENT_HOOK(th, RUBY_EVENT_C_RETURN, self, mid, klass);
+    rb_thread_raised_clear(th);
+    JUMP_TAG(TAG_RAISE);
 }
 
 void
@@ -722,19 +736,19 @@ rb_protect(VALUE (* proc) (VALUE), VALUE data, int * state)
     int status;
     rb_thread_t *th = GET_THREAD();
     rb_control_frame_t *cfp = th->cfp;
-    struct rb_vm_trap_tag trap_tag;
+    struct rb_vm_protect_tag protect_tag;
     rb_jmpbuf_t org_jmpbuf;
 
-    trap_tag.prev = th->trap_tag;
+    protect_tag.prev = th->protect_tag;
 
     PUSH_TAG();
-    th->trap_tag = &trap_tag;
+    th->protect_tag = &protect_tag;
     MEMCPY(&org_jmpbuf, &(th)->root_jmpbuf, rb_jmpbuf_t, 1);
     if ((status = EXEC_TAG()) == 0) {
 	SAVE_ROOT_JMPBUF(th, result = (*proc) (data));
     }
     MEMCPY(&(th)->root_jmpbuf, &org_jmpbuf, rb_jmpbuf_t, 1);
-    th->trap_tag = trap_tag.prev;
+    th->protect_tag = protect_tag.prev;
     POP_TAG();
 
     if (state) {

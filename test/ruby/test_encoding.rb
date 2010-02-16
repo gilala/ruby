@@ -1,4 +1,5 @@
 require 'test/unit'
+require_relative 'envutil'
 
 class TestEncoding < Test::Unit::TestCase
 
@@ -39,6 +40,20 @@ class TestEncoding < Test::Unit::TestCase
     assert_raise(ArgumentError) { Encoding.find("foobarbazqux") }
     assert_nothing_raised{Encoding.find("locale")}
     assert_nothing_raised{Encoding.find("filesystem")}
+
+    if /(?:ms|dar)win/ !~ RUBY_PLATFORM
+      # Unix's filesystem encoding is default_external
+      assert_ruby_status(%w[-EUTF-8:EUC-JP], <<-'EOS')
+        exit Encoding.find("filesystem") == Encoding::UTF_8
+        Encoding.default_external = Encoding::EUC_JP
+        exit Encoding.find("filesystem") == Encoding::EUC_JP
+      EOS
+    end
+  end
+
+  def test_replicate
+    assert(Encoding::UTF_8.replicate('UTF-8-ANOTHER'))
+    assert(Encoding::ISO_2022_JP.replicate('ISO-2022-JP-ANOTHER'))
   end
 
   def test_dummy_p

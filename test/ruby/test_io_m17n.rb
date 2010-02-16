@@ -558,6 +558,12 @@ EOT
       assert_equal(eucjp, r.read)
     }
 
+    with_pipe("UTF-8") {|r,w|
+      w << "a" * 1023 + "\u3042" + "a" * 1022
+      w.close
+      assert_equal(true, r.read.valid_encoding?)
+    }
+
     with_pipe("UTF-8:EUC-JP") {|r,w|
       assert_equal(Encoding::UTF_8, r.external_encoding)
       assert_equal(Encoding::EUC_JP, r.internal_encoding)
@@ -1505,7 +1511,6 @@ EOT
         assert_equal("a", f.getc)
         assert_equal("\n", f.getc)
         f.binmode
-        assert_equal("\n", f.getc)
         assert_equal("b", f.getc)
         assert_equal("\r", f.getc)
         assert_equal("\n", f.getc)
@@ -1525,7 +1530,6 @@ EOT
         assert_equal("a", f.getc)
         assert_equal("\n", f.getc)
         f.binmode
-        assert_equal("\n", f.getc)
         assert_equal("b", f.getc)
         assert_equal("\r", f.getc)
         assert_equal("\n", f.getc)

@@ -360,44 +360,30 @@ call_cfunc(VALUE (*func)(), VALUE recv,
 
 static inline VALUE
 vm_call_cfunc(rb_thread_t *th, rb_control_frame_t *reg_cfp,
-	      int num, VALUE recv, const rb_block_t *blockptr, VALUE flag,
+	      int num, VALUE recv, const rb_block_t *blockptr,
 	      const rb_method_entry_t *me)
 {
     VALUE val = 0;
     int state = 0;
     const rb_method_definition_t *def = me->def;
-    VALUE klass = me->klass;
-    ID id = me->called_id;
+    rb_control_frame_t *cfp;
 
-    EXEC_EVENT_HOOK(th, RUBY_EVENT_C_CALL, recv, id, klass);
+    EXEC_EVENT_HOOK(th, RUBY_EVENT_C_CALL, recv, me->called_id, me->klass);
 
-    TH_PUSH_TAG(th);
-    /* TODO: fix me.  separate event */
-    if (th->event_flags & (RUBY_EVENT_C_RETURN | RUBY_EVENT_VM)) {
-	state = TH_EXEC_TAG();
+    cfp = vm_push_frame(th, 0, VM_FRAME_MAGIC_CFUNC,
+			recv, (VALUE) blockptr, 0, reg_cfp->sp, 0, 1);
+    cfp->me = me;
+    reg_cfp->sp -= num + 1;
+
+    val = call_cfunc(def->body.cfunc.func, recv, (int)def->body.cfunc.argc, num, reg_cfp->sp + 1);
+
+    if (reg_cfp != th->cfp + 1) {
+	rb_bug("cfp consistency error - send");
     }
-    else {
-	_th->tag = _tag.prev;
-    }
-    if (state == 0) {
-	rb_control_frame_t *cfp =
-	    vm_push_frame(th, 0, VM_FRAME_MAGIC_CFUNC,
-			  recv, (VALUE) blockptr, 0, reg_cfp->sp, 0, 1);
 
-	cfp->me = me;
-	reg_cfp->sp -= num + 1;
+    vm_pop_frame(th);
 
-	val = call_cfunc(def->body.cfunc.func, recv, (int)def->body.cfunc.argc, num, reg_cfp->sp + 1);
-
-	if (reg_cfp != th->cfp + 1) {
-	    rb_bug("cfp consistency error - send");
-	}
-
-	vm_pop_frame(th);
-    }
-    TH_POP_TAG();
-    EXEC_EVENT_HOOK(th, RUBY_EVENT_C_RETURN, recv, id, klass);
-    if (state) TH_JUMP_TAG(th, state);
+    EXEC_EVENT_HOOK(th, RUBY_EVENT_C_RETURN, recv, me->called_id, me->klass);
 
     return val;
 }
@@ -512,7 +498,7 @@ vm_call_method(rb_thread_t *th, rb_control_frame_t *cfp,
 	      }
 	      case VM_METHOD_TYPE_NOTIMPLEMENTED:
 	      case VM_METHOD_TYPE_CFUNC:{
-		val = vm_call_cfunc(th, cfp, num, recv, blockptr, flag, me);
+		val = vm_call_cfunc(th, cfp, num, recv, blockptr, me);
 		break;
 	      }
 	      case VM_METHOD_TYPE_ATTRSET:{
@@ -623,7 +609,7 @@ vm_call_method(rb_thread_t *th, rb_control_frame_t *cfp,
 		    defined_class = RBASIC(defined_class)->klass;
 		}
 
-		if (!rb_obj_is_kind_of(cfp->self, rb_class_real(defined_class))) {
+		if (!rb_obj_is_kind_of(cfp->self, defined_class)) {
 		    val = vm_method_missing(th, id, recv, num, blockptr, NOEX_PROTECTED);
 		}
 		else {
@@ -1066,14 +1052,17 @@ vm_get_cref(const rb_iseq_t *iseq, const VALUE *lfp, const VALUE *dfp)
 }
 
 static NODE *
-vm_cref_push(rb_thread_t *th, VALUE klass, int noex)
+vm_cref_push(rb_thread_t *th, VALUE klass, int noex, rb_block_t *blockptr)
 {
     rb_control_frame_t *cfp = vm_get_ruby_level_caller_cfp(th, th->cfp);
     NODE *cref = NEW_BLOCK(klass);
     cref->nd_file = 0;
     cref->nd_visi = noex;
 
-    if (cfp) {
+    if (blockptr) {
+	cref->nd_next = vm_get_cref(blockptr->iseq, blockptr->lfp, blockptr->dfp);
+    }
+    else if (cfp) {
 	cref->nd_next = vm_get_cref(cfp->iseq, cfp->lfp, cfp->dfp);
     }
 
@@ -1088,6 +1077,23 @@ vm_get_cbase(const rb_iseq_t *iseq, const VALUE *lfp, const VALUE *dfp)
 
     while (cref) {
 	if ((klass = cref->nd_clss) != 0) {
+	    break;
+	}
+	cref = cref->nd_next;
+    }
+
+    return klass;
+}
+
+static inline VALUE
+vm_get_const_base(const rb_iseq_t *iseq, const VALUE *lfp, const VALUE *dfp)
+{
+    NODE *cref = vm_get_cref(iseq, lfp, dfp);
+    VALUE klass = Qundef;
+
+    while (cref) {
+	if (!(cref->flags & NODE_FL_CREF_PUSHED_BY_EVAL) &&
+	    (klass = cref->nd_clss) != 0) {
 	    break;
 	}
 	cref = cref->nd_next;
@@ -1117,12 +1123,16 @@ vm_get_ev_const(rb_thread_t *th, const rb_iseq_t *iseq,
 
     if (orig_klass == Qnil) {
 	/* in current lexical scope */
-	const NODE *root_cref = vm_get_cref(iseq, th->cfp->lfp, th->cfp->dfp);
-	const NODE *cref = root_cref;
+	const NODE *cref = vm_get_cref(iseq, th->cfp->lfp, th->cfp->dfp);
+	const NODE *root_cref = NULL;
 	VALUE klass = orig_klass;
 
 	while (cref && cref->nd_next) {
-	    klass = cref->nd_clss;
+	    if (!(cref->flags & NODE_FL_CREF_PUSHED_BY_EVAL)) {
+		klass = cref->nd_clss;
+		if (root_cref == NULL)
+		    root_cref = cref;
+	    }
 	    cref = cref->nd_next;
 
 	    if (!NIL_P(klass)) {
@@ -1149,8 +1159,10 @@ vm_get_ev_const(rb_thread_t *th, const rb_iseq_t *iseq,
 	}
 
 	/* search self */
-	klass = root_cref->nd_clss;
-	if (NIL_P(klass)) {
+	if (root_cref && !NIL_P(root_cref->nd_clss)) {
+	    klass = root_cref->nd_clss;
+	}
+	else {
 	    klass = CLASS_OF(th->cfp->self);
 	}
 
@@ -1178,7 +1190,8 @@ vm_get_cvar_base(NODE *cref)
     VALUE klass;
 
     while (cref && cref->nd_next &&
-	   (NIL_P(cref->nd_clss) || FL_TEST(cref->nd_clss, FL_SINGLETON))) {
+	   (NIL_P(cref->nd_clss) || FL_TEST(cref->nd_clss, FL_SINGLETON) ||
+	    (cref->flags & NODE_FL_CREF_PUSHED_BY_EVAL))) {
 	cref = cref->nd_next;
 
 	if (!cref->nd_next) {
@@ -1478,7 +1491,7 @@ vm_throw(rb_thread_t *th, rb_control_frame_t *reg_cfp,
 				    dfp = cfp->dfp;
 				    goto valid_return;
 				}
-				tdfp = GC_GUARDED_PTR_REF((VALUE *)*dfp);
+				tdfp = GC_GUARDED_PTR_REF((VALUE *)*tdfp);
 			    }
 			}
 		    }
@@ -1645,9 +1658,9 @@ struct opt_case_dispatch_i_arg {
 };
 
 static int
-opt_case_dispatch_i(st_data_t key, st_data_t data, void *p)
+opt_case_dispatch_i(st_data_t key, st_data_t data, st_data_t p)
 {
-    struct opt_case_dispatch_i_arg *arg = p;
+    struct opt_case_dispatch_i_arg *arg = (void *)p;
 
     if (RTEST(rb_funcall((VALUE)key, idEqq, 1, arg->obj))) {
 	arg->label = FIX2INT((VALUE)data);

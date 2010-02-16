@@ -111,7 +111,7 @@ rb_memsearch_ss(const unsigned char *xs, long m, const unsigned char *ys, long n
     if (m > SIZEOF_VALUE)
 	rb_bug("!!too long pattern string!!");
 
-    	/* Prepare hash value */
+    /* Prepare hash value */
     for (hx = *x++, hy = *y++; x < xe; ++x, ++y) {
 	hx <<= CHAR_BIT;
 	hy <<= CHAR_BIT;
@@ -354,7 +354,7 @@ rb_reg_expr_str(VALUE str, const char *s, long len)
 	    }
 	    else if (c == -1) {
                 int l = mbclen(p, pend, enc);
-	    	rb_str_buf_cat(str, p, l);
+		rb_str_buf_cat(str, p, l);
 		p += l;
 		continue;
 	    }
@@ -524,9 +524,9 @@ rb_reg_to_s(VALUE re)
                                 rb_enc_get(re),
                                 OnigDefaultSyntax);
 	    if (r == 0) {
-		 ++ptr;
- 		 len -= 2;
-		 err = (onig_compile(rp, ptr, ptr + len, NULL, NULL, 0) != 0);
+		++ptr;
+		len -= 2;
+		err = (onig_compile(rp, ptr, ptr + len, NULL, NULL, 0) != 0);
 	    }
 	    onig_free(rp);
 	}
@@ -1653,33 +1653,33 @@ match_aref(int argc, VALUE *argv, VALUE match)
     rb_scan_args(argc, argv, "11", &idx, &rest);
 
     if (NIL_P(rest)) {
-      if (FIXNUM_P(idx)) {
-        if (FIX2INT(idx) >= 0) {
-          return rb_reg_nth_match(FIX2INT(idx), match);
-        }
-      }
-      else {
-        const char *p;
-        int num;
+	if (FIXNUM_P(idx)) {
+	    if (FIX2INT(idx) >= 0) {
+		return rb_reg_nth_match(FIX2INT(idx), match);
+	    }
+	}
+	else {
+	    const char *p;
+	    int num;
 
-        switch (TYPE(idx)) {
-          case T_SYMBOL:
-            p = rb_id2name(SYM2ID(idx));
-            goto name_to_backref;
-            break;
-          case T_STRING:
-            p = StringValuePtr(idx);
+	    switch (TYPE(idx)) {
+	      case T_SYMBOL:
+		p = rb_id2name(SYM2ID(idx));
+		goto name_to_backref;
+		break;
+	      case T_STRING:
+		p = StringValuePtr(idx);
 
-          name_to_backref:
-            num = name_to_backref_number(RMATCH_REGS(match),
-                       RMATCH(match)->regexp, p, p + strlen(p));
-            return rb_reg_nth_match(num, match);
-            break;
+	      name_to_backref:
+		num = name_to_backref_number(RMATCH_REGS(match),
+					     RMATCH(match)->regexp, p, p + strlen(p));
+		return rb_reg_nth_match(num, match);
+		break;
 
-          default:
-            break;
-        }
-      }
+	      default:
+		break;
+	    }
+	}
     }
 
     return rb_ary_aref(argc, argv, match_to_a(match));
@@ -2413,9 +2413,20 @@ rb_reg_s_alloc(VALUE klass)
 }
 
 VALUE
+rb_reg_alloc(void)
+{
+    return rb_reg_s_alloc(rb_cRegexp);
+}
+
+VALUE
 rb_reg_new_str(VALUE s, int options)
 {
-    VALUE re = rb_reg_s_alloc(rb_cRegexp);
+    return rb_reg_init_str(rb_reg_alloc(), s, options);
+}
+
+VALUE
+rb_reg_init_str(VALUE re, VALUE s, int options)
+{
     onig_errmsg_buffer err = "";
 
     if (rb_reg_initialize_str(re, s, options, err, NULL, 0) != 0) {
@@ -2434,7 +2445,7 @@ rb_reg_new_ary(VALUE ary, int opt)
 VALUE
 rb_enc_reg_new(const char *s, long len, rb_encoding *enc, int options)
 {
-    VALUE re = rb_reg_s_alloc(rb_cRegexp);
+    VALUE re = rb_reg_alloc();
     onig_errmsg_buffer err = "";
 
     if (rb_reg_initialize(re, s, len, enc, options, err, NULL, 0) != 0) {
@@ -2453,7 +2464,7 @@ rb_reg_new(const char *s, long len, int options)
 VALUE
 rb_reg_compile(VALUE str, int options, const char *sourcefile, int sourceline)
 {
-    VALUE re = rb_reg_s_alloc(rb_cRegexp);
+    VALUE re = rb_reg_alloc();
     onig_errmsg_buffer err = "";
 
     if (!str) str = rb_str_new(0,0);

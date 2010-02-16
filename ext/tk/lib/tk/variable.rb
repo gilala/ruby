@@ -1164,10 +1164,8 @@ end
       [other, self.to_s]
     when Symbol
       [other, self.to_sym]
-    when Integer
-      [other, self.to_i]
-    when Float
-      [other, self.to_f]
+    when Numeric
+      [other, self.numeric]
     when Array
       [other, self.to_a]
     else
@@ -1218,7 +1216,7 @@ end
     end
   end
   def *(other)
-    num_or_str(self._value) * other.to_i
+    num_or_str(self._value) * other
     #begin
     #  number(self._value) * other
     #rescue
@@ -1229,7 +1227,7 @@ end
     number(self._value) / other
   end
   def %(other)
-    num_or_str(self._value) % other.to_i
+    num_or_str(self._value) % other
     #begin
     #  number(self._value) % other
     #rescue

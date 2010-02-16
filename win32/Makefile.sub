@@ -116,6 +116,9 @@ PLATFORM = mswin32
 !if !defined(RT)
 !error RT not defined.  Retry from configure pass.
 !endif
+!ifdef NTVER
+ARCHDEFS = -D_WIN32_WINNT=$(NTVER) $(ARCHDEFS)
+!endif
 
 arch = $(ARCH)-$(PLATFORM)
 sitearch = $(ARCH)-$(RT)
@@ -239,6 +242,7 @@ LIBRUBY_LDSHARED = $(LDSHARED)
 LIBRUBY_DLDFLAGS = $(EXTLDFLAGS) -implib:dummy.lib -def:$(RUBYDEF)
 
 EXEEXT = .exe
+EXECUTABLE_EXTS = ".exe",".com",".cmd",".bat"
 !if !defined(PROGRAM)
 PROGRAM=$(RUBY_INSTALL_NAME)$(EXEEXT)
 !endif
@@ -561,19 +565,12 @@ $(CONFIG_H): $(MKFILES) $(srcdir)/win32/Makefile.sub $(win_srcdir)/Makefile.sub
 #define DEFAULT_KCODE KCODE_NONE
 #define LOAD_RELATIVE 1
 #define DLEXT ".so"
+#define EXECUTABLE_EXTS $(EXECUTABLE_EXTS)
 #define RUBY_LIB_VERSION_STYLE 3	/* full */
 #define RUBY_LIB_PREFIX "/lib/$(RUBY_BASE_NAME)"
-#define RUBY_LIB RUBY_LIB_PREFIX"/"RUBY_LIB_VERSION
-#define RUBY_SITE_LIB RUBY_LIB_PREFIX"/site_ruby"
-#define RUBY_SITE_LIB2 RUBY_SITE_LIB"/"RUBY_LIB_VERSION
-#define RUBY_VENDOR_LIB RUBY_LIB_PREFIX"/vendor_ruby"
-#define RUBY_VENDOR_LIB2 RUBY_VENDOR_LIB"/"RUBY_LIB_VERSION
 #define RUBY_PLATFORM "$(arch)"
 #define RUBY_SITEARCH "$(sitearch)"
 #define RUBY_COREDLL "$(RT)"
-#define RUBY_ARCHLIB RUBY_LIB"/"RUBY_ARCH
-#define RUBY_SITE_ARCHLIB RUBY_SITE_LIB2"/"RUBY_SITEARCH
-#define RUBY_VENDOR_ARCHLIB RUBY_VENDOR_LIB2"/"RUBY_SITEARCH
 #define LIBRUBY_SO "$(LIBRUBY_SO)"
 #if 0
 $(BANG)if "$(RUBY_SO_NAME)"!="$$(RUBY_SO_NAME)" || "$(ARCH)-$(PLATFORM)"!="$$(ARCH)-$$(PLATFORM)"
@@ -596,6 +593,9 @@ $(BANG)endif
 #	@del $(RUBY_CONFIG_H)
 #	@ren $(RUBY_CONFIG_H:.h=_h).bak $(RUBY_CONFIG_H)
 #!endif
+
+EXECUTABLE_EXTS = $(EXECUTABLE_EXTS:"=) # "
+EXECUTABLE_EXTS = $(EXECUTABLE_EXTS:,= )
 
 config.status: $(MKFILES) $(srcdir)/win32/Makefile.sub $(win_srcdir)/Makefile.sub $(srcdir)/common.mk
 	@echo Creating $@
@@ -660,6 +660,7 @@ s,@LIBOBJS@,$(LIBOBJS),;t t
 s,@ALLOCA@,$(ALLOCA),;t t
 s,@DEFAULT_KCODE@,$(DEFAULT_KCODE),;t t
 s,@EXEEXT@,.exe,;t t
+s,@EXECUTABLE_EXTS@,$(EXECUTABLE_EXTS),;t t
 s,@OBJEXT@,$(OBJEXT),;t t
 s,@XCFLAGS@,$(XCFLAGS),;t t
 s,@XLDFLAGS@,$(XLDFLAGS),;t t
@@ -739,7 +740,7 @@ s,@try_header@,try_compile,;t t
 miniruby: miniruby$(EXEEXT)
 
 miniruby$(EXEEXT):
-		@echo. $(LIBS)
+		@echo $(LIBS)
 		$(PURIFY) $(CC) $(MAINOBJ) $(MINIOBJS) $(COMMONOBJS) $(DMYEXT) $(LIBS) -Fe$@ -link $(LDFLAGS)
 		@$(RM) miniruby.lib miniruby.exp
 		miniruby.exe -v
@@ -775,7 +776,7 @@ $(LIBRUBY):	$(RUBYDEF)
 		$(AR) $(ARFLAGS)$@ -def:$(RUBYDEF)
 
 $(LIBRUBY_SO):	$(LIBRUBY_A) $(DLDOBJS) $(RUBYDEF) $(RUBY_SO_NAME).res
-		@echo. $(DLDOBJS)
+		@echo $(DLDOBJS)
 		@-$(PRE_LIBRUBY_UPDATE)
 		$(LDSHARED) $(MAINOBJ) $(DLDOBJS) $(LIBRUBY_A) \
 			$(RUBY_SO_NAME).res $(LIBS) -Fe$@ -link $(LDFLAGS) \

@@ -215,16 +215,25 @@ class IMAPTest < Test::Unit::TestCase
         begin
           th = Thread.current
           m = Monitor.new
+          in_idle = false
+          exception_raised = false
           c = m.new_cond
           Thread.start do
             m.synchronize do
-              c.wait
+              until in_idle
+                c.wait(0.1)
+              end
             end
             th.raise(Interrupt)
+            exception_raised = true
           end
           imap.idle do |res|
             m.synchronize do
+              in_idle = true
               c.signal
+              until exception_raised
+                c.wait(0.1)
+              end
             end
           end
         rescue Interrupt
@@ -264,6 +273,34 @@ class IMAPTest < Test::Unit::TestCase
         end
       ensure
         imap.disconnect if imap
+      end
+    ensure
+      server.close
+    end
+  end
+
+  def test_unexpected_bye
+    server = TCPServer.new(0)
+    port = server.addr[1]
+    Thread.start do
+      begin
+        sock = server.accept
+        begin
+          sock.print("* OK Gimap ready for requests from 75.101.246.151 33if2752585qyk.26\r\n")
+          sock.gets
+          sock.print("* BYE System Error 33if2752585qyk.26\r\n")
+        ensure
+          sock.close
+        end
+      rescue
+      end
+    end
+    begin
+      begin
+        imap = Net::IMAP.new("localhost", :port => port)
+        assert_raise(Net::IMAP::ByeResponseError) do
+          imap.login("user", "password")
+        end
       end
     ensure
       server.close

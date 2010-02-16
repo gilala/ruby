@@ -14,6 +14,7 @@
 #include "ruby/ruby.h"
 #include "ruby/st.h"
 #include "ruby/util.h"
+#include <errno.h>
 
 #ifdef __APPLE__
 #include <crt_externs.h>
@@ -191,7 +192,7 @@ static VALUE
 hash_foreach_call(struct hash_foreach_arg *arg)
 {
     if (st_foreach(RHASH(arg->hash)->ntbl, hash_foreach_iter, (st_data_t)arg)) {
- 	rb_raise(rb_eRuntimeError, "hash modified during iteration");
+	rb_raise(rb_eRuntimeError, "hash modified during iteration");
     }
     return Qnil;
 }
@@ -1070,6 +1071,7 @@ replace_i(VALUE key, VALUE val, VALUE hash)
 static VALUE
 rb_hash_replace(VALUE hash, VALUE hash2)
 {
+    rb_hash_modify_check(hash);
     hash2 = to_hash(hash2);
     if (hash == hash2) return hash;
     rb_hash_clear(hash);
@@ -2009,7 +2011,18 @@ rb_env_path_tainted(void)
     return path_tainted;
 }
 
-#if !defined(_WIN32) && !(defined(HAVE_SETENV) && defined(HAVE_UNSETENV))
+#if defined(_WIN32) || (defined(HAVE_SETENV) && defined(HAVE_UNSETENV))
+#elif defined __sun__
+static int
+in_origenv(const char *str)
+{
+    char **env;
+    for (env = origenviron; *env; ++env) {
+	if (*env == str) return 1;
+    }
+    return 0;
+}
+#else
 static int
 envix(const char *nam)
 {
@@ -2032,6 +2045,10 @@ ruby_setenv(const char *name, const char *value)
 #if defined(_WIN32)
     int len;
     char *buf;
+    if (strchr(name, '=')) {
+	errno = EINVAL;
+	rb_sys_fail("ruby_setenv");
+    }
     if (value) {
 	len = strlen(name) + 1 + strlen(value) + 1;
 	buf = ALLOCA_N(char, len);
@@ -2039,7 +2056,7 @@ ruby_setenv(const char *name, const char *value)
 	putenv(buf);
 
 	/* putenv() doesn't handle empty value */
-	if (*value)
+	if (!*value)
 	    SetEnvironmentVariable(name,value);
     }
     else {
@@ -2051,13 +2068,46 @@ ruby_setenv(const char *name, const char *value)
 #elif defined(HAVE_SETENV) && defined(HAVE_UNSETENV)
 #undef setenv
 #undef unsetenv
-    if (value)
-	setenv(name,value,1);
-    else
+    if (value) {
+	if (setenv(name, value, 1))
+	    rb_sys_fail("setenv");
+    } else {
+#ifdef VOID_UNSETENV
 	unsetenv(name);
+#else
+	if (unsetenv(name))
+	    rb_sys_fail("unsetenv");
+#endif
+    }
+#elif defined __sun__
+    size_t len;
+    char **env_ptr, *str;
+    if (strchr(name, '=')) {
+	errno = EINVAL;
+	rb_sys_fail("ruby_setenv");
+    }
+    len = strlen(name);
+    for (env_ptr = GET_ENVIRON(environ); (str = *env_ptr) != 0; ++env_ptr) {
+	if (!strncmp(str, name, len) && str[len] == '=') {
+	    if (!in_origenv(str)) free(str);
+	    while ((env_ptr[0] = env_ptr[1]) != 0) env_ptr++;
+	    break;
+	}
+    }
+    if (value) {
+	str = malloc(len += strlen(value) + 2);
+	snprintf(str, len, "%s=%s", name, value);
+	if (putenv(str))
+	    rb_sys_fail("putenv");
+    }
 #else  /* WIN32 */
     size_t len;
-    int i=envix(name);		        /* where does it go? */
+    int i;
+    if (strchr(name, '=')) {
+	errno = EINVAL;
+	rb_sys_fail("ruby_setenv");
+    }
+    i=envix(name);		        /* where does it go? */
 
     if (environ == origenviron) {	/* need we copy environment? */
 	int j;

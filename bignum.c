@@ -436,6 +436,8 @@ rb_cstr_to_inum(const char *str, int base, int badcheck)
     VALUE z;
     BDIGIT *zds;
 
+#undef ISDIGIT
+#define ISDIGIT(c) ('0' <= (c) && (c) <= '9')
 #define conv_digit(c) \
     (!ISASCII(c) ? -1 : \
      ISDIGIT(c) ? ((c) - '0') : \
@@ -1329,6 +1331,111 @@ rb_big_cmp(VALUE x, VALUE y)
 	    (RBIGNUM_SIGN(x) ? INT2FIX(-1) : INT2FIX(1));
 }
 
+static VALUE
+big_op(VALUE x, VALUE y, int op)
+{
+    VALUE rel;
+    int n;
+
+    switch (TYPE(y)) {
+      case T_FIXNUM:
+      case T_BIGNUM:
+	rel = rb_big_cmp(x, y);
+	break;
+
+      case T_FLOAT:
+	{
+	    double a = RFLOAT_VALUE(y);
+
+	    if (isinf(a)) {
+		if (a > 0.0) return INT2FIX(-1);
+		else return INT2FIX(1);
+	    }
+	    rel = rb_dbl_cmp(rb_big2dbl(x), a);
+	    break;
+	}
+
+      default:
+	{
+	    ID id = 0;
+	    switch (op) {
+		case 0: id = '>'; break;
+		case 1: id = rb_intern(">="); break;
+		case 2: id = '<'; break;
+		case 3: id = rb_intern("<="); break;
+	    }
+	    return rb_num_coerce_relop(x, y, id);
+	}
+    }
+
+    if (NIL_P(rel)) return Qfalse;
+    n = FIX2INT(rel);
+
+    switch (op) {
+	case 0: return n >  0 ? Qtrue : Qfalse;
+	case 1: return n >= 0 ? Qtrue : Qfalse;
+	case 2: return n <  0 ? Qtrue : Qfalse;
+	case 3: return n <= 0 ? Qtrue : Qfalse;
+    }
+    return Qundef;
+}
+
+/*
+ * call-seq:
+ *   big > real  ->  true or false
+ *
+ * Returns <code>true</code> if the value of <code>big</code> is
+ * greater than that of <code>real</code>.
+ */
+
+static VALUE
+big_gt(VALUE x, VALUE y)
+{
+    return big_op(x, y, 0);
+}
+
+/*
+ * call-seq:
+ *   big >= real  ->  true or false
+ *
+ * Returns <code>true</code> if the value of <code>big</code> is
+ * greater than or equal to that of <code>real</code>.
+ */
+
+static VALUE
+big_ge(VALUE x, VALUE y)
+{
+    return big_op(x, y, 1);
+}
+
+/*
+ * call-seq:
+ *   big < real  ->  true or false
+ *
+ * Returns <code>true</code> if the value of <code>big</code> is
+ * less than that of <code>real</code>.
+ */
+
+static VALUE
+big_lt(VALUE x, VALUE y)
+{
+    return big_op(x, y, 2);
+}
+
+/*
+ * call-seq:
+ *   big <= real  ->  true or false
+ *
+ * Returns <code>true</code> if the value of <code>big</code> is
+ * less than or equal to that of <code>real</code>.
+ */
+
+static VALUE
+big_le(VALUE x, VALUE y)
+{
+    return big_op(x, y, 3);
+}
+
 /*
  *  call-seq:
  *     big == obj  => true or false
@@ -1518,8 +1625,6 @@ bigsub_int(VALUE x, long y0)
 #if SIZEOF_BDIGITS == SIZEOF_LONG
     num = (BDIGIT_DBL_SIGNED)xds[0] - y;
     if (xn == 1 && num < 0) {
-	for (i=0; i<xn; i++) {
-	}
 	RBIGNUM_SET_SIGN(z, !RBIGNUM_SIGN(x));
 	zds[0] = (BDIGIT)-num;
 	return bignorm(z);
@@ -1906,8 +2011,8 @@ bigmul1_karatsuba(VALUE x, VALUE y)
 
     if (!BIGZEROP(xl) && !BIGZEROP(yl)) {
 	/* t2 <- xl * yl */
-    	t2 = bigmul0(xl, yl);
-    	t2n = big_real_len(t2);
+	t2 = bigmul0(xl, yl);
+	t2n = big_real_len(t2);
 
 	/* copy t2 into low bytes of the result (z0) */
 	MEMCPY(zds, BDIGITS(t2), BDIGIT, t2n);
@@ -2015,7 +2120,7 @@ dump_bignum(VALUE x)
     long i;
     printf("0x0");
     for (i = RBIGNUM_LEN(x); i--; ) {
-    	printf("_%08x", BDIGITS(x)[i]);
+	printf("_%08x", BDIGITS(x)[i]);
     }
     puts("");
 }
@@ -2043,7 +2148,7 @@ bigmul0(VALUE x, VALUE y)
       normal:
 	if (x == y) return bigsqr_fast(x);
 	if (xn == 1 && yn == 1) return bigmul1_single(x, y);
-    	return bigmul1_normal(x, y);
+	return bigmul1_normal(x, y);
     }
 
     /* normal multiplication when x or y is a sparse bignum */
@@ -2490,7 +2595,7 @@ big_fdiv(VALUE x, VALUE y)
 #if SIZEOF_LONG > SIZEOF_INT
 	{
 	    /* Visual C++ can't be here */
-	    if (l > INT_MAX) return DBL2NUM(ruby_div0(1.0));
+	    if (l > INT_MAX) return DBL2NUM(INFINITY);
 	    if (l < INT_MIN) return DBL2NUM(0.0);
 	}
 #endif
@@ -3296,6 +3401,10 @@ InitVM_Bignum(void)
 
     rb_define_method(rb_cBignum, "<=>", rb_big_cmp, 1);
     rb_define_method(rb_cBignum, "==", rb_big_eq, 1);
+    rb_define_method(rb_cBignum, ">", big_gt, 1);
+    rb_define_method(rb_cBignum, ">=", big_ge, 1);
+    rb_define_method(rb_cBignum, "<", big_lt, 1);
+    rb_define_method(rb_cBignum, "<=", big_le, 1);
     rb_define_method(rb_cBignum, "===", rb_big_eq, 1);
     rb_define_method(rb_cBignum, "eql?", rb_big_eql, 1);
     rb_define_method(rb_cBignum, "hash", rb_big_hash, 0);

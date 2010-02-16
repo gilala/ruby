@@ -385,3 +385,61 @@ assert_equal 'ok', %q{
   end
   :ok
 }
+
+assert_equal 'ok', %{
+  open("zzz.rb", "w") do |f|
+    f.puts <<-END
+      begin
+        m = Mutex.new
+        Thread.new { m.lock; sleep 1 }
+        sleep 0.3
+        parent = Thread.current
+        Thread.new do
+          sleep 0.3
+          begin
+            fork { GC.start }
+          rescue Exception
+            parent.raise $!
+          end
+        end
+        m.lock
+        pid, status = Process.wait2
+        $result = status.success? ? :ok : :ng
+      rescue NotImplementedError
+        $result = :ok
+      end
+    END
+  end
+  require "./zzz.rb"
+  $result
+}
+
+assert_finish 3, %q{
+  require 'thread'
+
+  lock = Mutex.new
+  cond = ConditionVariable.new
+  t = Thread.new do
+    lock.synchronize do
+      cond.wait(lock)
+    end
+  end
+
+  begin
+    pid = fork do
+      # Child
+      STDOUT.write "This is the child process.\n"
+      STDOUT.write "Child process exiting.\n"
+    end
+    Process.waitpid(pid)
+  rescue NotImplementedError
+  end
+}, '[ruby-core:23572]'
+
+assert_equal 'ok', %q{
+  begin
+    Process.waitpid2(fork {sleep 1})[1].success? ? 'ok' : 'ng'
+  rescue NotImplementedError
+    'ok'
+  end
+}

@@ -238,7 +238,7 @@ class TestProcess < Test::Unit::TestCase
 
     h = {}
     cmd = [h, RUBY]
-    ENV.each do |k,v|
+    (ENV.keys + MANDATORY_ENVS).each do |k|
       case k
       when /\APATH\z/i
       when *MANDATORY_ENVS
@@ -260,6 +260,24 @@ class TestProcess < Test::Unit::TestCase
       system({"fofo"=>"haha"}, *ENVCOMMAND, STDOUT=>"out")
       assert_match(/^fofo=haha$/, File.read("out").chomp)
     }
+
+    old = ENV["hmm"]
+    begin
+      ENV["hmm"] = "fufu"
+      IO.popen(ENVCOMMAND) {|io| assert_match(/^hmm=fufu$/, io.read) }
+      IO.popen([{"hmm"=>""}, *ENVCOMMAND]) {|io| assert_match(/^hmm=$/, io.read) }
+      IO.popen([{"hmm"=>nil}, *ENVCOMMAND]) {|io| assert_not_match(/^hmm=/, io.read) }
+      ENV["hmm"] = ""
+      IO.popen(ENVCOMMAND) {|io| assert_match(/^hmm=$/, io.read) }
+      IO.popen([{"hmm"=>""}, *ENVCOMMAND]) {|io| assert_match(/^hmm=$/, io.read) }
+      IO.popen([{"hmm"=>nil}, *ENVCOMMAND]) {|io| assert_not_match(/^hmm=/, io.read) }
+      ENV["hmm"] = nil
+      IO.popen(ENVCOMMAND) {|io| assert_not_match(/^hmm=/, io.read) }
+      IO.popen([{"hmm"=>""}, *ENVCOMMAND]) {|io| assert_match(/^hmm=$/, io.read) }
+      IO.popen([{"hmm"=>nil}, *ENVCOMMAND]) {|io| assert_not_match(/^hmm=/, io.read) }
+    ensure
+      ENV["hmm"] = old
+    end
   end
 
   def test_execopts_unsetenv_others
@@ -1147,5 +1165,23 @@ class TestProcess < Test::Unit::TestCase
       Signal.trap(:CHLD, 'DEFAULT')
     rescue ArgumentError
     end
+  end
+
+  def test_no_curdir
+    if /mswin|bccwin|mingw/ =~ RUBY_PLATFORM
+      skip "removing current directory is not supported"
+    end
+    with_tmpchdir {|d|
+      Dir.mkdir("vd")
+      status = nil
+      Dir.chdir("vd") {
+        dir = "#{d}/vd"
+        # OpenSolaris cannot remove the current directory.
+        system(RUBY, "-e", "Dir.chdir '..'; Dir.rmdir #{dir.dump}")
+        system({"RUBYLIB"=>nil}, RUBY, "-e", "exit true")
+        status = $?
+      }
+      assert(status.success?, "[ruby-dev:38105]")
+    }
   end
 end

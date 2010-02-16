@@ -698,6 +698,8 @@ ary_take_first_or_last(int argc, VALUE *argv, VALUE ary, enum ary_take_pos_flags
     return ary_make_partial(ary, rb_cArray, offset, n);
 }
 
+static VALUE rb_ary_push_1(VALUE ary, VALUE item);
+
 /*
  *  call-seq:
  *     array << obj            -> array
@@ -714,9 +716,15 @@ ary_take_first_or_last(int argc, VALUE *argv, VALUE ary, enum ary_take_pos_flags
 VALUE
 rb_ary_push(VALUE ary, VALUE item)
 {
+    rb_ary_modify(ary);
+    return rb_ary_push_1(ary, item);
+}
+
+static VALUE
+rb_ary_push_1(VALUE ary, VALUE item)
+{
     long idx = RARRAY_LEN(ary);
 
-    rb_ary_modify(ary);
     if (idx >= ARY_CAPA(ary)) {
 	ary_double_capa(ary, idx);
     }
@@ -741,9 +749,9 @@ rb_ary_push(VALUE ary, VALUE item)
 static VALUE
 rb_ary_push_m(int argc, VALUE *argv, VALUE ary)
 {
-    rb_ary_modify_check(ary);
+    rb_ary_modify(ary);
     while (argc--) {
-	rb_ary_push(ary, *argv++);
+	rb_ary_push_1(ary, *argv++);
     }
     return ary;
 }
@@ -890,8 +898,8 @@ rb_ary_unshift_m(int argc, VALUE *argv, VALUE ary)
 {
     long len;
 
-    if (argc == 0) return ary;
     rb_ary_modify(ary);
+    if (argc == 0) return ary;
     if (ARY_CAPA(ary) <= (len = RARRAY_LEN(ary)) + argc) {
 	ary_double_capa(ary, len + argc);
     }
@@ -1319,6 +1327,7 @@ rb_ary_aset(int argc, VALUE *argv, VALUE ary)
     long offset, beg, len;
 
     if (argc == 3) {
+	rb_ary_modify_check(ary);
 	beg = NUM2LONG(argv[0]);
 	len = NUM2LONG(argv[1]);
 	rb_ary_splice(ary, beg, len, argv[2]);
@@ -1327,6 +1336,7 @@ rb_ary_aset(int argc, VALUE *argv, VALUE ary)
     if (argc != 2) {
 	rb_raise(rb_eArgError, "wrong number of arguments (%d for 2)", argc);
     }
+    rb_ary_modify_check(ary);
     if (FIXNUM_P(argv[0])) {
 	offset = FIX2LONG(argv[0]);
 	goto fixnum;
@@ -1360,10 +1370,11 @@ rb_ary_insert(int argc, VALUE *argv, VALUE ary)
 {
     long pos;
 
-    if (argc == 1) return ary;
     if (argc < 1) {
 	rb_raise(rb_eArgError, "wrong number of arguments (at least 1)");
     }
+    rb_ary_modify_check(ary);
+    if (argc == 1) return ary;
     pos = NUM2LONG(argv[0]);
     if (pos == -1) {
 	pos = RARRAY_LEN(ary);
@@ -1493,16 +1504,22 @@ rb_ary_empty_p(VALUE ary)
     return Qfalse;
 }
 
-VALUE
-rb_ary_dup(VALUE ary)
+static VALUE
+rb_ary_dup_setup(VALUE ary)
 {
     VALUE dup = rb_ary_new2(RARRAY_LEN(ary));
     int is_embed = ARY_EMBED_P(dup);
     DUPSETUP(dup, ary);
     if (is_embed) FL_SET_EMBED(dup);
-    MEMCPY(RARRAY_PTR(dup), RARRAY_PTR(ary), VALUE, RARRAY_LEN(ary));
     ARY_SET_LEN(dup, RARRAY_LEN(ary));
+    return dup;
+}
 
+VALUE
+rb_ary_dup(VALUE ary)
+{
+    VALUE dup = rb_ary_dup_setup(ary);
+    MEMCPY(RARRAY_PTR(dup), RARRAY_PTR(ary), VALUE, RARRAY_LEN(ary));
     return dup;
 }
 
@@ -1733,22 +1750,27 @@ rb_ary_to_ary_m(VALUE ary)
     return ary;
 }
 
+static void
+ary_reverse(p1, p2)
+    VALUE *p1, *p2;
+{
+    while (p1 < p2) {
+	VALUE tmp = *p1;
+	*p1++ = *p2;
+	*p2-- = tmp;
+    }
+}
+
 VALUE
 rb_ary_reverse(VALUE ary)
 {
     VALUE *p1, *p2;
-    VALUE tmp;
 
     rb_ary_modify(ary);
     if (RARRAY_LEN(ary) > 1) {
 	p1 = RARRAY_PTR(ary);
 	p2 = p1 + RARRAY_LEN(ary) - 1;	/* points last item */
-
-	while (p1 < p2) {
-	    tmp = *p1;
-	    *p1++ = *p2;
-	    *p2-- = tmp;
-	}
+	ary_reverse(p1, p2);
     }
     return ary;
 }
@@ -1783,7 +1805,111 @@ rb_ary_reverse_bang(VALUE ary)
 static VALUE
 rb_ary_reverse_m(VALUE ary)
 {
-    return rb_ary_reverse(rb_ary_dup(ary));
+    VALUE dup = rb_ary_dup_setup(ary);
+    long len = RARRAY_LEN(ary);
+
+    if (len > 0) {
+	VALUE *p1 = RARRAY_PTR(ary);
+	VALUE *p2 = RARRAY_PTR(dup) + len - 1;
+	do *p2-- = *p1++; while (--len > 0);
+    }
+    return dup;
+}
+
+static inline long
+rotate_count(long cnt, long len)
+{
+    return (cnt < 0) ? (len - (~cnt % len) - 1) : (cnt % len);
+}
+
+VALUE
+rb_ary_rotate(VALUE ary, long cnt)
+{
+    rb_ary_modify(ary);
+
+    if (cnt != 0) {
+	VALUE *ptr = RARRAY_PTR(ary);
+	long len = RARRAY_LEN(ary);
+
+	if (len > 0 && (cnt = rotate_count(cnt, len)) > 0) {
+	    --len;
+	    if (cnt < len) ary_reverse(ptr + cnt, ptr + len);
+	    if (--cnt > 0) ary_reverse(ptr, ptr + cnt);
+	    if (len > 0) ary_reverse(ptr, ptr + len);
+	    return ary;
+	}
+    }
+
+    return Qnil;
+}
+    
+/*
+ *  call-seq:
+ *     array.rotate!([cnt = 1]) -> array
+ *
+ *  Rotates _self_ in place so that the element at +cnt+ comes first,
+ *  and returns _self_.  If +cnt+ is negative then it rotates in
+ *  counter direction.
+ *
+ *     a = [ "a", "b", "c", "d" ]
+ *     a.rotate!        #=> ["b", "c", "d", "a"]
+ *     a                #=> ["b", "c", "d", "a"]
+ *     a.rotate!(2)     #=> ["d", "a", "b", "c"]
+ *     a.rotate!(-3)    #=> ["a", "b", "c", "d"]
+ */
+
+static VALUE
+rb_ary_rotate_bang(int argc, VALUE *argv, VALUE ary)
+{
+    long n = 1;
+
+    switch (argc) {
+      case 1: n = NUM2LONG(argv[0]);
+      case 0: break;
+      default: rb_scan_args(argc, argv, "01", NULL);
+    }
+    rb_ary_rotate(ary, n);
+    return ary;
+}
+
+/*
+ *  call-seq:
+ *     array.rotate([n = 1]) -> an_array
+ *
+ *  Returns new array by rotating _self_, whose first element is the
+ *  element at +cnt+ in _self_.  If +cnt+ is negative then it rotates
+ *  in counter direction.
+ *
+ *     a = [ "a", "b", "c", "d" ]
+ *     a.rotate         #=> ["b", "c", "d", "a"]
+ *     a                #=> ["a", "b", "c", "d"]
+ *     a.rotate(2)      #=> ["c", "d", "a", "b"]
+ *     a.rotate(-3)     #=> ["b", "c", "d", "a"]
+ */
+
+static VALUE
+rb_ary_rotate_m(int argc, VALUE *argv, VALUE ary)
+{
+    VALUE rotated, *ptr, *ptr2;
+    long len, cnt = 1;
+
+    switch (argc) {
+      case 1: cnt = NUM2LONG(argv[0]);
+      case 0: break;
+      default: rb_scan_args(argc, argv, "01", NULL);
+    }
+
+    len = RARRAY_LEN(ary);
+    rotated = rb_ary_dup_setup(ary);
+    if (len > 0) {
+	cnt = rotate_count(cnt, len);
+	ptr = RARRAY_PTR(ary);
+	ptr2 = RARRAY_PTR(rotated);
+	len -= cnt;
+	MEMCPY(ptr2, ptr + cnt, VALUE, len);
+	MEMCPY(ptr2 + len, ptr, VALUE, cnt);
+    }
+    return rotated;
 }
 
 struct ary_sort_data {
@@ -2123,10 +2249,12 @@ rb_ary_select(VALUE ary)
  *     array.delete(obj)            -> obj or nil
  *     array.delete(obj) { block }  -> obj or nil
  *
- *  Deletes items from <i>self</i> that are equal to <i>obj</i>. If
+ *  Deletes items from <i>self</i> that are equal to <i>obj</i>.
+ *  If any items are found, returns <i>obj</i>.   If
  *  the item is not found, returns <code>nil</code>. If the optional
  *  code block is given, returns the result of <i>block</i> if the item
- *  is not found.
+ *  is not found.  (To remove <code>nil</code> elements and
+ *  get an informative return value, use #compact!)
  *
  *     a = [ "a", "b", "b", "b", "c" ]
  *     a.delete("b")                   #=> "b"
@@ -2481,8 +2609,8 @@ rb_ary_transpose(VALUE ary)
 VALUE
 rb_ary_replace(VALUE copy, VALUE orig)
 {
-    orig = to_ary(orig);
     rb_ary_modify_check(copy);
+    orig = to_ary(orig);
     if (copy == orig) return copy;
 
     if (RARRAY_LEN(orig) <= RARRAY_EMBED_LEN_MAX) {
@@ -2675,6 +2803,7 @@ rb_ary_plus(VALUE x, VALUE y)
 VALUE
 rb_ary_concat(VALUE x, VALUE y)
 {
+    rb_ary_modify_check(x);
     y = to_ary(y);
     if (RARRAY_LEN(y) > 0) {
 	rb_ary_splice(x, RARRAY_LEN(x), 0, y);
@@ -3182,6 +3311,7 @@ rb_ary_uniq_bang(VALUE ary)
     VALUE hash, v;
     long i, j;
 
+    rb_ary_modify_check(ary);
     if (rb_block_given_p()) {
 	hash = ary_make_hash_by(ary);
 	if (RARRAY_LEN(ary) == (i = RHASH_SIZE(hash))) {
@@ -3252,7 +3382,8 @@ rb_ary_uniq(VALUE ary)
  *     array.compact!    ->   array  or  nil
  *
  *  Removes +nil+ elements from array.
- *  Returns +nil+ if no changes were made.
+ *  Returns +nil+ if no changes were made, otherwise return
+ *  </i>array</i>.
  *
  *     [ "a", nil, "b", nil, "c" ].compact! #=> [ "a", "b", "c" ]
  *     [ "a", "b", "c" ].compact!           #=> nil
@@ -3428,6 +3559,7 @@ rb_ary_flatten_bang(int argc, VALUE *argv, VALUE ary)
     VALUE result, lv;
 
     rb_scan_args(argc, argv, "01", &lv);
+    rb_ary_modify_check(ary);
     if (!NIL_P(lv)) level = NUM2INT(lv);
     if (level == 0) return Qnil;
 
@@ -4099,6 +4231,8 @@ InitVM_Array(void)
     rb_define_method(rb_cArray, "join", rb_ary_join_m, -1);
     rb_define_method(rb_cArray, "reverse", rb_ary_reverse_m, 0);
     rb_define_method(rb_cArray, "reverse!", rb_ary_reverse_bang, 0);
+    rb_define_method(rb_cArray, "rotate", rb_ary_rotate_m, -1);
+    rb_define_method(rb_cArray, "rotate!", rb_ary_rotate_bang, -1);
     rb_define_method(rb_cArray, "sort", rb_ary_sort, 0);
     rb_define_method(rb_cArray, "sort!", rb_ary_sort_bang, 0);
     rb_define_method(rb_cArray, "sort_by!", rb_ary_sort_by_bang, 0);

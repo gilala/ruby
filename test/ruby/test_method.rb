@@ -82,6 +82,7 @@ class TestMethod < Test::Unit::TestCase
     o = Object.new
     def o.foo; end
     assert_nothing_raised { RubyVM::InstructionSequence.disasm(o.method(:foo)) }
+    assert_nothing_raised { RubyVM::InstructionSequence.disasm("x".method(:upcase)) }
   end
 
   def test_new
@@ -178,6 +179,10 @@ class TestMethod < Test::Unit::TestCase
     o = Object.new
     o.instance_eval { define_singleton_method(:foo) { :foo } }
     assert_equal(:foo, o.foo)
+
+    assert_raise(TypeError) do
+      Class.new.class_eval { define_method(:foo, Object.new) }
+    end
   end
 
   def test_clone
@@ -310,5 +315,20 @@ class TestMethod < Test::Unit::TestCase
     assert_equal([[:req, :a], [:rest, :b], [:req, :c], [:block, :d]], self.class.instance_method(:pmo6).parameters)
     assert_equal([[:req, :a], [:opt, :b], [:rest, :c], [:req, :d], [:block, :e]], self.class.instance_method(:pmo7).parameters)
     assert_equal([[:req], [:block, :b]], self.class.instance_method(:pma1).parameters)
+  end
+
+  def test_public_method_with_zsuper_method
+    c = Class.new
+    c.class_eval do
+      def foo
+        :ok
+      end
+      private :foo
+    end
+    d = Class.new(c)
+    d.class_eval do
+      public :foo
+    end
+    assert_equal(:ok, d.new.public_method(:foo).call)
   end
 end

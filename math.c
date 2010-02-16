@@ -25,10 +25,13 @@ extern VALUE rb_to_float(VALUE val);
 static void
 domain_check(double x, double y, const char *msg)
 {
-    if (!isnan(y)) return;
-    else if (isnan(x)) return;
+    if (errno) {
+	if (isinf(y)) return;
+    }
     else {
-	if (!errno) {
+	if (!isnan(y)) return;
+	else if (isnan(x)) return;
+	else {
 #if defined(EDOM)
 	    errno = EDOM;
 #else
@@ -64,6 +67,17 @@ infinity_check(VALUE arg, double res, const char *msg)
  *
  *  Computes the arc tangent given <i>y</i> and <i>x</i>. Returns
  *  -PI..PI.
+ *
+ *    Math.atan2(-0.0, -1.0) #=> -3.141592653589793
+ *    Math.atan2(-1.0, -1.0) #=> -2.356194490192345
+ *    Math.atan2(-1.0, 0.0)  #=> -1.5707963267948966
+ *    Math.atan2(-1.0, 1.0)  #=> -0.7853981633974483
+ *    Math.atan2(-0.0, 1.0)  #=> -0.0
+ *    Math.atan2(0.0, 1.0)   #=> 0.0
+ *    Math.atan2(1.0, 1.0)   #=> 0.7853981633974483
+ *    Math.atan2(1.0, 0.0)   #=> 1.5707963267948966
+ *    Math.atan2(1.0, -1.0)  #=> 2.356194490192345
+ *    Math.atan2(0.0, -1.0)  #=> 3.141592653589793
  *
  */
 
@@ -598,7 +612,7 @@ math_erfc(VALUE obj, VALUE x)
  *  Calculates the gamma function of x.
  *
  *  Note that gamma(n) is same as fact(n-1) for integer n > 0.
- *  However gamma(n) returns float and possibly has error in calculation.
+ *  However gamma(n) returns float and can be an approximation.
  *
  *   def fact(n) (1..n).inject(1) {|r,i| r*i } end
  *   1.upto(26) {|i| p [i, Math.gamma(i), fact(i-1)] }
@@ -664,14 +678,13 @@ math_gamma(VALUE obj, VALUE x)
     };
     double d0, d;
     double intpart, fracpart;
-    int n;
     Need_Float(x);
     d0 = RFLOAT_VALUE(x);
     fracpart = modf(d0, &intpart);
     if (fracpart == 0.0 &&
-	0 < intpart &&
-	(n = (int)intpart - 1) < numberof(fact_table)) {
-        return DBL2NUM(fact_table[n]);
+        0 < intpart &&
+        intpart - 1 < (double)numberof(fact_table)) {
+        return DBL2NUM(fact_table[(int)intpart - 1]);
     }
     errno = 0;
     d = tgamma(d0);
@@ -695,7 +708,7 @@ static VALUE
 math_lgamma(VALUE obj, VALUE x)
 {
     double d0, d;
-    int sign;
+    int sign=1;
     VALUE v;
     Need_Float(x);
     errno = 0;

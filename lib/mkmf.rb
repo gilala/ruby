@@ -367,11 +367,13 @@ The complier failed to generate an executable file.
 You have to install development tools first.
 MSG
   end
-  src = create_tmpsrc(src, &b)
-  xsystem(command)
-ensure
-  log_src(src)
-  rm_rf 'conftest.dSYM'
+  begin
+    src = create_tmpsrc(src, &b)
+    xsystem(command)
+  ensure
+    log_src(src)
+    rm_rf 'conftest.dSYM'
+  end
 end
 
 def link_command(ldflags, opt="", libpath=$DEFLIBPATH|$LIBPATH)
@@ -830,7 +832,7 @@ end
 def have_header(header, preheaders = nil, &b)
   checking_for header do
     if try_header(cpp_include(preheaders)+cpp_include(header), &b)
-      $defs.push(format("-DHAVE_%s", header.tr("a-z./\055", "A-Z___")))
+      $defs.push(format("-DHAVE_%s", header.tr_cpp))
       true
     else
       false
@@ -985,6 +987,11 @@ def have_const(const, headers = nil, opt = "", &b)
   end
 end
 
+STRING_OR_FAILED_FORMAT = "%s"
+def STRING_OR_FAILED_FORMAT.%(x)
+  x ? super : "failed"
+end
+
 # Returns the size of the given +type+.  You may optionally specify additional
 # +headers+ to search in for the +type+.
 #
@@ -1002,10 +1009,7 @@ def check_sizeof(type, headers = nil, opts = "", &b)
   prelude << "static rbcv_typedef_ *rbcv_ptr_;\n"
   prelude = [prelude]
   expr = "sizeof((*rbcv_ptr_)#{"." << member if member})"
-  fmt = "%s"
-  def fmt.%(x)
-    x ? super : "failed"
-  end
+  fmt = STRING_OR_FAILED_FORMAT
   checking_for checking_message("size of #{type}", headers), fmt do
     if UNIVERSAL_INTS.include?(type)
       type
@@ -1019,6 +1023,37 @@ def check_sizeof(type, headers = nil, opts = "", &b)
       size
     end
   end
+end
+
+# Returns the signedness of the given +type+.  You may optionally
+# specify additional +headers+ to search in for the +type+.
+#
+# If the +type+ is found and is a numeric type, a macro is passed as a
+# preprocessor constant to the compiler using the +type+ name, in
+# uppercase, prepended with 'SIGNEDNESS_OF_', followed by the +type+
+# name, followed by '=X' where 'X' is positive integer if the +type+ is
+# unsigned, or negative integer if the +type+ is signed.
+#
+# For example, if size_t is defined as unsigned, then
+# check_signedness('size_t') would returned +1 and the
+# SIGNEDNESS_OF_SIZE_T=+1 preprocessor macro would be passed to the
+# compiler, and SIGNEDNESS_OF_INT=-1 if check_signedness('int') is
+# done.
+#
+def check_signedness(type, headers = nil)
+  signed = nil
+  checking_for("signedness of #{type}", STRING_OR_FAILED_FORMAT) do
+    if try_static_assert("(#{type})-1 < 0")
+      signed = -1
+    elsif try_static_assert("(#{type})-1 > 0")
+      signed = +1
+    else
+      next nil
+    end
+    $defs.push("-DSIGNEDNESS_OF_%s=%+d" % [type.tr_cpp, signed])
+    signed < 0 ? "signed" : "unsigned"
+  end
+  signed
 end
 
 # :stopdoc:
@@ -1123,10 +1158,12 @@ end
 # Internal use only.
 #
 def find_executable0(bin, path = nil)
-  ext = config_string('EXEEXT')
+  exts = config_string('EXECUTABLE_EXTS') {|s| s.split} || config_string('EXEEXT') {|s| [s]}
   if File.expand_path(bin) == bin
     return bin if File.executable?(bin)
-    ext and File.executable?(file = bin + ext) and return file
+    if exts
+      exts.each {|ext| File.executable?(file = bin + ext) and return file}
+    end
     return nil
   end
   if path ||= ENV['PATH']
@@ -1137,7 +1174,9 @@ def find_executable0(bin, path = nil)
   file = nil
   path.each do |dir|
     return file if File.executable?(file = File.join(dir, bin))
-    return file if ext and File.executable?(file << ext)
+    if exts
+      exts.each {|ext| File.executable?(ext = file + ext) and return ext}
+    end
   end
   nil
 end
@@ -1259,7 +1298,7 @@ end
 #
 def create_header(header = "extconf.h")
   message "creating %s\n", header
-  sym = header.tr("a-z./\055", "A-Z___")
+  sym = header.tr_cpp
   hdr = ["#ifndef #{sym}\n#define #{sym}\n"]
   for line in $defs
     case line
@@ -1465,8 +1504,8 @@ CPPFLAGS = #{extconf_h}#{$CPPFLAGS}
 CXXFLAGS = $(CFLAGS) #{CONFIG['CXXFLAGS']}
 ldflags  = #{$LDFLAGS}
 dldflags = #{$DLDFLAGS}
-archflag = #{$ARCH_FLAG}
-DLDFLAGS = $(ldflags) $(dldflags) $(archflag)
+ARCH_FLAG = #{$ARCH_FLAG}
+DLDFLAGS = $(ldflags) $(dldflags)
 LDSHARED = #{CONFIG['LDSHARED']}
 LDSHAREDXX = #{config_string('LDSHAREDXX') || '$(LDSHARED)'}
 AR = #{CONFIG['AR']}
@@ -1645,8 +1684,8 @@ def create_makefile(target, srcprefix = nil)
     target_prefix = ""
   end
 
-  srcprefix ||= '$(srcdir)'
-  RbConfig::expand(srcdir = srcprefix.dup)
+  srcprefix = "$(srcdir)/#{srcprefix}".chomp('/')
+  RbConfig.expand(srcdir = srcprefix.dup)
 
   ext = ".#{$OBJEXT}"
   if not $objs
@@ -1698,7 +1737,9 @@ def create_makefile(target, srcprefix = nil)
   dllib = target ? "$(TARGET).#{CONFIG['DLEXT']}" : ""
   staticlib = target ? "$(TARGET).#$LIBEXT" : ""
   mfile = open("Makefile", "wb")
-  mfile.print(*configuration(srcprefix))
+  conf = configuration(srcprefix)
+  conf = yield(conf) if block_given?
+  mfile.puts(conf)
   mfile.print "
 libpath = #{($DEFLIBPATH|$LIBPATH).join(" ")}
 LIBPATH = #{libpath}

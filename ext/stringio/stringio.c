@@ -696,10 +696,9 @@ strio_extend(struct StringIO *ptr, long pos, long len)
  *   strio.ungetc(string)   -> nil
  *
  * Pushes back one character (passed as a parameter) onto *strio*
- * such that a subsequent buffered read will return it.  Pushing back 
- * behind the beginning of the buffer string is not possible.  Nothing
- * will be done if such an attempt is made.
- * In other case, there is no limitation for multiple pushbacks.
+ * such that a subsequent buffered read will return it.  There is no
+ * limitation for multiple pushbacks including pushing back behind the
+ * beginning of the buffer string.
  */
 static VALUE
 strio_ungetc(VALUE self, VALUE c)
@@ -726,17 +725,26 @@ strio_ungetc(VALUE self, VALUE c)
 	    c = rb_str_conv_enc(c, enc2, enc);
 	}
     }
-    /* get logical position */
-    lpos = 0; p = RSTRING_PTR(ptr->string); pend = p + ptr->pos;
-    for (;;) {
-	clen = rb_enc_mbclen(p, pend, enc);
-	if (p+clen >= pend) break;
-	p += clen;
-	lpos++;
+    if (RSTRING_LEN(ptr->string) < ptr->pos) {
+	long len = RSTRING_LEN(ptr->string);
+	rb_str_resize(ptr->string, ptr->pos - 1);
+	memset(RSTRING_PTR(ptr->string) + len, 0, ptr->pos - len - 1);
+	rb_str_concat(ptr->string, c);
+	ptr->pos--;
     }
-    clen = p - RSTRING_PTR(ptr->string);
-    rb_str_update(ptr->string, lpos, ptr->pos ? 1 : 0, c);
-    ptr->pos = clen;
+    else {
+	/* get logical position */
+	lpos = 0; p = RSTRING_PTR(ptr->string); pend = p + ptr->pos;
+	for (;;) {
+	    clen = rb_enc_mbclen(p, pend, enc);
+	    if (p+clen >= pend) break;
+	    p += clen;
+	    lpos++;
+	}
+	clen = p - RSTRING_PTR(ptr->string);
+	rb_str_update(ptr->string, lpos, ptr->pos ? 1 : 0, c);
+	ptr->pos = clen;
+    }
 
     return Qnil;
 }

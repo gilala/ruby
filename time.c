@@ -102,7 +102,7 @@ rb_localtime(const time_t *tm, struct tm *result)
 }
 #endif
 
-static ID id_divmod, id_mul, id_submicro, id_subnano;
+static ID id_divmod, id_mul, id_submicro, id_nano_num, id_nano_den, id_offset;
 static ID id_eq, id_ne, id_quo, id_div, id_cmp, id_lshift;
 
 #define eq(x,y) (RTEST(rb_funcall((x), id_eq, 1, (y))))
@@ -178,8 +178,8 @@ quo(VALUE x, VALUE y)
     VALUE ret;
     ret = rb_funcall((x), id_quo, 1, (y));
     if (TYPE(ret) == T_RATIONAL &&
-        ((struct RRational *)ret)->den == INT2FIX(1)) {
-        ret = ((struct RRational *)ret)->num;
+        RRATIONAL(ret)->den == INT2FIX(1)) {
+        ret = RRATIONAL(ret)->num;
     }
     return ret;
 }
@@ -213,19 +213,22 @@ num_exact(VALUE v)
         v = rb_convert_type(v, T_RATIONAL, "Rational", "to_r");
         break;
 
+      case T_STRING:
       case T_NIL:
         goto typeerror;
 
       default: {
         VALUE tmp;
-        if (!NIL_P(tmp = rb_check_convert_type(v, T_RATIONAL, "Rational", "to_r")))
+        if (!NIL_P(tmp = rb_check_convert_type(v, T_RATIONAL, "Rational", "to_r"))) {
+	    if (rb_respond_to(v, rb_intern("to_str"))) goto typeerror;
             v = tmp;
+	}
         else if (!NIL_P(tmp = rb_check_to_integer(v, "to_int")))
             v = tmp;
         else {
           typeerror:
             rb_raise(rb_eTypeError, "can't convert %s into an exact number",
-                                 rb_obj_classname(v));
+		                    NIL_P(v) ? "nil" : rb_obj_classname(v));
         }
         break;
       }
@@ -1036,7 +1039,7 @@ localtimexv(VALUE timexv, struct vtm *result)
 }
 
 struct time_object {
-    VALUE timexv;
+    VALUE timexv; /* time_t value * TIME_SCALE.  possibly Rational. */
     struct vtm vtm;
     int gmt;
     int tm_got;
@@ -1448,6 +1451,20 @@ time_init_1(int argc, VALUE *argv, VALUE time)
  *     "%.6f" % b.to_f   #=> "1195480202.283415"
  *
  *     Time.new(2008,6,21, 13,30,0, "+09:00") #=> 2008-06-21 13:30:00 +0900
+ *
+ *     # A trip for RubyConf 2007
+ *     t1 = Time.new(2007,11,1,15,25,0, "+09:00") # JST (Narita)
+ *     t2 = Time.new(2007,11,1,12, 5,0, "-05:00") # CDT (Minneapolis)
+ *     t3 = Time.new(2007,11,1,13,25,0, "-05:00") # CDT (Minneapolis)
+ *     t4 = Time.new(2007,11,1,16,53,0, "-04:00") # EDT (Charlotte) 
+ *     t5 = Time.new(2007,11,5, 9,24,0, "-05:00") # EST (Charlotte)
+ *     t6 = Time.new(2007,11,5,11,21,0, "-05:00") # EST (Detroit)
+ *     t7 = Time.new(2007,11,5,13,45,0, "-05:00") # EST (Detroit)
+ *     t8 = Time.new(2007,11,6,17,10,0, "+09:00") # JST (Narita)
+ *     p((t2-t1)/3600.0)                          #=> 10.666666666666666
+ *     p((t4-t3)/3600.0)                          #=> 2.466666666666667
+ *     p((t6-t5)/3600.0)                          #=> 1.95
+ *     p((t8-t7)/3600.0)                          #=> 13.416666666666666
  *
  */
 
@@ -2407,9 +2424,14 @@ static VALUE
 time_to_r(VALUE time)
 {
     struct time_object *tobj;
+    VALUE v;
 
     GetTimeval(time, tobj);
-    return rb_time_unmagnify(tobj->timexv);
+    v = rb_time_unmagnify(tobj->timexv);
+    if (TYPE(v) != T_RATIONAL) {
+        v = rb_convert_type(v, T_RATIONAL, "Rational", "to_r");
+    }
+    return v;
 }
 
 /*
@@ -2885,6 +2907,11 @@ time_add(struct time_object *tobj, VALUE offset, int sign)
     if (TIME_UTC_P(tobj)) {
 	GetTimeval(result, tobj);
         TIME_SET_UTC(tobj);
+    }
+    else if (TIME_FIXOFF_P(tobj)) {
+        VALUE off = tobj->vtm.utc_offset;
+        GetTimeval(result, tobj);
+        TIME_SET_FIXOFF(tobj, off);
     }
     return result;
 }
@@ -3553,7 +3580,7 @@ time_strftime(VALUE time, VALUE format)
     }
     else {
 	len = rb_strftime_alloc(&buf, RSTRING_PTR(format),
-			       	&tobj->vtm, rb_time_unmagnify(tobj->timexv), TIME_UTC_P(tobj));
+				&tobj->vtm, rb_time_unmagnify(tobj->timexv), TIME_UTC_P(tobj));
     }
     str = rb_str_new(buf, len);
     if (buf != buffer) xfree(buf);
@@ -3600,6 +3627,8 @@ time_mdump(VALUE time)
     usec = nsec / 1000;
     nsec = nsec % 1000;
 
+    nano = add(LONG2FIX(nsec), subnano);
+
     p = 0x1UL            << 31 | /*  1 */
 	TIME_UTC_P(tobj) << 30 | /*  1 */
 	(year-1900)      << 14 | /* 16 */
@@ -3621,7 +3650,17 @@ time_mdump(VALUE time)
 
     str = rb_str_new(buf, 8);
     rb_copy_generic_ivar(str, time);
-    if (nsec) {
+    if (!rb_equal(nano, INT2FIX(0))) {
+        if (TYPE(nano) == T_RATIONAL) {
+            rb_ivar_set(str, id_nano_num, RRATIONAL(nano)->num);
+            rb_ivar_set(str, id_nano_den, RRATIONAL(nano)->den);
+        }
+        else {
+            rb_ivar_set(str, id_nano_num, nano);
+            rb_ivar_set(str, id_nano_den, INT2FIX(1));
+        }
+    }
+    if (nsec) { /* submicro is only for Ruby 1.9.1 compatibility */
         /*
          * submicro is formatted in fixed-point packed BCD (without sign).
          * It represent digits under microsecond.
@@ -3640,8 +3679,12 @@ time_mdump(VALUE time)
             len = 1;
         rb_ivar_set(str, id_submicro, rb_str_new(buf, len));
     }
-    if (!rb_equal(subnano, INT2FIX(0))) {
-        rb_ivar_set(str, id_subnano, subnano);
+    if (!TIME_UTC_P(tobj)) {
+	VALUE off = time_utc_offset(time), div, mod;
+	divmodv(off, INT2FIX(1), &div, &mod);
+	if (rb_equal(mod, INT2FIX(0)))
+	    off = rb_Integer(div);
+	rb_ivar_set(str, id_offset, off);
     }
     return str;
 }
@@ -3679,17 +3722,26 @@ time_mload(VALUE time, VALUE str)
     struct vtm vtm;
     int i, gmt;
     long nsec;
-    VALUE timexv, submicro, subnano;
+    VALUE timexv, submicro, nano_num, nano_den, offset;
 
     time_modify(time);
 
+    nano_num = rb_attr_get(str, id_nano_num);
+    if (nano_num != Qnil) {
+        st_delete(rb_generic_ivar_table(str), (st_data_t*)&id_nano_num, 0);
+    }
+    nano_den = rb_attr_get(str, id_nano_den);
+    if (nano_den != Qnil) {
+        st_delete(rb_generic_ivar_table(str), (st_data_t*)&id_nano_den, 0);
+    }
     submicro = rb_attr_get(str, id_submicro);
     if (submicro != Qnil) {
         st_delete(rb_generic_ivar_table(str), (st_data_t*)&id_submicro, 0);
     }
-    subnano = rb_attr_get(str, id_subnano);
-    if (subnano != Qnil) {
-        st_delete(rb_generic_ivar_table(str), (st_data_t*)&id_subnano, 0);
+    offset = rb_attr_get(str, id_offset);
+    if (offset != Qnil) {
+        validate_utc_offset(offset);
+        st_delete(rb_generic_ivar_table(str), (st_data_t*)&id_offset, 0);
     }
     rb_copy_generic_ivar(time, str);
 
@@ -3709,6 +3761,7 @@ time_mload(VALUE time, VALUE str)
 
     if ((p & (1UL<<31)) == 0) {
         gmt = 0;
+	offset = Qnil;
 	sec = p;
 	usec = s;
         nsec = usec * 1000;
@@ -3732,12 +3785,19 @@ time_mload(VALUE time, VALUE str)
 	usec = (long)(s & 0xfffff);
         nsec = usec * 1000;
 
-        if (submicro != Qnil) {
+
+        vtm.subsecx = mulquo(LONG2FIX(nsec), INT2FIX(TIME_SCALE), LONG2FIX(1000000000));
+        if (nano_num != Qnil) {
+            VALUE nano = quo(num_exact(nano_num), num_exact(nano_den));
+            vtm.subsecx = add(vtm.subsecx, mulquo(nano, INT2FIX(TIME_SCALE), LONG2FIX(1000000000)));
+        }
+        else if (submicro != Qnil) { /* for Ruby 1.9.1 compatibility */
             unsigned char *ptr;
             long len;
             int digit;
             ptr = (unsigned char*)StringValuePtr(submicro);
             len = RSTRING_LEN(submicro);
+            nsec = 0;
             if (0 < len) {
                 if (10 <= (digit = ptr[0] >> 4)) goto end_submicro;
                 nsec += digit * 100;
@@ -3748,21 +3808,22 @@ time_mload(VALUE time, VALUE str)
                 if (10 <= (digit = ptr[1] >> 4)) goto end_submicro;
                 nsec += digit;
             }
+            vtm.subsecx = add(vtm.subsecx, mulquo(LONG2FIX(nsec), INT2FIX(TIME_SCALE), LONG2FIX(1000000000)));
 end_submicro: ;
-        }
-
-        vtm.subsecx = mulquo(LONG2FIX(nsec), INT2FIX(TIME_SCALE), LONG2FIX(1000000000));
-        if (subnano != Qnil) {
-            subnano = num_exact(subnano);
-            vtm.subsecx = add(vtm.subsecx, mulquo(subnano, INT2FIX(TIME_SCALE), LONG2FIX(1000000000)));
         }
         timexv = timegmxv(&vtm);
     }
 
     GetTimeval(time, tobj);
     tobj->tm_got = 0;
-    if (gmt) TIME_SET_UTC(tobj);
     tobj->timexv = timexv;
+    if (gmt) {
+	TIME_SET_UTC(tobj);
+    }
+    else if (!NIL_P(offset)) {
+	time_set_utc_offset(time, offset);
+	time_fixoff(time);
+    }
 
     return time;
 }
@@ -3815,7 +3876,9 @@ Init_Time(void)
     id_divmod = rb_intern("divmod");
     id_mul = rb_intern("*");
     id_submicro = rb_intern("submicro");
-    id_subnano = rb_intern("subnano");
+    id_nano_num = rb_intern("nano_num");
+    id_nano_den = rb_intern("nano_den");
+    id_offset = rb_intern("offset");
 }
 
 void

@@ -9,10 +9,10 @@ rescue LoadError
 end
 
 # Resolv is a thread-aware DNS resolver library written in Ruby.  Resolv can
-# handle multiple DNS requests concurrently without blocking.  The ruby
+# handle multiple DNS requests concurrently without blocking the entire ruby
 # interpreter.
 #
-# See also resolv-replace.rb to replace the libc resolver with # Resolv.
+# See also resolv-replace.rb to replace the libc resolver with Resolv.
 #
 # Resolv can look up various DNS resources using the DNS module directly.
 #
@@ -313,6 +313,16 @@ class Resolv
     # nil:: Uses /etc/resolv.conf.
     # String:: Path to a file using /etc/resolv.conf's format.
     # Hash:: Must contain :nameserver, :search and :ndots keys.
+    # :nameserver_port can be used to specify port number of nameserver address.
+    #
+    # The value of :nameserver should be an address string or
+    # an array of address strings.
+    # - :nameserver => '8.8.8.8'
+    # - :nameserver => ['8.8.8.8', '8.8.4.4']
+    #
+    # The value of :nameserver_port should be an array of
+    # pair of nameserver address and port number.
+    # - :nameserver_port => [['8.8.8.8', 53], ['8.8.4.4', 53]]
     #
     # Example:
     #
@@ -485,13 +495,13 @@ class Resolv
       requester = make_requester
       senders = {}
       begin
-        @config.resolv(name) {|candidate, tout, nameserver|
+        @config.resolv(name) {|candidate, tout, nameserver, port|
           msg = Message.new
           msg.rd = 1
           msg.add_question(candidate, typeclass)
-          unless sender = senders[[candidate, nameserver]]
-            sender = senders[[candidate, nameserver]] =
-              requester.sender(msg, candidate, nameserver)
+          unless sender = senders[[candidate, nameserver, port]]
+            sender = senders[[candidate, nameserver, port]] =
+              requester.sender(msg, candidate, nameserver, port)
           end
           reply, reply_name = requester.request(sender, tout)
           case reply.rcode
@@ -510,10 +520,11 @@ class Resolv
     end
 
     def make_requester # :nodoc:
-      if nameserver = @config.single?
-        Requester::ConnectedUDP.new(nameserver)
+      nameserver_port = @config.nameserver_port
+      if nameserver_port.length == 1
+        Requester::ConnectedUDP.new(*nameserver_port[0])
       else
-        Requester::UnconnectedUDP.new
+        Requester::UnconnectedUDP.new(*nameserver_port)
       end
     end
 
@@ -599,10 +610,10 @@ class Resolv
       }
     end
 
-    def self.bind_random_port(udpsock, is_ipv6=false) # :nodoc:
+    def self.bind_random_port(udpsock, bind_host="0.0.0.0") # :nodoc:
       begin
         port = rangerand(1024..65535)
-        udpsock.bind(is_ipv6 ? "::" : "", port)
+        udpsock.bind(bind_host, port)
       rescue Errno::EADDRINUSE
         retry
       end
@@ -611,7 +622,7 @@ class Resolv
     class Requester # :nodoc:
       def initialize
         @senders = {}
-        @sock = nil
+        @socks = nil
       end
 
       def request(sender, tout)
@@ -619,10 +630,11 @@ class Resolv
         sender.send
         while (now = Time.now) < timelimit
           timeout = timelimit - now
-          if !IO.select([@sock], nil, nil, timeout)
+          select_result = IO.select(@socks, nil, nil, timeout)
+          if !select_result
             raise ResolvTimeout
           end
-          reply, from = recv_reply
+          reply, from = recv_reply(select_result[0])
           begin
             msg = Message.decode(reply)
           rescue DecodeError
@@ -638,9 +650,11 @@ class Resolv
       end
 
       def close
-        sock = @sock
-        @sock = nil
-        sock.close if sock
+        socks = @socks
+        @socks = nil
+        if socks
+          socks.each {|sock| sock.close }
+        end
       end
 
       class Sender # :nodoc:
@@ -652,16 +666,31 @@ class Resolv
       end
 
       class UnconnectedUDP < Requester # :nodoc:
-        def initialize
+        def initialize(*nameserver_port)
           super()
-          @sock = UDPSocket.new
-          @sock.do_not_reverse_lookup = true
-          @sock.fcntl(Fcntl::F_SETFD, Fcntl::FD_CLOEXEC) if defined? Fcntl::F_SETFD
-          DNS.bind_random_port(@sock)
+          @nameserver_port = nameserver_port
+          @socks_hash = {}
+          @socks = []
+          nameserver_port.each {|host, port|
+            if host.index(':')
+              bind_host = "::"
+              af = Socket::AF_INET6
+            else
+              bind_host = "0.0.0.0"
+              af = Socket::AF_INET
+            end
+            next if @socks_hash[bind_host]
+            sock = UDPSocket.new(af)
+            sock.do_not_reverse_lookup = true
+            sock.fcntl(Fcntl::F_SETFD, Fcntl::FD_CLOEXEC) if defined? Fcntl::F_SETFD
+            DNS.bind_random_port(sock, bind_host)
+            @socks << sock
+            @socks_hash[bind_host] = sock
+          }
         end
 
-        def recv_reply
-          reply, from = @sock.recvfrom(UDPSize)
+        def recv_reply(readable_socks)
+          reply, from = readable_socks[0].recvfrom(UDPSize)
           return reply, [from[3],from[1]]
         end
 
@@ -670,8 +699,9 @@ class Resolv
           id = DNS.allocate_request_id(host, port)
           request = msg.encode
           request[0,2] = [id].pack('n')
+          sock = @socks_hash[host.index(':') ? "::" : "0.0.0.0"]
           return @senders[[service, id]] =
-            Sender.new(request, data, @sock, host, port)
+            Sender.new(request, data, sock, host, port)
         end
 
         def close
@@ -701,15 +731,16 @@ class Resolv
           @host = host
           @port = port
           is_ipv6 = host.index(':')
-          @sock = UDPSocket.new(is_ipv6 ? Socket::AF_INET6 : Socket::AF_INET)
-          @sock.do_not_reverse_lookup = true
-          @sock.fcntl(Fcntl::F_SETFD, Fcntl::FD_CLOEXEC) if defined? Fcntl::F_SETFD
-          DNS.bind_random_port(@sock, is_ipv6)
-          @sock.connect(host, port)
+          sock = UDPSocket.new(is_ipv6 ? Socket::AF_INET6 : Socket::AF_INET)
+          @socks = [sock]
+          sock.do_not_reverse_lookup = true
+          sock.fcntl(Fcntl::F_SETFD, Fcntl::FD_CLOEXEC) if defined? Fcntl::F_SETFD
+          DNS.bind_random_port(sock, is_ipv6 ? "::" : "0.0.0.0")
+          sock.connect(host, port)
         end
 
-        def recv_reply
-          reply = @sock.recv(UDPSize)
+        def recv_reply(readable_socks)
+          reply = readable_socks[0].recv(UDPSize)
           return reply, nil
         end
 
@@ -720,7 +751,7 @@ class Resolv
           id = DNS.allocate_request_id(@host, @port)
           request = msg.encode
           request[0,2] = [id].pack('n')
-          return @senders[[nil,id]] = Sender.new(request, data, @sock)
+          return @senders[[nil,id]] = Sender.new(request, data, @socks[0])
         end
 
         def close
@@ -743,14 +774,15 @@ class Resolv
           super()
           @host = host
           @port = port
-          @sock = TCPSocket.new(@host, @port)
-          @sock.fcntl(Fcntl::F_SETFD, Fcntl::FD_CLOEXEC) if defined? Fcntl::F_SETFD
+          sock = TCPSocket.new(@host, @port)
+          @socks = [sock]
+          sock.fcntl(Fcntl::F_SETFD, Fcntl::FD_CLOEXEC) if defined? Fcntl::F_SETFD
           @senders = {}
         end
 
-        def recv_reply
-          len = @sock.read(2).unpack('n')[0]
-          reply = @sock.read(len)
+        def recv_reply(readable_socks)
+          len = readable_socks[0].read(2).unpack('n')[0]
+          reply = @socks[0].read(len)
           return reply, nil
         end
 
@@ -761,7 +793,7 @@ class Resolv
           id = DNS.allocate_request_id(@host, @port)
           request = msg.encode
           request[0,2] = [request.length, id].pack('nn')
-          return @senders[[nil,id]] = Sender.new(request, data, @sock)
+          return @senders[[nil,id]] = Sender.new(request, data, @socks[0])
         end
 
         class Sender < Requester::Sender # :nodoc:
@@ -840,13 +872,13 @@ class Resolv
             config_hash[:search] = [search].flatten if search
           end
         end
-        config_hash
+        config_hash || {}
       end
 
       def lazy_initialize
         @mutex.synchronize {
           unless @initialized
-            @nameserver = []
+            @nameserver_port = []
             @search = nil
             @ndots = 1
             case @config_info
@@ -865,11 +897,18 @@ class Resolv
             else
               raise ArgumentError.new("invalid resolv configuration: #{@config_info.inspect}")
             end
-            @nameserver = config_hash[:nameserver] if config_hash.include? :nameserver
+            if config_hash.include? :nameserver
+              @nameserver_port = config_hash[:nameserver].map {|ns| [ns, Port] }
+            end
+            if config_hash.include? :nameserver_port
+              @nameserver_port = config_hash[:nameserver_port].map {|ns, port| [ns, (port || Port)] }
+            end
             @search = config_hash[:search] if config_hash.include? :search
             @ndots = config_hash[:ndots] if config_hash.include? :ndots
 
-            @nameserver = ['0.0.0.0'] if @nameserver.empty?
+            if @nameserver_port.empty?
+              @nameserver_port << ['0.0.0.0', Port]
+            end
             if @search
               @search = @search.map {|arg| Label.split(arg) }
             else
@@ -881,9 +920,14 @@ class Resolv
               end
             end
 
-            if !@nameserver.kind_of?(Array) ||
-               !@nameserver.all? {|ns| String === ns }
-              raise ArgumentError.new("invalid nameserver config: #{@nameserver.inspect}")
+            if !@nameserver_port.kind_of?(Array) ||
+               @nameserver_port.any? {|ns_port|
+                  !(Array === ns_port) ||
+                  ns_port.length != 2
+                  !(String === ns_port[0]) ||
+                  !(Integer === ns_port[1])
+               }
+              raise ArgumentError.new("invalid nameserver config: #{@nameserver_port.inspect}")
             end
 
             if !@search.kind_of?(Array) ||
@@ -903,11 +947,15 @@ class Resolv
 
       def single?
         lazy_initialize
-        if @nameserver.length == 1
-          return @nameserver[0]
+        if @nameserver_port.length == 1
+          return @nameserver_port[0]
         else
           return nil
         end
+      end
+
+      def nameserver_port
+        @nameserver_port
       end
 
       def generate_candidates(name)
@@ -930,7 +978,7 @@ class Resolv
 
       def generate_timeouts
         ts = [InitialTimeout]
-        ts << ts[-1] * 2 / @nameserver.length
+        ts << ts[-1] * 2 / @nameserver_port.length
         ts << ts[-1] * 2
         ts << ts[-1] * 2
         return ts
@@ -943,9 +991,9 @@ class Resolv
           candidates.each {|candidate|
             begin
               timeouts.each {|tout|
-                @nameserver.each {|nameserver|
+                @nameserver_port.each {|nameserver, port|
                   begin
-                    yield candidate, tout, nameserver
+                    yield candidate, tout, nameserver, port
                   rescue ResolvTimeout
                   end
                 }
@@ -1361,6 +1409,10 @@ class Resolv
           @index = 0
           @limit = data.length
           yield self
+        end
+
+        def inspect
+          "\#<#{self.class}: #{@data[0, @index].inspect} #{@data[@index..-1].inspect}>"
         end
 
         def get_length16
@@ -2075,8 +2127,11 @@ class Resolv
     end
 
     def initialize(address) # :nodoc:
-      unless address.kind_of?(String) && address.length == 4
-        raise ArgumentError.new('IPv4 address must be 4 bytes')
+      unless address.kind_of?(String)
+        raise ArgumentError, 'IPv4 address must be a string'
+      end
+      unless address.length == 4
+        raise ArgumentError, "IPv4 address expects 4 bytes but #{address.length} bytes"
       end
       @address = address
     end

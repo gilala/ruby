@@ -585,7 +585,6 @@ rb_vm_invoke_proc(rb_thread_t *th, rb_proc_t *proc, VALUE self,
     VALUE val = Qundef;
     int state;
     volatile int stored_safe = th->safe_level;
-    rb_control_frame_t * volatile cfp = th->cfp;
 
     TH_PUSH_TAG(th);
     if ((state = EXEC_TAG()) == 0) {
@@ -598,21 +597,6 @@ rb_vm_invoke_proc(rb_thread_t *th, rb_proc_t *proc, VALUE self,
 
     if (!proc->is_from_method) {
 	th->safe_level = stored_safe;
-    }
-
-    if (state) {
-	if (state == TAG_RETURN && proc->is_lambda) {
-	    VALUE err = th->errinfo;
-	    VALUE *escape_dfp = GET_THROWOBJ_CATCH_POINT(err);
-
-	    if (escape_dfp == cfp->dfp) {
-		printf("ok\n");
-		state = 0;
-		th->errinfo = Qnil;
-		th->cfp = cfp;
-		val = GET_THROWOBJ_VAL(err);
-	    }
-	}
     }
 
     if (state) {
@@ -995,6 +979,27 @@ vm_init_redefined_flag(rb_vm_t *vm)
 #undef OP
 }
 
+/* for vm development */
+
+static const char *
+vm_frametype_name(const rb_control_frame_t *cfp)
+{
+    switch (VM_FRAME_TYPE(cfp)) {
+      case VM_FRAME_MAGIC_METHOD: return "method";
+      case VM_FRAME_MAGIC_BLOCK:  return "block";
+      case VM_FRAME_MAGIC_CLASS:  return "class";
+      case VM_FRAME_MAGIC_TOP:    return "top";
+      case VM_FRAME_MAGIC_FINISH: return "finish";
+      case VM_FRAME_MAGIC_CFUNC:  return "cfunc";
+      case VM_FRAME_MAGIC_PROC:   return "proc";
+      case VM_FRAME_MAGIC_IFUNC:  return "ifunc";
+      case VM_FRAME_MAGIC_EVAL:   return "eval";
+      case VM_FRAME_MAGIC_LAMBDA: return "lambda";
+      default:
+	rb_bug("unknown frame");
+    }
+}
+
 /* evaluator body */
 
 /*                  finish
@@ -1131,7 +1136,11 @@ vm_exec(rb_thread_t *th)
 	cont_pc = cont_sp = catch_iseqval = 0;
 
 	while (th->cfp->pc == 0 || th->cfp->iseq == 0) {
-	    th->cfp++;
+	    if (UNLIKELY(VM_FRAME_TYPE(th->cfp) == VM_FRAME_MAGIC_CFUNC)) {
+		const rb_method_entry_t *me = th->cfp->me;
+		EXEC_EVENT_HOOK(th, RUBY_EVENT_C_RETURN, th->cfp->self, me->called_id, me->klass);
+	    }
+	    th->cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(th->cfp);
 	}
 
 	cfp = th->cfp;
@@ -1288,12 +1297,25 @@ vm_exec(rb_thread_t *th)
 			  cfp->sp + 1 /* push value */, cfp->lfp, catch_iseq->local_size - 1);
 
 	    state = 0;
+	    th->state = 0;
 	    th->errinfo = Qnil;
 	    goto vm_loop_start;
 	}
 	else {
-	    th->cfp++;
-	    if (th->cfp->pc != &finish_insn_seq[0]) {
+	    /* skip frame */
+
+	    switch (VM_FRAME_TYPE(th->cfp)) {
+	      case VM_FRAME_MAGIC_METHOD:
+		EXEC_EVENT_HOOK(th, RUBY_EVENT_RETURN, th->cfp->self, 0, 0);
+		break;
+	      case VM_FRAME_MAGIC_CLASS:
+		EXEC_EVENT_HOOK(th, RUBY_EVENT_END, th->cfp->self, 0, 0);
+		break;
+	    }
+
+	    th->cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(th->cfp);
+
+	    if (VM_FRAME_TYPE(th->cfp) != VM_FRAME_MAGIC_FINISH) {
 		goto exception_handler;
 	    }
 	    else {
@@ -1688,7 +1710,7 @@ thread_free(void *ptr)
 	    rb_bug("thread_free: locking_mutex must be NULL (%p:%ld)", (void *)th, th->locking_mutex);
 	}
 	if (th->keeping_mutexes != NULL) {
-	    rb_bug("thread_free: keeping_mutexes must be NULL (%p:%ld)", (void *)th, th->locking_mutex);
+	    rb_bug("thread_free: keeping_mutexes must be NULL (%p:%p)", (void *)th, th->keeping_mutexes);
 	}
 
 	if (th->local_storage) {
@@ -1723,8 +1745,6 @@ thread_free(void *ptr)
 static size_t
 thread_memsize(const void *ptr)
 {
-    RUBY_FREE_ENTER("thread");
-
     if (ptr) {
 	const rb_thread_t *th = ptr;
 	size_t size = sizeof(rb_thread_t);
@@ -2201,6 +2221,7 @@ InitVM_VM(void)
     rb_define_method(rb_cRubyVM, "parent", rb_vm_parent, 0);
     rb_define_singleton_method(rb_cRubyVM, "current", rb_vm_s_current, 0);
     rb_define_singleton_method(rb_cRubyVM, "parent", rb_vm_s_parent, 0);
+    rb_undef_method(CLASS_OF(rb_cRubyVM), "new");
 
     /* ::VM::FrozenCore */
     fcore = rb_class_new(rb_cBasicObject);
@@ -2219,6 +2240,7 @@ InitVM_VM(void)
     /* ::VM::Env */
     rb_cEnv = rb_define_class_under(rb_cRubyVM, "Env", rb_cObject);
     rb_undef_alloc_func(rb_cEnv);
+    rb_undef_method(CLASS_OF(rb_cEnv), "new");
 
     /* ::Thread */
     rb_cThread = rb_define_class("Thread", rb_cObject);

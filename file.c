@@ -71,15 +71,15 @@ int flock(int, int);
 #define lstat stat
 #endif
 
-#ifdef __BEOS__ /* should not change ID if -1 */
+#if defined(__BEOS__) || defined(__HAIKU__) /* should not change ID if -1 */
 static int
 be_chown(const char *path, uid_t owner, gid_t group)
 {
-    if (owner == -1 || group == -1) {
+    if (owner == (uid_t)-1 || group == (gid_t)-1) {
 	struct stat st;
 	if (stat(path, &st) < 0) return -1;
-	if (owner == -1) owner = st.st_uid;
-	if (group == -1) group = st.st_gid;
+	if (owner == (uid_t)-1) owner = st.st_uid;
+	if (group == (gid_t)-1) group = st.st_gid;
     }
     return chown(path, owner, group);
 }
@@ -87,18 +87,46 @@ be_chown(const char *path, uid_t owner, gid_t group)
 static int
 be_fchown(int fd, uid_t owner, gid_t group)
 {
-    if (owner == -1 || group == -1) {
+    if (owner == (uid_t)-1 || group == (gid_t)-1) {
 	struct stat st;
 	if (fstat(fd, &st) < 0) return -1;
-	if (owner == -1) owner = st.st_uid;
-	if (group == -1) group = st.st_gid;
+	if (owner == (uid_t)-1) owner = st.st_uid;
+	if (group == (gid_t)-1) group = st.st_gid;
     }
     return fchown(fd, owner, group);
 }
 #define fchown be_fchown
-#endif /* __BEOS__ */
+#endif /* __BEOS__ || __HAIKU__ */
 
 #define insecure_obj_p(obj, level) (level >= 4 || (level > 0 && OBJ_TAINTED(obj)))
+
+static VALUE
+file_path_convert(VALUE name)
+{
+#ifndef _WIN32 /* non Windows == Unix */
+    rb_encoding *fname_encoding = rb_enc_from_index(ENCODING_GET(name));
+    rb_encoding *fs_encoding;
+#  ifdef __APPLE__
+    /* Mac OS X's file system encoding is UTF-8 */
+    if (rb_usascii_encoding() != fname_encoding
+	    && rb_ascii8bit_encoding() != fname_encoding
+	    && (fs_encoding = rb_filesystem_encoding()) != fname_encoding
+	    && rb_enc_find("UTF8-MAC") != fname_encoding) {
+	/* Don't call rb_enc_find() before UTF-8 */
+	name = rb_str_conv_enc(name, fname_encoding, fs_encoding);
+    }
+#  else /* Unix other than Mac OS X */
+    if (rb_default_internal_encoding() != NULL
+	    && rb_usascii_encoding() != fname_encoding
+	    && rb_ascii8bit_encoding() != fname_encoding
+	    && (fs_encoding = rb_filesystem_encoding()) != fname_encoding) {
+	/* Don't call rb_filesystem_encoding() before US-ASCII and ASCII-8BIT */
+	name = rb_str_conv_enc(name, fname_encoding, fs_encoding);
+    }
+#  endif
+#endif
+    return name;
+}
 
 static VALUE
 rb_get_path_check(VALUE obj, int level)
@@ -119,7 +147,9 @@ rb_get_path_check(VALUE obj, int level)
     else {
 	tmp = obj;
     }
+    StringValue(tmp);
   exit:
+    tmp = file_path_convert(tmp);
     StringValueCStr(tmp);
     if (obj != tmp && insecure_obj_p(tmp, level)) {
 	rb_insecure_operation();
@@ -959,7 +989,7 @@ eaccess(const char *path, int mode)
     else if (group_member(st.st_gid))
 	mode <<= 3;
 
-    if ((st.st_mode & mode) == mode) return 0;
+    if ((int)(st.st_mode & mode) == mode) return 0;
 
     return -1;
 #else
@@ -3100,6 +3130,151 @@ rb_file_s_absolute_path(int argc, VALUE *argv)
     return rb_file_absolute_path(fname, dname);
 }
 
+static void
+realpath_rec(long *prefixlenp, VALUE *resolvedp, char *unresolved, VALUE loopcheck, int strict, int last)
+{
+    while (*unresolved) {
+        char *testname = unresolved;
+        char *unresolved_firstsep = rb_path_next(unresolved);
+        long testnamelen = unresolved_firstsep - unresolved;
+        char *unresolved_nextname = unresolved_firstsep;
+        while (isdirsep(*unresolved_nextname)) unresolved_nextname++;
+        unresolved = unresolved_nextname;
+        if (testnamelen == 1 && testname[0] == '.') {
+        }
+        else if (testnamelen == 2 && testname[0] == '.' && testname[1] == '.') {
+            if (*prefixlenp < RSTRING_LEN(*resolvedp)) {
+                char *resolved_names = RSTRING_PTR(*resolvedp) + *prefixlenp;
+                char *lastsep = rb_path_last_separator(resolved_names);
+                long len = lastsep ? lastsep - resolved_names : 0;
+                rb_str_set_len(*resolvedp, *prefixlenp + len);
+            }
+        }
+        else {
+            VALUE checkval;
+            VALUE testpath = rb_str_dup(*resolvedp);
+            if (*prefixlenp < RSTRING_LEN(testpath))
+                rb_str_cat2(testpath, "/");
+            rb_str_cat(testpath, testname, testnamelen);
+            checkval = rb_hash_aref(loopcheck, testpath);
+            if (!NIL_P(checkval)) {
+                if (checkval == ID2SYM(rb_intern("resolving"))) {
+                    errno = ELOOP;
+                    rb_sys_fail(RSTRING_PTR(testpath));
+                }
+                else {
+                    *resolvedp = rb_str_dup(checkval);
+                }
+            }
+            else {
+                struct stat sbuf;
+                int ret;
+                ret = lstat(RSTRING_PTR(testpath), &sbuf);
+                if (ret == -1) {
+                    if (errno == ENOENT) {
+                        if (strict || !last || *unresolved_firstsep)
+                            rb_sys_fail(RSTRING_PTR(testpath));
+                        *resolvedp = testpath;
+                        break;
+                    }
+                    else {
+                        rb_sys_fail(RSTRING_PTR(testpath));
+                    }
+                }
+#ifdef HAVE_READLINK
+                if (S_ISLNK(sbuf.st_mode)) {
+                    volatile VALUE link;
+                    char *link_prefix, *link_names;
+                    long link_prefixlen;
+                    rb_hash_aset(loopcheck, testpath, ID2SYM(rb_intern("resolving")));
+                    link = rb_file_s_readlink(rb_cFile, testpath);
+                    link_prefix = RSTRING_PTR(link);
+                    link_names = skiproot(link_prefix);
+                    link_prefixlen = link_names - link_prefix;
+                    if (link_prefixlen == 0) {
+                        realpath_rec(prefixlenp, resolvedp, link_names, loopcheck, strict, *unresolved_firstsep == '\0');
+                    }
+                    else {
+                        *resolvedp = rb_str_new(link_prefix, link_prefixlen);
+                        *prefixlenp = link_prefixlen;
+                        realpath_rec(prefixlenp, resolvedp, link_names, loopcheck, strict, *unresolved_firstsep == '\0');
+                    }
+                    rb_hash_aset(loopcheck, testpath, rb_str_dup_frozen(*resolvedp));
+                }
+                else
+#endif
+                {
+                    VALUE s = rb_str_dup_frozen(testpath);
+                    rb_hash_aset(loopcheck, s, s);
+                    *resolvedp = testpath;
+                }
+            }
+        }
+    }
+}
+
+static VALUE
+realpath_internal(VALUE path, int strict)
+{
+    long prefixlen;
+    VALUE resolved;
+    volatile VALUE unresolved_path;
+    char *unresolved_names;
+    VALUE loopcheck;
+
+    rb_secure(2);
+
+    FilePathValue(path);
+    unresolved_path = rb_str_dup_frozen(path);
+    unresolved_names = skiproot(RSTRING_PTR(unresolved_path));
+    prefixlen = unresolved_names - RSTRING_PTR(unresolved_path);
+    loopcheck = rb_hash_new();
+    if (prefixlen == 0) {
+        volatile VALUE curdir = rb_dir_getwd();
+        char *unresolved_curdir_names = skiproot(RSTRING_PTR(curdir));
+        prefixlen = unresolved_curdir_names - RSTRING_PTR(curdir);
+        resolved = rb_str_new(RSTRING_PTR(curdir), prefixlen);
+        realpath_rec(&prefixlen, &resolved, unresolved_curdir_names, loopcheck, 1, 0);
+    }
+    else {
+        resolved = rb_str_new(RSTRING_PTR(unresolved_path), prefixlen);
+    }
+    realpath_rec(&prefixlen, &resolved, unresolved_names, loopcheck, strict, 1);
+    OBJ_TAINT(resolved);
+    return resolved;
+}
+
+/*
+ * call-seq:
+ *     File.realpath(pathname) -> real_pathname
+ *
+ *  Returns the real (absolute) pathname of +pathname+ in the actual
+ *  filesystem not containing symlinks or useless dots.
+ * 
+ *  All components of the pathname must exist when this method is
+ *  called.
+ */
+static VALUE
+rb_file_s_realpath(VALUE klass, VALUE path)
+{
+    return realpath_internal(path, 1);
+}
+
+/*
+ * call-seq:
+ *     File.realdirpath(pathname) -> real_pathname
+ *
+ *  Returns the real (absolute) pathname of +pathname+ in the actual filesystem.
+ *  The real pathname doesn't contain symlinks or useless dots.
+ * 
+ *  The last component of the real pathname can be nonexistent.
+ */
+static VALUE
+rb_file_s_realdirpath(VALUE klass, VALUE path)
+{
+    return realpath_internal(path, 0);
+}
+
 static size_t
 rmext(const char *p, long l1, const char *e)
 {
@@ -3698,51 +3873,51 @@ test_check(int n, int argc, VALUE *argv)
  *  File tests on a single file:
  *
  *    Test   Returns   Meaning
- *     ?A  | Time    | Last access time for file1
- *     ?b  | boolean | True if file1 is a block device
- *     ?c  | boolean | True if file1 is a character device
- *     ?C  | Time    | Last change time for file1
- *     ?d  | boolean | True if file1 exists and is a directory
- *     ?e  | boolean | True if file1 exists
- *     ?f  | boolean | True if file1 exists and is a regular file
- *     ?g  | boolean | True if file1 has the \CF{setgid} bit
+ *    "A"  | Time    | Last access time for file1
+ *    "b"  | boolean | True if file1 is a block device
+ *    "c"  | boolean | True if file1 is a character device
+ *    "C"  | Time    | Last change time for file1
+ *    "d"  | boolean | True if file1 exists and is a directory
+ *    "e"  | boolean | True if file1 exists
+ *    "f"  | boolean | True if file1 exists and is a regular file
+ *    "g"  | boolean | True if file1 has the \CF{setgid} bit
  *         |         | set (false under NT)
- *     ?G  | boolean | True if file1 exists and has a group
+ *    "G"  | boolean | True if file1 exists and has a group
  *         |         | ownership equal to the caller's group
- *     ?k  | boolean | True if file1 exists and has the sticky bit set
- *     ?l  | boolean | True if file1 exists and is a symbolic link
- *     ?M  | Time    | Last modification time for file1
- *     ?o  | boolean | True if file1 exists and is owned by
+ *    "k"  | boolean | True if file1 exists and has the sticky bit set
+ *    "l"  | boolean | True if file1 exists and is a symbolic link
+ *    "M"  | Time    | Last modification time for file1
+ *    "o"  | boolean | True if file1 exists and is owned by
  *         |         | the caller's effective uid
- *     ?O  | boolean | True if file1 exists and is owned by
+ *    "O"  | boolean | True if file1 exists and is owned by
  *         |         | the caller's real uid
- *     ?p  | boolean | True if file1 exists and is a fifo
- *     ?r  | boolean | True if file1 is readable by the effective
+ *    "p"  | boolean | True if file1 exists and is a fifo
+ *    "r"  | boolean | True if file1 is readable by the effective
  *         |         | uid/gid of the caller
- *     ?R  | boolean | True if file is readable by the real
+ *    "R"  | boolean | True if file is readable by the real
  *         |         | uid/gid of the caller
- *     ?s  | int/nil | If file1 has nonzero size, return the size,
+ *    "s"  | int/nil | If file1 has nonzero size, return the size,
  *         |         | otherwise return nil
- *     ?S  | boolean | True if file1 exists and is a socket
- *     ?u  | boolean | True if file1 has the setuid bit set
- *     ?w  | boolean | True if file1 exists and is writable by
+ *    "S"  | boolean | True if file1 exists and is a socket
+ *    "u"  | boolean | True if file1 has the setuid bit set
+ *    "w"  | boolean | True if file1 exists and is writable by
  *         |         | the effective uid/gid
- *     ?W  | boolean | True if file1 exists and is writable by
+ *    "W"  | boolean | True if file1 exists and is writable by
  *         |         | the real uid/gid
- *     ?x  | boolean | True if file1 exists and is executable by
+ *    "x"  | boolean | True if file1 exists and is executable by
  *         |         | the effective uid/gid
- *     ?X  | boolean | True if file1 exists and is executable by
+ *    "X"  | boolean | True if file1 exists and is executable by
  *         |         | the real uid/gid
- *     ?z  | boolean | True if file1 exists and has a zero length
+ *    "z"  | boolean | True if file1 exists and has a zero length
  *
  * Tests that take two files:
  *
- *     ?-  | boolean | True if file1 and file2 are identical
- *     ?=  | boolean | True if the modification times of file1
+ *    "-"  | boolean | True if file1 and file2 are identical
+ *    "="  | boolean | True if the modification times of file1
  *         |         | and file2 are equal
- *     ?<  | boolean | True if the modification time of file1
+ *    "<"  | boolean | True if the modification time of file1
  *         |         | is prior to that of file2
- *     ?>  | boolean | True if the modification time of file1
+ *    ">"  | boolean | True if the modification time of file1
  *         |         | is after that of file2
  */
 
@@ -3875,10 +4050,10 @@ rb_f_test(int argc, VALUE *argv)
   unknown:
     /* unknown command */
     if (ISPRINT(cmd)) {
-	rb_raise(rb_eArgError, "unknown command ?%c", cmd);
+	rb_raise(rb_eArgError, "unknown command '%s%c'", cmd == '\'' || cmd == '\\' ? "\\" : "", cmd);
     }
     else {
-	rb_raise(rb_eArgError, "unknown command ?\\x%02X", cmd);
+	rb_raise(rb_eArgError, "unknown command \"\\x%02X\"", cmd);
     }
     return Qnil;		/* not reached */
 }
@@ -4920,6 +5095,8 @@ InitVM_File(void)
     rb_define_singleton_method(rb_cFile, "truncate", rb_file_s_truncate, 2);
     rb_define_singleton_method(rb_cFile, "expand_path", rb_file_s_expand_path, -1);
     rb_define_singleton_method(rb_cFile, "absolute_path", rb_file_s_absolute_path, -1);
+    rb_define_singleton_method(rb_cFile, "realpath", rb_file_s_realpath, 1);
+    rb_define_singleton_method(rb_cFile, "realdirpath", rb_file_s_realdirpath, 1);
     rb_define_singleton_method(rb_cFile, "basename", rb_file_s_basename, -1);
     rb_define_singleton_method(rb_cFile, "dirname", rb_file_s_dirname, 1);
     rb_define_singleton_method(rb_cFile, "extname", rb_file_s_extname, 1);

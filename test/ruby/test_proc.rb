@@ -178,7 +178,7 @@ class TestProc < Test::Unit::TestCase
     b = proc { :foo }
     assert_equal(:foo, b.curry[])
 
-    b = lambda {|x, y, &b| b.call(x + y) }.curry
+    b = lambda {|x, y, &blk| blk.call(x + y) }.curry
     b = b.call(2) { raise }
     b = b.call(3) {|x| x + 4 }
     assert_equal(9, b)
@@ -620,7 +620,7 @@ class TestProc < Test::Unit::TestCase
     assert_equal [1, 2, 3, 4, 5, 6, Proc, :x], (pr.call(1, 2, 3, 4, 5, 6, 7){|x| x})
   end
 
-  def test_proc_args_opt_and_block
+  def test_proc_args_opt_and_block2
     pr = proc {|a,b,c=:c,d=:d,*e,&f|
       [a, b, c, d, e, f.class, f&&f.call(:x)]
     }
@@ -735,6 +735,10 @@ class TestProc < Test::Unit::TestCase
     assert_equal([[:req, :a], [:rest, :b], [:req, :c], [:block, :d]], method(:pmo6).to_proc.parameters)
     assert_equal([[:req, :a], [:opt, :b], [:rest, :c], [:req, :d], [:block, :e]], method(:pmo7).to_proc.parameters)
     assert_equal([[:req], [:block, :b]], method(:pma1).to_proc.parameters)
+
+    assert_equal([], "".method(:upcase).to_proc.parameters)
+    assert_equal([[:rest]], "".method(:gsub).to_proc.parameters)
+    assert_equal([[:rest]], proc {}.curry.parameters)
   end
 
   def test_to_s
@@ -746,14 +750,15 @@ class TestProc < Test::Unit::TestCase
     assert(x.to_s.tainted?)
   end
 
-  def source_location_test
-    __LINE__
+  @@line_of_source_location_test = __LINE__ + 1
+  def source_location_test a=1,
+    b=2
   end
 
   def test_source_location
     file, lineno = method(:source_location_test).source_location
     assert_match(/^#{ Regexp.quote(__FILE__) }$/, file)
-    assert_equal(source_location_test - 1, lineno)
+    assert_equal(@@line_of_source_location_test, lineno, 'Bug #2427')
   end
 
   def test_splat_without_respond_to

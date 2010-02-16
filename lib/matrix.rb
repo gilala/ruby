@@ -26,7 +26,8 @@ module ExceptionForMatrix # :nodoc:
 
   def_exception("ErrDimensionMismatch", "\#{self.name} dimension mismatch")
   def_exception("ErrNotRegular", "Not Regular Matrix")
-  def_exception("ErrOperationNotDefined", "This operation(%s) can\\'t defined")
+  def_exception("ErrOperationNotDefined", "Operation(%s) can\\'t be defined: %s op %s")
+  def_exception("ErrOperationNotImplemented", "Sorry, Operation(%s) not implemented: %s op %s")
 end
 
 #
@@ -497,7 +498,7 @@ class Matrix
   def +(m)
     case m
     when Numeric
-      Matrix.Raise ErrOperationNotDefined, "+"
+      Matrix.Raise ErrOperationNotDefined, "+", self.class, m.class
     when Vector
       m = Matrix.column_vector(m)
     when Matrix
@@ -525,7 +526,7 @@ class Matrix
   def -(m)
     case m
     when Numeric
-      Matrix.Raise ErrOperationNotDefined, "-"
+      Matrix.Raise ErrOperationNotDefined, "-", self.class, m.class
     when Vector
       m = Matrix.column_vector(m)
     when Matrix
@@ -569,7 +570,7 @@ class Matrix
 
   #
   # Returns the inverse of the matrix.
-  #   Matrix[[1, 2], [2, 1]].inverse
+  #   Matrix[[-1, -1], [0, -1]].inverse
   #     => -1  1
   #         0 -1
   #
@@ -603,16 +604,16 @@ class Matrix
       end
       akk = a[k][k]
 
-      size.times do |i|
-        next if i == k
-        q = a[i][k].quo(akk)
-        a[i][k] = 0
+      size.times do |ii|
+        next if ii == k
+        q = a[ii][k].quo(akk)
+        a[ii][k] = 0
 
         (k + 1 ... size).each do |j|
-          a[i][j] -= a[k][j] * q
+          a[ii][j] -= a[k][j] * q
         end
         size.times do |j|
-          @rows[i][j] -= @rows[k][j] * q
+          @rows[ii][j] -= @rows[k][j] * q
         end
       end
 
@@ -649,9 +650,9 @@ class Matrix
         x *= x
       end
     elsif other.kind_of?(Float) || defined?(Rational) && other.kind_of?(Rational)
-      Matrix.Raise ErrOperationNotDefined, "**"
+      Matrix.Raise ErrOperationNotImplemented, "**", self.class, other.class
     else
-      Matrix.Raise ErrOperationNotDefined, "**"
+      Matrix.Raise ErrOperationNotDefined, "**", self.class, other.class
     end
   end
 
@@ -678,8 +679,8 @@ class Matrix
     det = 1
     size.times do |k|
       if (akk = a[k][k]) == 0
-        i = (k+1 ... size).find {|i|
-          a[i][k] != 0
+        i = (k+1 ... size).find {|ii|
+          a[ii][k] != 0
         }
         return 0 if i.nil?
         a[i], a[k] = a[k], a[i]
@@ -687,10 +688,10 @@ class Matrix
         det *= -1
       end
 
-      (k + 1 ... size).each do |i|
-        q = a[i][k].quo(akk)
+      (k + 1 ... size).each do |ii|
+        q = a[ii][k].quo(akk)
         (k + 1 ... size).each do |j|
-          a[i][j] -= a[k][j] * q
+          a[ii][j] -= a[k][j] * q
         end
       end
       det *= akk
@@ -718,21 +719,21 @@ class Matrix
     det = 1
     size.times do |k|
       if a[k][k].zero?
-        i = (k+1 ... size).find {|i|
-          a[i][k] != 0
+        i = (k+1 ... size).find {|ii|
+          a[ii][k] != 0
         }
         return 0 if i.nil?
         a[i], a[k] = a[k], a[i]
         det *= -1
       end
 
-      (k + 1 ... size).each do |i|
-        q = a[i][k].quo(a[k][k])
+      (k + 1 ... size).each do |ii|
+        q = a[ii][k].quo(a[k][k])
         (k ... size).each do |j|
-          a[i][j] -= a[k][j] * q
+          a[ii][j] -= a[k][j] * q
         end
-        unless a[i][k].zero?
-          a[i], a[k] = a[k], a[i]
+        unless a[ii][k].zero?
+          a[ii], a[k] = a[k], a[ii]
           det *= -1
           redo
         end
@@ -764,15 +765,15 @@ class Matrix
     rank = 0
     a_column_size.times do |k|
       if (akk = a[k][k]) == 0
-        i = (k+1 ... a_row_size).find {|i|
-          a[i][k] != 0
+        i = (k+1 ... a_row_size).find {|ii|
+          a[ii][k] != 0
         }
         if i
           a[i], a[k] = a[k], a[i]
           akk = a[k][k]
         else
-          i = (k+1 ... a_column_size).find {|i|
-            a[k][i] != 0
+          i = (k+1 ... a_column_size).find {|ii|
+            a[k][ii] != 0
           }
           next if i.nil?
           (k ... a_column_size).each do |j|
@@ -782,10 +783,10 @@ class Matrix
         end
       end
 
-      (k + 1 ... a_row_size).each do |i|
-        q = a[i][k].quo(akk)
+      (k + 1 ... a_row_size).each do |ii|
+        q = a[ii][k].quo(akk)
         (k + 1... a_column_size).each do |j|
-          a[i][j] -= a[k][j] * q
+          a[ii][j] -= a[k][j] * q
         end
       end
       rank += 1
@@ -976,9 +977,7 @@ class Matrix
       when Numeric
         Scalar.new(@value + other)
       when Vector, Matrix
-        Scalar.Raise WrongArgType, other.class, "Numeric or Scalar"
-      when Scalar
-        Scalar.new(@value + other.value)
+        Scalar.Raise ErrOperationNotDefined, "+", @value.class, other.class
       else
         x, y = other.coerce(self)
         x + y
@@ -990,9 +989,7 @@ class Matrix
       when Numeric
         Scalar.new(@value - other)
       when Vector, Matrix
-        Scalar.Raise WrongArgType, other.class, "Numeric or Scalar"
-      when Scalar
-        Scalar.new(@value - other.value)
+        Scalar.Raise ErrOperationNotDefined, "-", @value.class, other.class
       else
         x, y = other.coerce(self)
         x - y
@@ -1016,7 +1013,7 @@ class Matrix
       when Numeric
         Scalar.new(@value / other)
       when Vector
-        Scalar.Raise WrongArgType, other.class, "Numeric or Scalar or Matrix"
+        Scalar.Raise ErrOperationNotDefined, "/", @value.class, other.class
       when Matrix
         self * other.inverse
       else
@@ -1030,9 +1027,10 @@ class Matrix
       when Numeric
         Scalar.new(@value ** other)
       when Vector
-        Scalar.Raise WrongArgType, other.class, "Numeric or Scalar or Matrix"
+        Scalar.Raise ErrOperationNotDefined, "**", @value.class, other.class
       when Matrix
-        other.powered_by(self)
+        #other.powered_by(self)
+        Scalar.Raise ErrOperationNotImplemented, "**", @value.class, other.class
       else
         x, y = other.coerce(self)
         x ** y
@@ -1147,10 +1145,11 @@ class Vector
   #
   def each2(v) # :yield: e1, e2
     Vector.Raise ErrDimensionMismatch if size != v.size
-    return to_enum(:each2) unless block_given?
+    return to_enum(:each2, v) unless block_given?
     size.times do |i|
       yield @elements[i], v[i]
     end
+    self
   end
 
   #
@@ -1159,7 +1158,7 @@ class Vector
   #
   def collect2(v) # :yield: e1, e2
     Vector.Raise ErrDimensionMismatch if size != v.size
-    return to_enum(:collect2) unless block_given?
+    return to_enum(:collect2, v) unless block_given?
     (0 ... size).collect do |i|
       yield @elements[i], v[i]
     end
@@ -1214,6 +1213,8 @@ class Vector
       Vector.elements(els, false)
     when Matrix
       Matrix.column_vector(self) * x
+    when Vector
+      Vector.Raise ErrOperationNotDefined, "*", self.class, x.class
     else
       s, x = x.coerce(self)
       s * x
@@ -1258,6 +1259,22 @@ class Vector
     end
   end
 
+  #
+  # Vector division.
+  #
+  def /(x)
+    case x
+    when Numeric
+      els = @elements.collect{|e| e / x}
+      Vector.elements(els, false)
+    when Matrix, Vector
+      Vector.Raise ErrOperationNotDefined, "/", self.class, x.class
+    else
+      s, x = x.coerce(self)
+      s / x
+    end
+  end
+
   #--
   # VECTOR FUNCTIONS -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
   #++
@@ -1290,7 +1307,7 @@ class Vector
   # Like Vector#collect2, but returns a Vector instead of an Array.
   #
   def map2(v, &block) # :yield: e1, e2
-    return to_enum(:map2) unless block_given?
+    return to_enum(:map2, v) unless block_given?
     els = collect2(v, &block)
     Vector.elements(els, false)
   end

@@ -166,6 +166,7 @@ mark_dump_arg(void *ptr)
         return;
     rb_mark_set(p->data);
     rb_mark_hash(p->compat_tbl);
+    rb_gc_mark(p->str);
 }
 
 static void
@@ -423,10 +424,11 @@ w_symbol(ID id, struct dump_arg *arg)
 	    rb_raise(rb_eTypeError, "can't dump anonymous ID %ld", id);
 	}
 	encidx = rb_enc_get_index(sym);
-	if (encidx == rb_usascii_encindex()) {
+	if (encidx == rb_usascii_encindex() ||
+	    rb_enc_str_coderange(sym) == ENC_CODERANGE_7BIT) {
 	    encidx = -1;
 	}
-	else if (rb_enc_str_coderange(sym) != ENC_CODERANGE_7BIT) {
+	else {
 	    w_byte(TYPE_IVAR, arg);
 	}
 	w_byte(TYPE_SYMBOL, arg);
@@ -649,7 +651,7 @@ w_object(VALUE obj, struct dump_arg *arg, int limit)
 	    check_dump_arg(arg, s_mdump);
 	    w_class(TYPE_USRMARSHAL, obj, arg, FALSE);
 	    w_object(v, arg, limit);
-	    if (hasiv) w_ivar(obj, 0, &c_arg);
+	    if (hasiv) w_ivar(obj, ivtbl, &c_arg);
 	    return;
 	}
 	if (rb_respond_to(obj, s_dump)) {
@@ -926,7 +928,7 @@ marshal_dump(int argc, VALUE *argv)
     arg->compat_allocator_tbl = DATA_PTR(rb_compat_allocator_tbl);
     arg->compat_tbl = st_init_numtable();
     arg->encodings = 0;
-    arg->str = rb_str_tmp_new(0);
+    arg->str = rb_str_buf_new(0);
     if (!NIL_P(port)) {
 	if (!rb_respond_to(port, s_write)) {
 	  type_error:
@@ -950,7 +952,6 @@ marshal_dump(int argc, VALUE *argv)
 	rb_io_write(arg->dest, arg->str);
 	rb_str_resize(arg->str, 0);
     }
-    RBASIC(arg->str)->klass = rb_cString;
     clear_dump_arg(arg);
     RB_GC_GUARD(wrapper);
 
@@ -1131,7 +1132,6 @@ id2encidx(ID id, VALUE val, struct load_arg *arg)
 {
     if (id == rb_id_encoding()) {
 	int idx = rb_enc_find_index(StringValueCStr(val));
-	r_entry(val, arg);
 	return idx;
     }
     else if (id == rb_intern("E")) {
@@ -1259,7 +1259,7 @@ r_leave(VALUE v, struct load_arg *arg)
 }
 
 static void
-r_ivar(VALUE obj, struct load_arg *arg)
+r_ivar(VALUE obj, int *has_encoding, struct load_arg *arg)
 {
     long len;
 
@@ -1271,6 +1271,7 @@ r_ivar(VALUE obj, struct load_arg *arg)
 	    int idx = id2encidx(id, val, arg);
 	    if (idx >= 0) {
 		rb_enc_associate_index(obj, idx);
+		if (has_encoding) *has_encoding = TRUE;
 	    }
 	    else {
 		rb_ivar_set(obj, id, val);
@@ -1324,37 +1325,6 @@ obj_alloc_by_path(VALUE path, struct load_arg *arg)
     return rb_obj_alloc(klass);
 }
 
-#define div0(x) ruby_div0(x)
-
-static int
-has_encoding(struct load_arg *arg)
-{
-    int res = FALSE;
-    long offset = arg->offset;
-    r_long(arg);
-    switch (r_byte(arg)) {
-      case TYPE_SYMBOL:
-	switch (r_byte(arg)) {
-	  case 6:
-	    if (r_byte(arg) == 'E') res = TRUE;
-	    break;
-	  case 13:
-	    if (r_byte(arg) == 'e') res = TRUE;
-	    break;
-	}
-	break;
-      case TYPE_SYMLINK:
-	{
-	    ID id = r_symlink(arg);
-	    if (id == rb_intern("E") || id == rb_id_encoding())
-		res = TRUE;
-	}
-	break;
-    }
-    arg->offset = offset;
-    return res;
-}
-
 static VALUE
 r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
 {
@@ -1381,7 +1351,7 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
 	    int ivar = TRUE;
 
 	    v = r_object0(arg, &ivar, extmod);
-	    if (ivar) r_ivar(v, arg);
+	    if (ivar) r_ivar(v, NULL, arg);
 	}
 	break;
 
@@ -1451,13 +1421,13 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
 	    const char *ptr = RSTRING_PTR(str);
 
 	    if (strcmp(ptr, "nan") == 0) {
-		d = div0(0.0);
+		d = NAN;
 	    }
 	    else if (strcmp(ptr, "inf") == 0) {
-		d = div0(+1.0);
+		d = INFINITY;
 	    }
 	    else if (strcmp(ptr, "-inf") == 0) {
-		d = div0(-1.0);
+		d = -INFINITY;
 	    }
 	    else {
 		char *e;
@@ -1525,17 +1495,33 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
 	{
 	    volatile VALUE str = r_bytes(arg);
 	    int options = r_byte(arg);
+	    int has_encoding = FALSE;
 
-	    if (!ivp || !has_encoding(arg)) {
-		VALUE pat;
-		VALUE dst;
-		static const char rsrc[] =
-		    "(?<!\\\\)((?:\\\\\\\\)*)\\\\([ghijklmopquyEFHIJKLNOPQRSTUVXY])";
-		pat = rb_reg_new(rsrc, sizeof(rsrc)-1, 0);
-		dst = rb_usascii_str_new_cstr("\\1\\2");
-		rb_funcall(str, rb_intern("gsub!"), 2, pat, dst);
+	    v = r_entry(rb_reg_alloc(), arg);
+	    if (ivp) {
+		r_ivar(str, &has_encoding, arg);
+		*ivp = FALSE;
 	    }
-	    v = r_entry(rb_reg_new_str(str, options), arg);
+	    if (!has_encoding) {
+		/* 1.8 compatibility; remove escapes undefined in 1.8 */
+		char *ptr = RSTRING_PTR(str), *dst = ptr, *src = ptr;
+		long len = RSTRING_LEN(str);
+		long bs = 0;
+		for (; len-- > 0; *dst++ = *src++) {
+		    switch (*src) {
+		      case '\\': bs++; break;
+		      case 'g': case 'h': case 'i': case 'j': case 'k': case 'l':
+		      case 'm': case 'o': case 'p': case 'q': case 'u': case 'y':
+		      case 'E': case 'F': case 'H': case 'I': case 'J': case 'K':
+		      case 'L': case 'N': case 'O': case 'P': case 'Q': case 'R':
+		      case 'S': case 'T': case 'U': case 'V': case 'X': case 'Y':
+			if (bs & 1) --dst;
+		      default: bs = 0; break;
+		    }
+		}
+		rb_str_set_len(str, dst - ptr);
+	    }
+	    v = rb_reg_init_str(v, str, options);
 	    v = r_leave(v, arg);
 	}
 	break;
@@ -1620,7 +1606,7 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
 	    }
 	    data = r_string(arg);
 	    if (ivp) {
-		r_ivar(data, arg);
+		r_ivar(data, NULL, arg);
 		*ivp = FALSE;
 	    }
 	    v = rb_funcall(klass, s_load, 1, data);
@@ -1662,7 +1648,7 @@ r_object0(struct load_arg *arg, int *ivp, VALUE extmod)
 		rb_raise(rb_eArgError, "dump format error");
 	    }
 	    v = r_entry0(v, idx, arg);
-	    r_ivar(v, arg);
+	    r_ivar(v, NULL, arg);
 	    v = r_leave(v, arg);
 	}
 	break;

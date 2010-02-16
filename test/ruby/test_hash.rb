@@ -51,7 +51,7 @@ class TestHash < Test::Unit::TestCase
     assert_equal([], x[22])
     assert_not_same(x[22], x[22])
 
-    x = Hash.new{|h,k| z = k; h[k] = k*2}
+    x = Hash.new{|h,kk| z = kk; h[kk] = kk*2}
     z = 0
     assert_equal(44, x[22])
     assert_equal(22, z)
@@ -376,7 +376,7 @@ class TestHash < Test::Unit::TestCase
     assert_equal('nil', @h.fetch(nil))
   end
 
-  def test_key?
+  def test_key2?
     assert(!@cls[].key?(1))
     assert(!@cls[].key?(nil))
     assert(@h.key?(nil))
@@ -648,7 +648,7 @@ class TestHash < Test::Unit::TestCase
     assert_equal(hb, h2)
   end
 
-  def test_value?
+  def test_value2?
     assert(!@cls[].value?(1))
     assert(!@cls[].value?(nil))
     assert(@h.value?(nil))
@@ -703,14 +703,14 @@ class TestHash < Test::Unit::TestCase
   end
 
   def test_default_proc
-    h = Hash.new {|h, k| h + k + "baz" }
+    h = Hash.new {|hh, k| hh + k + "baz" }
     assert_equal("foobarbaz", h.default_proc.call("foo", "bar"))
     h = {}
     assert_nil(h.default_proc)
   end
 
   def test_shift2
-    h = Hash.new {|h, k| :foo }
+    h = Hash.new {|hh, k| :foo }
     h[1] = 2
     assert_equal([1, 2], h.shift)
     assert_equal(:foo, h.shift)
@@ -748,6 +748,13 @@ class TestHash < Test::Unit::TestCase
     h2 = {}
     h2.replace h1
     assert_equal(:foo, h2[0])
+
+    assert_raise(ArgumentError) { h2.replace() }
+    assert_raise(TypeError) { h2.replace(1) }
+    h2.freeze
+    assert_raise(ArgumentError) { h2.replace() }
+    assert_raise(RuntimeError) { h2.replace(h1) }
+    assert_raise(RuntimeError) { h2.replace(42) }
   end
 
   def test_size2
@@ -870,5 +877,14 @@ class TestHash < Test::Unit::TestCase
     o = Object.new
     def o.hash; 2<<100; end
     assert_equal({x=>1}.hash, {x=>1}.hash)
+  end
+
+  def test_hash_poped
+    assert_nothing_raised { eval("a = 1; {a => a}; a") }
+  end
+
+  def test_recursive_check
+    h = {}
+    assert_raise(ArgumentError) { h[h] = :foo }
   end
 end

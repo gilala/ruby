@@ -1026,7 +1026,7 @@ rb_newobj_from_heap(rb_objspace_t *objspace)
     VALUE obj;
 
     if ((ruby_gc_stress && !ruby_disable_gc_stress) || !freelist) {
-    	if (!heaps_increment(objspace) && !garbage_collect(objspace)) {
+	if (!heaps_increment(objspace) && !garbage_collect(objspace)) {
 	    during_gc = 0;
 	    rb_memerror();
 	}
@@ -1477,8 +1477,8 @@ free_method_entry_i(ID key, rb_method_entry_t *me, st_data_t data)
     return ST_CONTINUE;
 }
 
-static void
-free_m_table(st_table *tbl)
+void
+rb_free_m_table(st_table *tbl)
 {
     st_foreach(tbl, free_method_entry_i, 0);
     st_free_table(tbl);
@@ -2012,7 +2012,7 @@ obj_free(rb_objspace_t *objspace, VALUE obj)
       case T_MODULE:
       case T_CLASS:
 	rb_clear_cache_by_class((VALUE)obj);
-	free_m_table(RCLASS_M_TBL(obj));
+	rb_free_m_table(RCLASS_M_TBL(obj));
 	if (RCLASS_IV_TBL(obj)) {
 	    st_free_table(RCLASS_IV_TBL(obj));
 	}
@@ -2071,6 +2071,7 @@ obj_free(rb_objspace_t *objspace, VALUE obj)
 	break;
       case T_ICLASS:
 	/* iClass shares table with the module */
+	xfree(RANY(obj)->as.klass.ptr);
 	break;
 
       case T_FLOAT:

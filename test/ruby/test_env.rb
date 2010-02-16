@@ -68,6 +68,7 @@ class TestEnv < Test::Unit::TestCase
     ENV['test'] = val[0...-1]
 
     assert_nil(ENV.key(val))
+    assert_nil(ENV.index(val))
     assert_nil(ENV.key(val.upcase))
     ENV['test'] = val
     if IGNORE_CASE
@@ -122,6 +123,7 @@ class TestEnv < Test::Unit::TestCase
     assert_equal(nil, ENV["test"])
     assert_raise(ArgumentError) { ENV["foo\0bar"] = "test" }
     assert_raise(ArgumentError) { ENV["test"] = "foo\0bar" }
+    assert_raise(Errno::EINVAL) { ENV["foo=bar"] = "test" }
     ENV[PATH_ENV] = "/tmp/".taint
     assert_equal("/tmp/", ENV[PATH_ENV])
   end

@@ -21,7 +21,7 @@ extern "C" {
 #endif
 #endif
 
-#ifndef RUBY_LIB
+#ifndef RUBY_LIB_PREFIX
 #include "ruby/config.h"
 #ifdef RUBY_EXTCONF_H
 #include RUBY_EXTCONF_H
@@ -564,6 +564,7 @@ struct RObject {
      RCLASS_IV_INDEX_TBL(rb_obj_class(o)) : \
      ROBJECT(o)->as.heap.iv_index_tbl)
 
+/** @internal */
 typedef struct {
     VALUE super;
     struct st_table *iv_tbl;
@@ -683,6 +684,7 @@ struct RRegexp {
 #define RREGEXP_SRC(r) RREGEXP(r)->src
 #define RREGEXP_SRC_PTR(r) RSTRING_PTR(RREGEXP(r)->src)
 #define RREGEXP_SRC_LEN(r) RSTRING_LEN(RREGEXP(r)->src)
+#define RREGEXP_SRC_END(r) RSTRING_END(RREGEXP(r)->src)
 
 struct RHash {
     struct RBasic basic;
@@ -1095,6 +1097,7 @@ VALUE rb_equal(VALUE,VALUE);
 PRINTF_ARGS(NORETURN(void rb_raise(VALUE, const char*, ...)), 2, 3);
 PRINTF_ARGS(NORETURN(void rb_fatal(const char*, ...)), 1, 2);
 PRINTF_ARGS(NORETURN(void rb_bug(const char*, ...)), 1, 2);
+NORETURN(void rb_bug_errno(const char*, int));
 NORETURN(void rb_sys_fail(const char*));
 NORETURN(void rb_mod_sys_fail(VALUE, const char*));
 NORETURN(void rb_iter_break(void));

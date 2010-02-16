@@ -15,7 +15,7 @@ if defined?(Gem) then
     def gem(gem_name, *version_requirements)
       Gem.push_gem_version_on_load_path(gem_name, *version_requirements)
     end
-
+    private :gem
   end
 
   module Gem
@@ -66,8 +66,9 @@ if defined?(Gem) then
     end
 
     def self.set_home(home)
-      home = home.gsub File::ALT_SEPARATOR, File::SEPARATOR if File::ALT_SEPARATOR
-      @gem_home = home.force_encoding(Encoding.find('filesystem'))
+      home = home.dup.force_encoding(Encoding.find('filesystem'))
+      home.gsub!(File::ALT_SEPARATOR, File::SEPARATOR) if File::ALT_SEPARATOR
+      @gem_home = home
     end
 
     def self.set_paths(gpaths)
@@ -232,19 +233,11 @@ if defined?(Gem) then
             Dir.entries(gems_directory).each do |gem_directory_name|
               next if gem_directory_name == "." || gem_directory_name == ".."
 
-              dash = gem_directory_name.rindex("-")
-              next if dash.nil?
-
-              gem_name = gem_directory_name[0...dash]
+              next unless gem_name = gem_directory_name[/(.*)-(.*)/, 1]
+              new_version = integers_for($2)
               current_version = GemVersions[gem_name]
-              new_version = integers_for(gem_directory_name[dash+1..-1])
 
-              if current_version then
-                if (current_version <=> new_version) == -1 then
-                  GemVersions[gem_name] = new_version
-                  GemPaths[gem_name] = File.join(gems_directory, gem_directory_name)
-                end
-              else
+              if !current_version or (current_version <=> new_version) < 0 then
                 GemVersions[gem_name] = new_version
                 GemPaths[gem_name] = File.join(gems_directory, gem_directory_name)
               end

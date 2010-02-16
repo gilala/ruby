@@ -261,6 +261,17 @@ rb_thread_debug(
 }
 #endif
 
+void
+rb_thread_lock_unlock(rb_thread_lock_t *lock)
+{
+    native_mutex_unlock(lock);
+}
+
+void
+rb_thread_lock_destroy(rb_thread_lock_t *lock)
+{
+    native_mutex_destroy(lock);
+}
 
 static void
 set_unblock_function(rb_thread_t *th, rb_unblock_function_t *func, void *arg,
@@ -333,6 +344,7 @@ typedef struct rb_mutex_struct
 } mutex_t;
 
 static void rb_mutex_unlock_all(mutex_t *mutex, rb_thread_t *th);
+static void rb_mutex_abandon_all(mutex_t *mutexes);
 
 void
 rb_thread_terminate_all(void)
@@ -383,6 +395,15 @@ ruby_system_alone(void)
 }
 
 static void
+thread_unlock_all_locking_mutexes(rb_thread_t *th)
+{
+    if (th->keeping_mutexes) {
+	rb_mutex_unlock_all(th->keeping_mutexes, th);
+	th->keeping_mutexes = NULL;
+    }
+}
+
+static void
 thread_cleanup_func_before_exec(void *th_ptr)
 {
     rb_thread_t *th = th_ptr;
@@ -398,11 +419,7 @@ thread_cleanup_func(void *th_ptr)
 {
     rb_thread_t *th = th_ptr;
 
-    /* unlock all locking mutexes */
-    if (th->keeping_mutexes) {
-	rb_mutex_unlock_all(th->keeping_mutexes, th);
-	th->keeping_mutexes = NULL;
-    }
+    th->locking_mutex = Qfalse;
     thread_cleanup_func_before_exec(th_ptr);
     native_thread_destroy(th);
 }
@@ -536,7 +553,7 @@ thread_start_func_2(rb_thread_t *th, VALUE *stack_start, VALUE *register_stack_s
 	    th->stack = 0;
 	}
     }
-    thread_cleanup_func(th);
+    thread_unlock_all_locking_mutexes(th);
     if (th != main_th) rb_check_deadlock(th->vm);
     if (th->vm->main_thread == th) {
 	int signo = 0;
@@ -546,6 +563,7 @@ thread_start_func_2(rb_thread_t *th, VALUE *stack_start, VALUE *register_stack_s
 	if (signo) ruby_default_signal(signo);
     }
     else {
+	thread_cleanup_func(th);
 	native_mutex_unlock(&th->vm->global_vm_lock);
     }
 
@@ -2606,7 +2624,7 @@ do_select(int n, fd_set *read, fd_set *write, fd_set *except,
 	wait_100ms.tv_usec = 100 * 1000; /* 100 ms */
 
 	do {
-	    wait = (timeout == 0 || cmp_tv(&wait_100ms, timeout) > 0) ? &wait_100ms : timeout;
+	    wait = (timeout == 0 || cmp_tv(&wait_100ms, timeout) < 0) ? &wait_100ms : timeout;
 	    BLOCKING_REGION({
 		do {
 		    result = select(n, read, write, except, wait);
@@ -2616,16 +2634,16 @@ do_select(int n, fd_set *read, fd_set *write, fd_set *except,
 		    if (read) *read = orig_read;
 		    if (write) *write = orig_write;
 		    if (except) *except = orig_except;
-		    wait = &wait_100ms;
 		    if (timeout) {
 			struct timeval elapsed;
 			gettimeofday(&elapsed, NULL);
 			subtract_tv(&elapsed, &start_time);
+			gettimeofday(&start_time, NULL);
 			if (!subtract_tv(timeout, &elapsed)) {
 			    finish = 1;
 			    break;
 			}
-			if (cmp_tv(&wait_100ms, timeout) < 0) wait = timeout;
+			if (cmp_tv(&wait_100ms, timeout) > 0) wait = timeout;
 		    }
 		} while (__th->interrupt_flag == 0);
 	    }, 0, 0);
@@ -2912,6 +2930,7 @@ rb_thread_atfork_internal(int (*atfork)(st_data_t, st_data_t, st_data_t))
     VALUE thval = th->self;
     vm->main_thread = th;
 
+    native_mutex_reinitialize_atfork(&th->vm->global_vm_lock);
     st_foreach(vm->living_threads, atfork, (st_data_t)th);
     st_clear(vm->living_threads);
     st_insert(vm->living_threads, thval, (st_data_t)th->thread_id);
@@ -2927,6 +2946,10 @@ terminate_atfork_i(st_data_t key, st_data_t val, st_data_t current_th)
     GetThreadPtr(thval, th);
 
     if (th != (rb_thread_t *)current_th) {
+	if (th->keeping_mutexes) {
+	    rb_mutex_abandon_all(th->keeping_mutexes);
+	}
+	th->keeping_mutexes = NULL;
 	thread_cleanup_func(th);
     }
     return ST_CONTINUE;
@@ -2936,6 +2959,7 @@ void
 rb_thread_atfork(void)
 {
     rb_thread_atfork_internal(terminate_atfork_i);
+    GET_THREAD()->join_list_head = 0;
     rb_reset_random_seed();
 }
 
@@ -3349,7 +3373,7 @@ lock_interrupt(void *ptr)
 
 /*
  * call-seq:
- *    mutex.lock  => true or false
+ *    mutex.lock  => self
  *
  * Attempts to grab the lock and waits if it isn't available.
  * Raises +ThreadError+ if +mutex+ was locked by the current thread.
@@ -3489,6 +3513,19 @@ rb_mutex_unlock_all(mutex_t *mutexes, rb_thread_t *th)
 	mutexes = mutex->next_mutex;
 	err = mutex_unlock(mutex, th);
 	if (err) rb_bug("invalid keeping_mutexes: %s", err);
+    }
+}
+
+static void
+rb_mutex_abandon_all(mutex_t *mutexes)
+{
+    mutex_t *mutex;
+
+    while (mutexes) {
+	mutex = mutexes;
+	mutexes = mutex->next_mutex;
+	mutex->th = 0;
+	mutex->next_mutex = 0;
     }
 }
 

@@ -1,3 +1,4 @@
+# -*- rd -*-
 = NEWS
 
 This document is a list of user visible feature changes made between
@@ -15,10 +16,20 @@ with all sufficient information, see the ChangeLog file.
   * Array
     * new method:
       * Array#sort_by!
+      * Array#rotate!
+      * Array#rotate
 
   * Dir
     * new method:
       * Dir.home
+
+  * Encoding
+    * new encodings:
+      * Big5
+      * Big5-UAO
+
+    * new method:
+      * ascii_compatible?
 
   * Enumerable
     * New methods:
@@ -45,6 +56,17 @@ with all sufficient information, see the ChangeLog file.
 
   * ENV
     * Uses locale's encoding
+    * ENV.[]= raises Errno::{EINVAL,ENOMEM} etc. on failure.
+
+  * Float
+    * new constants:
+      * Float::INFINITY
+      * Float::NAN
+
+  * File
+    * new methods:
+      * File.realpath
+      * File.realdirpath
 
   * IO
     * new method:
@@ -95,6 +117,12 @@ with all sufficient information, see the ChangeLog file.
       * respond_to? can be used to detect methods not implemented.
         For example, Process.respond_to?(:fork) returns false on Windows.
 
+* digest
+    * new methods:
+      * Digest::Class.base64digest
+      * Digest::Instance#base64digest
+      * Digest::Instance#base64digest!
+
 * rss
 
   * 0.2.4 -> 0.2.7.
@@ -133,6 +161,9 @@ with all sufficient information, see the ChangeLog file.
     * do not raise ShiftingError if an aged file already exists.
       (no ShiftingError will be raised from 1.2.7, just warn() instead)
 
+* net/http
+  * merged net/https.
+
 * open3
   * new methods:
     * Open3.popen2
@@ -165,6 +196,7 @@ with all sufficient information, see the ChangeLog file.
       Addrinfo#to_s returns the old binary sockaddr string.
     * BasicSocket#getsockopt returns Socket::Option object instead of a binary string.
       Socket::Option#to_s returns the old binary string.
+    * Socket.do_not_reverse_lookup is turned on by default now.
 
   * new class:
     * Addrinfo
@@ -252,11 +284,15 @@ with all sufficient information, see the ChangeLog file.
   * new methods:
     * Zlib::GzipFile#path
 
+* rbconfig
+  * new methods:
+    * RbConfig.ruby
+
 === Language changes
 
 * Regexp properties (\p{}) names now ignore underscores, spaces, and case, so
   \p{ol chiki} is the same as \p{Ol_Chiki}
-* Regexps now support Unicode 5.1 (new characters and scripts)
+* Regexps now support Unicode 5.2 (new characters and scripts)
 * \d, \s, and \w are now ASCII only; use POSIX bracket classes and \p{} for
   Unicode semantics
 * $: no longer includes the current directory, use require_relative

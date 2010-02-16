@@ -32,7 +32,7 @@
 # include <sys/socket.h>
 #endif
 
-#if defined(__BOW__) || defined(__CYGWIN__) || defined(_WIN32) || defined(__EMX__) || defined(__BEOS__)
+#if defined(__BOW__) || defined(__CYGWIN__) || defined(_WIN32) || defined(__EMX__) || defined(__BEOS__) || defined(__HAIKU__)
 # define NO_SAFE_RENAME
 #endif
 
@@ -86,7 +86,7 @@
 extern void Init_File(void);
 extern void InitVM_File(void);
 
-#ifdef __BEOS__
+#if defined(__BEOS__) || defined(__HAIKU__)
 # ifndef NOFILE
 #  define NOFILE (OPEN_MAX)
 # endif
@@ -158,7 +158,7 @@ static rb_thread_lock_t max_file_descriptor_lock;
 #  define STDIO_READ_DATA_PENDING(fp) ((fp)->FILE_COUNT > 0)
 #elif defined(FILE_READEND)
 #  define STDIO_READ_DATA_PENDING(fp) ((fp)->FILE_READPTR < (fp)->FILE_READEND)
-#elif defined(__BEOS__)
+#elif defined(__BEOS__) || defined(__HAIKU__)
 #  define STDIO_READ_DATA_PENDING(fp) (fp->_state._eof == 0)
 #else
 #  define STDIO_READ_DATA_PENDING(fp) (!feof(fp))
@@ -171,9 +171,15 @@ static rb_thread_lock_t max_file_descriptor_lock;
 #define READ_DATA_PENDING_PTR(fptr) ((fptr)->rbuf+(fptr)->rbuf_off)
 #define READ_DATA_BUFFERED(fptr) READ_DATA_PENDING(fptr)
 
+#if defined(_WIN32)
+#define WAIT_FD_IN_WIN32(fptr) rb_thread_wait_fd((fptr)->fd);
+#else
+#define WAIT_FD_IN_WIN32(fptr) ;
+#endif
+
 #define READ_CHECK(fptr) do {\
     if (!READ_DATA_PENDING(fptr)) {\
-	rb_thread_wait_fd((fptr)->fd);\
+	WAIT_FD_IN_WIN32(fptr);\
 	rb_io_check_closed(fptr);\
      }\
 } while(0)
@@ -302,8 +308,9 @@ io_unread(rb_io_t *fptr)
     if (fptr->rbuf_len == 0 || fptr->mode & FMODE_DUPLEX)
         return;
     /* xxx: target position may be negative if buffer is filled by ungetc */
+    errno = 0;
     r = lseek(fptr->fd, -fptr->rbuf_len, SEEK_CUR);
-    if (r < 0) {
+    if (r < 0 && errno) {
         if (errno == ESPIPE)
             fptr->mode |= FMODE_DUPLEX;
         return;
@@ -359,7 +366,7 @@ flush_before_seek(rb_io_t *fptr)
 
 #define io_set_eof(fptr) (void)(((fptr)->mode & FMODE_TTY) && ((fptr)->mode |= FMODE_EOF))
 #define io_unset_eof(fptr) (fptr->mode &= ~FMODE_EOF)
-#define io_seek(fptr, ofs, whence) (io_unset_eof(fptr), lseek(flush_before_seek(fptr)->fd, ofs, whence))
+#define io_seek(fptr, ofs, whence) (errno = 0, io_unset_eof(fptr), lseek(flush_before_seek(fptr)->fd, ofs, whence))
 #define io_tell(fptr) lseek(flush_before_seek(fptr)->fd, 0, SEEK_CUR)
 
 #ifndef SEEK_CUR
@@ -1110,7 +1117,7 @@ rb_io_set_pos(VALUE io, VALUE offset)
     pos = NUM2OFFT(offset);
     GetOpenFile(io, fptr);
     pos = io_seek(fptr, pos, SEEK_SET);
-    if (pos < 0) rb_sys_fail_path(fptr->pathv);
+    if (pos < 0 && errno) rb_sys_fail_path(fptr->pathv);
 
     return OFFT2NUM(pos);
 }
@@ -1138,7 +1145,7 @@ rb_io_rewind(VALUE io)
     VALUE argf = rb_vm_argf();
 
     GetOpenFile(io, fptr);
-    if (io_seek(fptr, 0L, 0) < 0) rb_sys_fail_path(fptr->pathv);
+    if (io_seek(fptr, 0L, 0) < 0 && errno) rb_sys_fail_path(fptr->pathv);
     if (io == ARGF.current_file) {
 	ARGF.lineno -= fptr->lineno;
     }
@@ -1522,7 +1529,7 @@ remain_size(rb_io_t *fptr)
     off_t pos;
 
     if (fstat(fptr->fd, &st) == 0  && S_ISREG(st.st_mode)
-#ifdef __BEOS__
+#if defined(__BEOS__) || defined(__HAIKU__)
 	&& (st.st_dev > 3)
 #endif
 	)
@@ -1579,17 +1586,22 @@ make_readconv(rb_io_t *fptr, int size)
     }
 }
 
-static int
-more_char(rb_io_t *fptr)
+#define MORE_CHAR_SUSPENDED Qtrue
+#define MORE_CHAR_FINISHED Qnil
+static VALUE
+fill_cbuf(rb_io_t *fptr, int ec_flags)
 {
     const unsigned char *ss, *sp, *se;
     unsigned char *ds, *dp, *de;
     rb_econv_result_t res;
     int putbackable;
     int cbuf_len0;
+    VALUE exc;
+
+    ec_flags |= ECONV_PARTIAL_INPUT;
 
     if (fptr->cbuf_len == fptr->cbuf_capa)
-        return 0; /* cbuf full */
+        return MORE_CHAR_SUSPENDED; /* cbuf full */
     if (fptr->cbuf_len == 0)
         fptr->cbuf_off = 0;
     else if (fptr->cbuf_off + fptr->cbuf_len == fptr->cbuf_capa) {
@@ -1604,7 +1616,7 @@ more_char(rb_io_t *fptr)
         se = sp + fptr->rbuf_len;
         ds = dp = (unsigned char *)fptr->cbuf + fptr->cbuf_off + fptr->cbuf_len;
         de = (unsigned char *)fptr->cbuf + fptr->cbuf_capa;
-        res = rb_econv_convert(fptr->readconv, &sp, se, &dp, de, ECONV_PARTIAL_INPUT|ECONV_AFTER_OUTPUT);
+        res = rb_econv_convert(fptr->readconv, &sp, se, &dp, de, ec_flags);
         fptr->rbuf_off += (int)(sp - ss);
         fptr->rbuf_len -= (int)(sp - ss);
         fptr->cbuf_len += (int)(dp - ds);
@@ -1616,20 +1628,20 @@ more_char(rb_io_t *fptr)
             fptr->rbuf_len += putbackable;
         }
 
-        rb_econv_check_error(fptr->readconv);
+        exc = rb_econv_make_exception(fptr->readconv);
+        if (!NIL_P(exc))
+            return exc;
 
         if (cbuf_len0 != fptr->cbuf_len)
-            return 0;
+            return MORE_CHAR_SUSPENDED;
 
         if (res == econv_finished) {
-	    clear_readconv(fptr);
-            return -1;
+            return MORE_CHAR_FINISHED;
 	}
 
         if (res == econv_source_buffer_empty) {
             if (fptr->rbuf_len == 0) {
-                rb_thread_wait_fd(fptr->fd);
-                rb_io_check_closed(fptr);
+		READ_CHECK(fptr);
                 if (io_fillbuf(fptr) == -1) {
                     ds = dp = (unsigned char *)fptr->cbuf + fptr->cbuf_off + fptr->cbuf_len;
                     de = (unsigned char *)fptr->cbuf + fptr->cbuf_capa;
@@ -1640,6 +1652,16 @@ more_char(rb_io_t *fptr)
             }
         }
     }
+}
+
+static VALUE
+more_char(rb_io_t *fptr)
+{
+    VALUE v;
+    v = fill_cbuf(fptr, ECONV_AFTER_OUTPUT);
+    if (v != MORE_CHAR_SUSPENDED && v != MORE_CHAR_FINISHED)
+        rb_exc_raise(v);
+    return v;
 }
 
 static VALUE
@@ -1663,7 +1685,7 @@ io_shift_cbuf(rb_io_t *fptr, int len, VALUE *strp)
     /* xxx: set coderange */
     if (fptr->cbuf_len == 0)
         fptr->cbuf_off = 0;
-    if (fptr->cbuf_off < fptr->cbuf_capa/2) {
+    else if (fptr->cbuf_capa/2 < fptr->cbuf_off) {
         memmove(fptr->cbuf, fptr->cbuf+fptr->cbuf_off, fptr->cbuf_len);
         fptr->cbuf_off = 0;
     }
@@ -1684,10 +1706,19 @@ read_all(rb_io_t *fptr, long siz, VALUE str)
         else rb_str_set_len(str, 0);
         make_readconv(fptr, 0);
         while (1) {
+            VALUE v;
             if (fptr->cbuf_len) {
                 io_shift_cbuf(fptr, fptr->cbuf_len, &str);
             }
-            if (more_char(fptr) == -1) {
+            v = fill_cbuf(fptr, 0);
+            if (v != MORE_CHAR_SUSPENDED && v != MORE_CHAR_FINISHED) {
+                if (fptr->cbuf_len) {
+                    io_shift_cbuf(fptr, fptr->cbuf_len, &str);
+                }
+                rb_exc_raise(v);
+            }
+            if (v == MORE_CHAR_FINISHED) {
+                clear_readconv(fptr);
                 return io_enc_str(str, fptr);
             }
         }
@@ -1714,7 +1745,7 @@ read_all(rb_io_t *fptr, long siz, VALUE str)
 	}
 	bytes += n;
 	if (cr != ENC_CODERANGE_BROKEN)
-	    pos = rb_str_coderange_scan_restartable(RSTRING_PTR(str) + pos, RSTRING_PTR(str) + bytes, enc, &cr);
+	    pos += rb_str_coderange_scan_restartable(RSTRING_PTR(str) + pos, RSTRING_PTR(str) + bytes, enc, &cr);
 	if (bytes < siz) break;
 	siz += BUFSIZ;
 	rb_str_resize(str, siz);
@@ -2168,7 +2199,8 @@ appendline(rb_io_t *fptr, int delim, VALUE *strp, long *lp)
                     return (unsigned char)RSTRING_PTR(str)[RSTRING_LEN(str)-1];
                 }
             }
-        } while (more_char(fptr) != -1);
+        } while (more_char(fptr) != MORE_CHAR_FINISHED);
+        clear_readconv(fptr);
         *lp = limit;
         return EOF;
     }
@@ -2199,8 +2231,7 @@ appendline(rb_io_t *fptr, int delim, VALUE *strp, long *lp)
 	    if (limit == 0)
 		return (unsigned char)RSTRING_PTR(str)[RSTRING_LEN(str)-1];
 	}
-	rb_thread_wait_fd(fptr->fd);
-	rb_io_check_closed(fptr);
+	READ_CHECK(fptr);
     } while (io_fillbuf(fptr) >= 0);
     *lp = limit;
     return EOF;
@@ -2222,8 +2253,7 @@ swallow(rb_io_t *fptr, int term)
 	    if (!read_buffered_data(buf, cnt - i, fptr)) /* must not fail */
 		rb_sys_fail_path(fptr->pathv);
 	}
-	rb_thread_wait_fd(fptr->fd);
-	rb_io_check_closed(fptr);
+	READ_CHECK(fptr);
     } while (io_fillbuf(fptr) == 0);
     return FALSE;
 }
@@ -2259,11 +2289,10 @@ rb_io_getline_fast(rb_io_t *fptr, rb_encoding *enc)
 	    }
 	    len += pending;
 	    if (cr != ENC_CODERANGE_BROKEN)
-		pos = rb_str_coderange_scan_restartable(RSTRING_PTR(str) + pos, RSTRING_PTR(str) + len, enc, &cr);
+		pos += rb_str_coderange_scan_restartable(RSTRING_PTR(str) + pos, RSTRING_PTR(str) + len, enc, &cr);
 	    if (e) break;
 	}
-	rb_thread_wait_fd(fptr->fd);
-	rb_io_check_closed(fptr);
+	READ_CHECK(fptr);
 	if (io_fillbuf(fptr) < 0) {
 	    if (NIL_P(str)) return Qnil;
 	    break;
@@ -2683,7 +2712,8 @@ io_getc(rb_io_t *fptr, rb_encoding *enc)
                 }
             }
 
-            if (more_char(fptr) == -1) {
+            if (more_char(fptr) == MORE_CHAR_FINISHED) {
+                clear_readconv(fptr);
                 if (fptr->cbuf_len == 0)
                     return Qnil;
                 /* return an incomplete character just before EOF */
@@ -2818,7 +2848,8 @@ rb_io_each_codepoint(VALUE io)
 			rb_raise(rb_eIOError, "too long character");
 		    }
 		}
-		if (more_char(fptr) == -1) {
+		if (more_char(fptr) == MORE_CHAR_FINISHED) {
+                    clear_readconv(fptr);
 		    /* ignore an incomplete character before EOF */
 		    return io;
 		}
@@ -2831,8 +2862,8 @@ rb_io_each_codepoint(VALUE io)
 	    c = rb_enc_codepoint(fptr->cbuf+fptr->cbuf_off,
 				 fptr->cbuf+fptr->cbuf_off+fptr->cbuf_len,
 				 fptr->encs.enc);
-	    fptr->rbuf_off += n;
-	    fptr->rbuf_len -= n;
+	    fptr->cbuf_off += n;
+	    fptr->cbuf_len -= n;
 	    rb_yield(UINT2NUM(c));
 	}
     }
@@ -3725,8 +3756,9 @@ rb_io_sysseek(int argc, VALUE *argv, VALUE io)
     if ((fptr->mode & FMODE_WRITABLE) && fptr->wbuf_len) {
 	rb_warn("sysseek for buffered IO");
     }
+    errno = 0;
     pos = lseek(fptr->fd, pos, whence);
-    if (pos == -1) rb_sys_fail_path(fptr->pathv);
+    if (pos == -1 && errno) rb_sys_fail_path(fptr->pathv);
 
     return OFFT2NUM(pos);
 }
@@ -4090,11 +4122,14 @@ rb_io_oflags_modestr(int oflags)
 #else
 # define MODE_BINARY(a,b) (a)
 #endif
+    int accmode = oflags & (O_RDONLY|O_WRONLY|O_RDWR);
     if (oflags & O_APPEND) {
-	if ((oflags & O_RDWR) == O_RDWR) {
+	if (accmode == O_WRONLY) {
+	    return MODE_BINARY("a", "ab");
+	}
+	if (accmode == O_RDWR) {
 	    return MODE_BINARY("a+", "ab+");
 	}
-	return MODE_BINARY("a", "ab");
     }
     switch (oflags & (O_RDONLY|O_WRONLY|O_RDWR)) {
       case O_RDONLY:
@@ -4152,8 +4187,10 @@ parse_mode_enc(const char *estr, rb_encoding **enc_p, rb_encoding **enc2_p)
 	if (len == 0 || len > ENCODING_MAXNAMELEN)
 	    idx = -1;
 	else {
-	    if (io_encname_bom_p(estr, len))
+	    if (io_encname_bom_p(estr, len)) {
 		estr += 4;
+                len -= 4;
+            }
 	    memcpy(encname, estr, len);
 	    encname[len] = '\0';
 	    estr = encname;
@@ -4164,6 +4201,7 @@ parse_mode_enc(const char *estr, rb_encoding **enc_p, rb_encoding **enc2_p)
 	long len = strlen(estr);
 	if (io_encname_bom_p(estr, len)) {
 	    estr += 4;
+            len -= 4;
 	    memcpy(encname, estr, len);
 	    encname[len] = '\0';
 	    estr = encname;
@@ -5386,27 +5424,6 @@ rb_scan_open_args(int argc, VALUE *argv,
     opt = pop_last_hash(&argc, argv);
     rb_scan_args(argc, argv, "12", &fname, &vmode, &vperm);
     FilePathValue(fname);
-#ifdef __APPLE__
-    {
-	static rb_encoding *fs_encoding;
-	static rb_encoding *utf8mac_encoding;
-	rb_encoding *fname_encoding = rb_enc_get(fname);
-	if (!fs_encoding)
-	    fs_encoding = rb_filesystem_encoding();
-	if (!utf8mac_encoding)
-	    utf8mac_encoding = rb_enc_find("UTF8-MAC");
-	if (rb_usascii_encoding() != fname_encoding
-	    && rb_ascii8bit_encoding() != fname_encoding
-	    && rb_utf8_encoding() != fname_encoding
-	    && utf8mac_encoding != fname_encoding
-	    && fs_encoding != fname_encoding) {
-	    static VALUE fs_enc;
-	    if (!fs_enc)
-		fs_enc = rb_enc_from_encoding(fs_encoding);
-	    fname = rb_str_encode(fname, fs_enc, 0, Qnil);
-	}
-    }
-#endif
 
     rb_io_extract_modeenc(&vmode, &vperm, opt, &oflags, &fmode, convconfig_p);
 
@@ -5723,7 +5740,7 @@ io_reopen(VALUE io, VALUE nfile)
 
     nfile = rb_io_get_io(nfile);
     if (rb_safe_level() >= 4 &&
-       	(!OBJ_UNTRUSTED(io) || !OBJ_UNTRUSTED(nfile))) {
+	(!OBJ_UNTRUSTED(io) || !OBJ_UNTRUSTED(nfile))) {
 	rb_raise(rb_eSecurityError, "Insecure: can't reopen");
     }
     GetOpenFile(io, fptr);
@@ -5785,10 +5802,10 @@ io_reopen(VALUE io, VALUE nfile)
 	}
 	rb_thread_fd_close(fd);
 	if ((orig->mode & FMODE_READABLE) && pos >= 0) {
-	    if (io_seek(fptr, pos, SEEK_SET) < 0) {
+	    if (io_seek(fptr, pos, SEEK_SET) < 0 && errno) {
 		rb_sys_fail_path(fptr->pathv);
 	    }
-	    if (io_seek(orig, pos, SEEK_SET) < 0) {
+	    if (io_seek(orig, pos, SEEK_SET) < 0 && errno) {
 		rb_sys_fail_path(orig->pathv);
 	    }
 	}
@@ -7939,6 +7956,19 @@ io_s_read(struct foreach_arg *arg)
     return io_read(arg->argc, arg->argv, arg->io);
 }
 
+struct seek_arg {
+    VALUE io;
+    VALUE offset;
+    int mode;
+};
+
+static VALUE
+seek_before_read(struct seek_arg *arg)
+{
+    rb_io_binmode(arg->io);
+    return rb_io_seek(arg->io, arg->offset, arg->mode);
+}
+
 /*
  *  call-seq:
  *     IO.read(name, [length [, offset]] )   => string
@@ -7981,8 +8011,16 @@ rb_io_s_read(int argc, VALUE *argv, VALUE io)
     open_key_args(argc, argv, &arg);
     if (NIL_P(arg.io)) return Qnil;
     if (!NIL_P(offset)) {
-	rb_io_binmode(arg.io);
-	rb_io_seek(arg.io, offset, SEEK_SET);
+	struct seek_arg sarg;
+	int state = 0;
+	sarg.io = arg.io;
+	sarg.offset = offset;
+	sarg.mode = SEEK_SET;
+	rb_protect((VALUE (*)(VALUE))seek_before_read, (VALUE)&sarg, &state);
+	if (state) {
+	    rb_io_close(arg.io);
+	    rb_jump_tag(state);
+	}
 	if (arg.argc == 2) arg.argc = 1;
     }
     return rb_ensure(io_s_read, (VALUE)&arg, rb_io_close, arg.io);
@@ -8125,8 +8163,9 @@ nogvl_copy_stream_sendfile(struct copy_stream_struct *stp)
         if (use_pread)
             copy_length = src_stat.st_size - src_offset;
         else {
+	    errno = 0;
             off_t cur = lseek(stp->src_fd, 0, SEEK_CUR);
-            if (cur == (off_t)-1) {
+            if (cur == (off_t)-1 && errno) {
                 stp->syserr = "lseek";
                 stp->error_no = errno;
                 return -1;
@@ -8258,8 +8297,9 @@ nogvl_copy_stream_read_write(struct copy_stream_struct *stp)
 
     if (use_pread && stp->close_src) {
         off_t r;
+	errno = 0;
         r = lseek(stp->src_fd, src_offset, SEEK_SET);
-        if (r == (off_t)-1) {
+        if (r == (off_t)-1 && errno) {
             stp->syserr = "lseek";
             stp->error_no = errno;
             return;
@@ -9277,7 +9317,7 @@ argf_each_line(int argc, VALUE *argv, VALUE argf)
     RETURN_ENUMERATOR(argf, argc, argv);
     for (;;) {
 	if (!next_argv()) return argf;
-	rb_block_call(ARGF.current_file, rb_intern("each_line"), argc, argv, rb_yield, 0);
+	rb_block_call(ARGF.current_file, rb_intern("each_line"), argc, argv, 0, 0);
 	ARGF.next_p = 1;
     }
 }
@@ -9311,7 +9351,7 @@ argf_each_byte(VALUE argf)
     RETURN_ENUMERATOR(argf, 0, 0);
     for (;;) {
 	if (!next_argv()) return argf;
-	rb_block_call(ARGF.current_file, rb_intern("each_byte"), 0, 0, rb_yield, 0);
+	rb_block_call(ARGF.current_file, rb_intern("each_byte"), 0, 0, 0, 0);
 	ARGF.next_p = 1;
     }
 }
@@ -9341,7 +9381,7 @@ argf_each_char(VALUE argf)
     RETURN_ENUMERATOR(argf, 0, 0);
     for (;;) {
 	if (!next_argv()) return argf;
-	rb_block_call(ARGF.current_file, rb_intern("each_char"), 0, 0, rb_yield, 0);
+	rb_block_call(ARGF.current_file, rb_intern("each_char"), 0, 0, 0, 0);
 	ARGF.next_p = 1;
     }
 }

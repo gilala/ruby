@@ -942,6 +942,21 @@ dir_s_chdir(int argc, VALUE *argv, VALUE obj)
     return INT2FIX(0);
 }
 
+VALUE
+rb_dir_getwd(void)
+{
+    char *path;
+    VALUE cwd;
+
+    rb_secure(4);
+    path = my_getcwd();
+    cwd = rb_tainted_str_new2(path);
+    rb_enc_associate(cwd, rb_filesystem_encoding());
+
+    xfree(path);
+    return cwd;
+}
+
 /*
  *  call-seq:
  *     Dir.getwd => string
@@ -956,16 +971,7 @@ dir_s_chdir(int argc, VALUE *argv, VALUE obj)
 static VALUE
 dir_s_getwd(VALUE dir)
 {
-    char *path;
-    VALUE cwd;
-
-    rb_secure(4);
-    path = my_getcwd();
-    cwd = rb_tainted_str_new2(path);
-    rb_enc_associate(cwd, rb_filesystem_encoding());
-
-    xfree(path);
-    return cwd;
+    return rb_dir_getwd();
 }
 
 static void
@@ -1899,6 +1905,9 @@ dir_glob(int argc, VALUE *argv, const struct dir_data *base)
  *                          Equivalent to pattern alternation in
  *                          regexp.
  *  <code>\</code>::        Escapes the next metacharacter.
+ *                          Note that this means you cannot use backslash in windows
+ *                          as part of a glob, i.e. Dir["c:\\foo*"] will not work
+ *                          use Dir["c:/foo*"] instead
  *
  *     Dir["config.?"]                     #=> ["config.h"]
  *     Dir.glob("config.?")                #=> ["config.h"]

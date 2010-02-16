@@ -200,7 +200,7 @@ class TestM17N < Test::Unit::TestCase
     assert_equal('"\xF8\x80\x80\x80 "', u("\xf8\x80\x80\x80 ").inspect)
     assert_equal('"\xFC\x80\x80\x80\x80 "', u("\xfc\x80\x80\x80\x80 ").inspect)
 
-
+    assert_equal('"\x{81308130}"', "\x81\x30\x81\x30".force_encoding('GB18030').inspect)
     assert_equal("\"\\xA1\\x{8FA1A1}\"", e("\xa1\x8f\xa1\xa1").inspect)
 
     assert_equal('"\x81."', s("\x81.").inspect)
@@ -646,40 +646,40 @@ class TestM17N < Test::Unit::TestCase
 
   def test_dynamic_ascii_regexp
     assert_warning(%r{regexp match /.../n against to}) {
-      assert_regexp_generic_ascii(/#{}/n)
+      assert_regexp_generic_ascii(/#{ }/n)
     }
-    assert_regexp_fixed_ascii8bit(/#{}\xc2\xa1/n)
-    assert_regexp_fixed_ascii8bit(/\xc2\xa1#{}/n)
+    assert_regexp_fixed_ascii8bit(/#{ }\xc2\xa1/n)
+    assert_regexp_fixed_ascii8bit(/\xc2\xa1#{ }/n)
     assert_nothing_raised { s1, s2 = a('\xc2'), a('\xa1'); /#{s1}#{s2}/ }
   end
 
   def test_dynamic_eucjp_regexp
-    assert_regexp_fixed_eucjp(/#{}/e)
-    assert_regexp_fixed_eucjp(/#{}\xc2\xa1/e)
-    assert_regexp_fixed_eucjp(/\xc2\xa1#{}/e)
-    assert_raise(SyntaxError) { eval('/\xc2#{}/e') }
-    assert_raise(SyntaxError) { eval('/#{}\xc2/e') }
-    assert_raise(SyntaxError) { eval('/\xc2#{}\xa1/e') }
+    assert_regexp_fixed_eucjp(/#{ }/e)
+    assert_regexp_fixed_eucjp(/#{ }\xc2\xa1/e)
+    assert_regexp_fixed_eucjp(/\xc2\xa1#{ }/e)
+    assert_raise(SyntaxError) { eval('/\xc2#{ }/e') }
+    assert_raise(SyntaxError) { eval('/#{ }\xc2/e') }
+    assert_raise(SyntaxError) { eval('/\xc2#{ }\xa1/e') }
     assert_raise(ArgumentError) { s1, s2 = e('\xc2'), e('\xa1'); /#{s1}#{s2}/ }
   end
 
   def test_dynamic_sjis_regexp
-    assert_regexp_fixed_sjis(/#{}/s)
-    assert_regexp_fixed_sjis(/#{}\xc2\xa1/s)
-    assert_regexp_fixed_sjis(/\xc2\xa1#{}/s)
-    assert_raise(SyntaxError) { eval('/\x81#{}/s') }
-    assert_raise(SyntaxError) { eval('/#{}\x81/s') }
-    assert_raise(SyntaxError) { eval('/\x81#{}\xa1/s') }
+    assert_regexp_fixed_sjis(/#{ }/s)
+    assert_regexp_fixed_sjis(/#{ }\xc2\xa1/s)
+    assert_regexp_fixed_sjis(/\xc2\xa1#{ }/s)
+    assert_raise(SyntaxError) { eval('/\x81#{ }/s') }
+    assert_raise(SyntaxError) { eval('/#{ }\x81/s') }
+    assert_raise(SyntaxError) { eval('/\x81#{ }\xa1/s') }
     assert_raise(ArgumentError) { s1, s2 = s('\x81'), s('\xa1'); /#{s1}#{s2}/ }
   end
 
   def test_dynamic_utf8_regexp
-    assert_regexp_fixed_utf8(/#{}/u)
-    assert_regexp_fixed_utf8(/#{}\xc2\xa1/u)
-    assert_regexp_fixed_utf8(/\xc2\xa1#{}/u)
-    assert_raise(SyntaxError) { eval('/\xc2#{}/u') }
-    assert_raise(SyntaxError) { eval('/#{}\xc2/u') }
-    assert_raise(SyntaxError) { eval('/\xc2#{}\xa1/u') }
+    assert_regexp_fixed_utf8(/#{ }/u)
+    assert_regexp_fixed_utf8(/#{ }\xc2\xa1/u)
+    assert_regexp_fixed_utf8(/\xc2\xa1#{ }/u)
+    assert_raise(SyntaxError) { eval('/\xc2#{ }/u') }
+    assert_raise(SyntaxError) { eval('/#{ }\xc2/u') }
+    assert_raise(SyntaxError) { eval('/\xc2#{ }\xa1/u') }
     assert_raise(ArgumentError) { s1, s2 = u('\xc2'), u('\xa1'); /#{s1}#{s2}/ }
   end
 
@@ -712,23 +712,23 @@ class TestM17N < Test::Unit::TestCase
     assert_raise(SyntaxError) { eval(s(%{/\\u{6666}\\xc2\\xa1/})) }
     assert_nothing_raised { eval(u(%{/\\u{6666}\\xc2\\xa1/})) }
 
-    assert_raise(SyntaxError) { eval(a(%{/\xc2\xa1#{}\\u{6666}/})) }
-    assert_raise(SyntaxError) { eval(e(%{/\xc2\xa1#{}\\u{6666}/})) }
-    assert_raise(SyntaxError) { eval(s(%{/\xc2\xa1#{}\\u{6666}/})) }
-    assert_nothing_raised { eval(u(%{/\xc2\xa1#{}\\u{6666}/})) }
-    assert_raise(SyntaxError) { eval(a(%{/\\u{6666}#{}\xc2\xa1/})) }
-    assert_raise(SyntaxError) { eval(e(%{/\\u{6666}#{}\xc2\xa1/})) }
-    assert_raise(SyntaxError) { eval(s(%{/\\u{6666}#{}\xc2\xa1/})) }
-    assert_nothing_raised { eval(u(%{/\\u{6666}#{}\xc2\xa1/})) }
+    assert_raise(SyntaxError) { eval(a(%{/\xc2\xa1#{ }\\u{6666}/})) }
+    assert_raise(SyntaxError) { eval(e(%{/\xc2\xa1#{ }\\u{6666}/})) }
+    assert_raise(SyntaxError) { eval(s(%{/\xc2\xa1#{ }\\u{6666}/})) }
+    assert_nothing_raised { eval(u(%{/\xc2\xa1#{ }\\u{6666}/})) }
+    assert_raise(SyntaxError) { eval(a(%{/\\u{6666}#{ }\xc2\xa1/})) }
+    assert_raise(SyntaxError) { eval(e(%{/\\u{6666}#{ }\xc2\xa1/})) }
+    assert_raise(SyntaxError) { eval(s(%{/\\u{6666}#{ }\xc2\xa1/})) }
+    assert_nothing_raised { eval(u(%{/\\u{6666}#{ }\xc2\xa1/})) }
 
-    assert_raise(SyntaxError) { eval(a(%{/\\xc2\\xa1#{}\\u{6666}/})) }
-    assert_raise(SyntaxError) { eval(e(%{/\\xc2\\xa1#{}\\u{6666}/})) }
-    assert_raise(SyntaxError) { eval(s(%{/\\xc2\\xa1#{}\\u{6666}/})) }
-    assert_nothing_raised { eval(u(%{/\\xc2\\xa1#{}\\u{6666}/})) }
-    assert_raise(SyntaxError) { eval(a(%{/\\u{6666}#{}\\xc2\\xa1/})) }
-    assert_raise(SyntaxError) { eval(e(%{/\\u{6666}#{}\\xc2\\xa1/})) }
-    assert_raise(SyntaxError) { eval(s(%{/\\u{6666}#{}\\xc2\\xa1/})) }
-    assert_nothing_raised { eval(u(%{/\\u{6666}#{}\\xc2\\xa1/})) }
+    assert_raise(SyntaxError) { eval(a(%{/\\xc2\\xa1#{ }\\u{6666}/})) }
+    assert_raise(SyntaxError) { eval(e(%{/\\xc2\\xa1#{ }\\u{6666}/})) }
+    assert_raise(SyntaxError) { eval(s(%{/\\xc2\\xa1#{ }\\u{6666}/})) }
+    assert_nothing_raised { eval(u(%{/\\xc2\\xa1#{ }\\u{6666}/})) }
+    assert_raise(SyntaxError) { eval(a(%{/\\u{6666}#{ }\\xc2\\xa1/})) }
+    assert_raise(SyntaxError) { eval(e(%{/\\u{6666}#{ }\\xc2\\xa1/})) }
+    assert_raise(SyntaxError) { eval(s(%{/\\u{6666}#{ }\\xc2\\xa1/})) }
+    assert_nothing_raised { eval(u(%{/\\u{6666}#{ }\\xc2\\xa1/})) }
   end
 
   def test_str_allocate
@@ -757,11 +757,12 @@ class TestM17N < Test::Unit::TestCase
 
   def test_sprintf_p
     enc = "".inspect.encoding
+    asc = Encoding::US_ASCII
     Encoding.list.each do |e|
       format = "%p".force_encoding(e)
       ['', 'a', "\xC2\xA1", "\x00"].each do |s|
         s.force_encoding(e)
-        assert_strenc(s.inspect, enc, format % s)
+        assert_strenc(s.inspect, e.ascii_compatible? && enc == asc ? e : enc, format % s)
       end
       s = "\xC2\xA1".force_encoding(e)
       assert_strenc('%10s' % s.inspect, enc, "%10p" % s)
@@ -867,6 +868,11 @@ class TestM17N < Test::Unit::TestCase
     assert_equal(nil, u("\xc2\xa1\xc2\xa2\xc2\xa3")[u("\xa1\xc2")])
     assert_raise(Encoding::CompatibilityError) { u("\xc2\xa1\xc2\xa2\xc2\xa3")[a("\xa1\xc2")] }
     assert_nil(e("\xa1\xa2\xa3\xa4")[e("\xa2\xa3")])
+
+    bug2379 = '[ruby-core:26787]'
+    assert_equal("\u{439}", "\u{439}"[0, 30], bug2379)
+    assert_equal("\u{439}", "a\u{439}"[1, 30], bug2379)
+    assert_equal("\u{439}", "a\u{439}bcdefghijklmnop"[1, 1][0, 1], bug2379)
   end
 
   def test_aset
@@ -1212,36 +1218,36 @@ class TestM17N < Test::Unit::TestCase
     assert_equal(Encoding::US_ASCII, eval("\n# -*- encoding: ASCII-8BIT -*-\n__ENCODING__".force_encoding("US-ASCII")))
 
     # leading expressions
-    assert_equal(Encoding::ASCII_8BIT, eval("1+1 # -*- encoding: US-ASCII -*-\n__ENCODING__".force_encoding("ASCII-8BIT")))
-    assert_equal(Encoding::US_ASCII, eval("1+1 # -*- encoding: ASCII-8BIT -*-\n__ENCODING__".force_encoding("US-ASCII")))
+    assert_equal(Encoding::ASCII_8BIT, eval("v=1 # -*- encoding: US-ASCII -*-\n__ENCODING__".force_encoding("ASCII-8BIT")))
+    assert_equal(Encoding::US_ASCII, eval("v=1 # -*- encoding: ASCII-8BIT -*-\n__ENCODING__".force_encoding("US-ASCII")))
   end
 
   def test_regexp_usascii
     assert_regexp_usascii_literal('//', Encoding::US_ASCII)
-    assert_regexp_usascii_literal('/#{}/', Encoding::US_ASCII)
+    assert_regexp_usascii_literal('/#{ }/', Encoding::US_ASCII)
     assert_regexp_usascii_literal('/#{"a"}/', Encoding::US_ASCII)
     assert_regexp_usascii_literal('/#{%q"\x80"}/', Encoding::ASCII_8BIT)
     assert_regexp_usascii_literal('/#{"\x80"}/', nil, SyntaxError)
 
     assert_regexp_usascii_literal('/a/', Encoding::US_ASCII)
-    assert_regexp_usascii_literal('/a#{}/', Encoding::US_ASCII)
+    assert_regexp_usascii_literal('/a#{ }/', Encoding::US_ASCII)
     assert_regexp_usascii_literal('/a#{"a"}/', Encoding::US_ASCII)
     assert_regexp_usascii_literal('/a#{%q"\x80"}/', Encoding::ASCII_8BIT)
     assert_regexp_usascii_literal('/a#{"\x80"}/', nil, SyntaxError)
 
     assert_regexp_usascii_literal('/\x80/', Encoding::ASCII_8BIT)
-    assert_regexp_usascii_literal('/\x80#{}/', Encoding::ASCII_8BIT)
+    assert_regexp_usascii_literal('/\x80#{ }/', Encoding::ASCII_8BIT)
     assert_regexp_usascii_literal('/\x80#{"a"}/', Encoding::ASCII_8BIT)
     assert_regexp_usascii_literal('/\x80#{%q"\x80"}/', Encoding::ASCII_8BIT)
     assert_regexp_usascii_literal('/\x80#{"\x80"}/', nil, SyntaxError)
 
     assert_regexp_usascii_literal('/\u1234/', Encoding::UTF_8)
-    assert_regexp_usascii_literal('/\u1234#{}/', Encoding::UTF_8)
+    assert_regexp_usascii_literal('/\u1234#{ }/', Encoding::UTF_8)
     assert_regexp_usascii_literal('/\u1234#{"a"}/', Encoding::UTF_8)
     assert_regexp_usascii_literal('/\u1234#{%q"\x80"}/', nil, SyntaxError)
     assert_regexp_usascii_literal('/\u1234#{"\x80"}/', nil, SyntaxError)
     assert_regexp_usascii_literal('/\u1234\x80/', nil, SyntaxError)
-    assert_regexp_usascii_literal('/\u1234#{}\x80/', nil, RegexpError)
+    assert_regexp_usascii_literal('/\u1234#{ }\x80/', nil, RegexpError)
   end
 
   def test_gbk

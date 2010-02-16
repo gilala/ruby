@@ -392,8 +392,8 @@ struct rb_vm_tag {
     struct rb_vm_tag *prev;
 };
 
-struct rb_vm_trap_tag {
-    struct rb_vm_trap_tag *prev;
+struct rb_vm_protect_tag {
+    struct rb_vm_protect_tag *prev;
 };
 
 #define RUBY_VM_VALUE_CACHE_SIZE 0x1000
@@ -479,7 +479,7 @@ typedef struct rb_thread_struct
     int transition_for_lock;
 
     struct rb_vm_tag *tag;
-    struct rb_vm_trap_tag *trap_tag;
+    struct rb_vm_protect_tag *protect_tag;
 
     int parse_in_eval;
     int mild_compile_error;
@@ -592,8 +592,9 @@ typedef struct {
 #define VM_CALL_SUPER_BIT          (0x01 << 7)
 #define VM_CALL_OPT_SEND_BIT       (0x01 << 8)
 
-#define VM_SPECIAL_OBJECT_VMCORE   0x01
-#define VM_SPECIAL_OBJECT_CBASE    0x02
+#define VM_SPECIAL_OBJECT_VMCORE       0x01
+#define VM_SPECIAL_OBJECT_CBASE        0x02
+#define VM_SPECIAL_OBJECT_CONST_BASE  0x03
 
 #define VM_FRAME_MAGIC_METHOD 0x11
 #define VM_FRAME_MAGIC_BLOCK  0x21
@@ -749,6 +750,9 @@ enum ruby_vm_interrupted_bits {
 void rb_threadptr_signal_raise(rb_thread_t *th, int sig);
 void rb_threadptr_signal_exit(rb_thread_t *th);
 void rb_threadptr_execute_interrupts(rb_thread_t *);
+
+void rb_thread_lock_unlock(rb_thread_lock_t *);
+void rb_thread_lock_destroy(rb_thread_lock_t *);
 
 #define RUBY_VM_CHECK_INTS_TH(th) do { \
   if (UNLIKELY(th->interrupt_flag)) { \

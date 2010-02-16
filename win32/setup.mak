@@ -53,7 +53,10 @@ RDOCTARGET = $(RDOCTARGET)
 EXTOUT = $(EXTOUT)
 !endif
 !if defined(BASERUBY)
-BASERUBY = $(BASERUBY)
+BASERUBY = $(BASERUBY:/=\)
+!endif
+!if defined(NTVER)
+NTVER = $(NTVER)
 !endif
 <<
 !if !defined(BASERUBY)

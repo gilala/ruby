@@ -452,7 +452,7 @@ class TestFileUtils
 
     # [ruby-dev:39345]
     touch 'tmp/[rmtmp]'
-    rm_f 'tmp/[rmtmp]'
+    FileUtils.rm_f 'tmp/[rmtmp]'
     assert_file_not_exist 'tmp/[rmtmp]'
   end
 
@@ -726,7 +726,7 @@ class TestFileUtils
     Dir.rmdir "tmp-first-line\ntmp-second-line"
   end if lf_in_path_allowed?
 
-    def test_mkdir_pathname
+  def test_mkdir_pathname
     # pathname
     assert_nothing_raised {
       mkdir Pathname.new('tmp/tmpdirtmp')

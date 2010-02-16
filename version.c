@@ -22,6 +22,30 @@
 #ifndef RUBY_SITEARCH
 #define RUBY_SITEARCH RUBY_ARCH
 #endif
+#ifdef RUBY_PLATFORM_CPU
+#define RUBY_THINARCH RUBY_PLATFORM_CPU"-"RUBY_PLATFORM_OS
+#endif
+#ifndef RUBY_LIB_PREFIX
+#error RUBY_LIB_PREFIX must be defined
+#endif
+#ifndef RUBY_SITE_LIB
+#define RUBY_SITE_LIB RUBY_LIB_PREFIX"/site_ruby"
+#endif
+#ifndef RUBY_VENDOR_LIB
+#define RUBY_VENDOR_LIB RUBY_LIB_PREFIX"/vendor_ruby"
+#endif
+
+#define RUBY_LIB                    RUBY_LIB_PREFIX  "/"RUBY_LIB_VERSION
+#define RUBY_SITE_LIB2              RUBY_SITE_LIB    "/"RUBY_LIB_VERSION
+#define RUBY_VENDOR_LIB2            RUBY_VENDOR_LIB  "/"RUBY_LIB_VERSION
+#define RUBY_ARCHLIB                RUBY_LIB         "/"RUBY_ARCH
+#define RUBY_SITE_ARCHLIB           RUBY_SITE_LIB2   "/"RUBY_SITEARCH
+#define RUBY_VENDOR_ARCHLIB         RUBY_VENDOR_LIB2 "/"RUBY_SITEARCH
+#ifdef  RUBY_THINARCH
+#define RUBY_THIN_ARCHLIB           RUBY_LIB         "/"RUBY_THINARCH
+#define RUBY_SITE_THIN_ARCHLIB      RUBY_SITE_LIB2   "/"RUBY_THINARCH
+#define RUBY_VENDOR_THIN_ARCHLIB    RUBY_VENDOR_LIB2 "/"RUBY_THINARCH
+#endif
 
 const char ruby_version[] = RUBY_VERSION;
 const char ruby_release_date[] = RUBY_RELEASE_DATE;
@@ -32,6 +56,7 @@ const char ruby_copyright[] = RUBY_COPYRIGHT;
 const char ruby_engine[] = "ruby";
 
 const char ruby_initial_load_paths[] =
+#ifndef NO_INITIAL_LOAD_PATH
 #ifdef RUBY_SEARCH_PATH
     RUBY_SEARCH_PATH "\0"
 #endif
@@ -54,6 +79,7 @@ const char ruby_initial_load_paths[] =
     RUBY_THIN_ARCHLIB "\0"
 #endif
     RUBY_ARCHLIB "\0"
+#endif
     "";
 
 void

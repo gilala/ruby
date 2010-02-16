@@ -5,7 +5,7 @@
 
 echo> ~tmp~.mak ####
 echo>> ~tmp~.mak conf = %0
-echo>> ~tmp~.mak $(conf:\=/): nul
+echo>> ~tmp~.mak $(conf): nul
 echo>> ~tmp~.mak 	@del ~setup~.mak
 echo>> ~tmp~.mak 	@-$(MAKE) -l$(MAKEFLAGS) -f $(@D)/setup.mak \
 if exist pathlist.tmp del pathlist.tmp
@@ -30,6 +30,13 @@ if "%1" == "--disable-win95" goto :disable-win95
 if "%1" == "--extout" goto :extout
 if "%1" == "--path" goto :path
 if "%1" == "--with-baseruby" goto :baseruby
+if "%1" == "--with-ntver" goto :ntver
+echo %1| findstr "^--with-.*-dir$" > nul
+if not errorlevel 1 goto :withdir
+echo %1| findstr "^--with-.*-include$" > nul
+if not errorlevel 1 goto :withdir
+echo %1| findstr "^--with-.*-lib$" > nul
+if not errorlevel 1 goto :withdir
 if "%1" == "-h" goto :help
 if "%1" == "--help" goto :help
   echo>>confargs.tmp %1 \
@@ -107,6 +114,12 @@ goto :loop
   echo>>confargs.tmp %1 \
   shift
 goto :loop
+:ntver
+  echo>> ~tmp~.mak 	"NTVER=%2" \
+  echo>>confargs.tmp %1=%2 \
+  shift
+  shift
+goto :loop
 :extout
   echo>> ~tmp~.mak 	"EXTOUT=%2" \
   echo>>confargs.tmp %1=%2 \
@@ -125,6 +138,11 @@ goto :loop
   shift
   shift
 goto :loop
+:withdir
+  echo>>confargs.tmp %1=%2 \
+  shift
+  shift
+goto :loop
 :help
   echo Configuration:
   echo   --help                  display this help
@@ -137,12 +155,13 @@ goto :loop
   echo   --with-baseruby=RUBY    use RUBY as baseruby [ruby]
   echo   --with-static-linked-ext link external modules statically
   echo   --disable-install-doc   do not install rdoc indexes during install
-  echo   --enable-win95          enable win95 support
+  echo   --disable-win95         disable win95 support
+  echo   --with-ntver=0xXXXX     target NT version (shouldn't use with old SDK)
   del *.tmp
   del ~tmp~.mak
 goto :exit
 :end
-echo>> ~tmp~.mak 	WIN32DIR=$(@D)
+echo>> ~tmp~.mak 	WIN32DIR=$(@D:\=/)
 echo.>>confargs.tmp
 echo>confargs.c #define $ $$ 
 echo>>confargs.c !ifndef CONFIGURE_ARGS

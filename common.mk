@@ -25,7 +25,7 @@ NORMALMAINOBJ = main.$(OBJEXT)
 MAINOBJ       = $(NORMALMAINOBJ)
 EXTOBJS	      = 
 DLDOBJS	      = $(DMYEXT)
-MINIOBJS      = $(ARCHMINIOBJS) dmyencoding.$(OBJEXT) miniprelude.$(OBJEXT)
+MINIOBJS      = $(ARCHMINIOBJS) dmyencoding.$(OBJEXT) dmyversion.$(OBJEXT) miniprelude.$(OBJEXT)
 ENC_MK        = enc.mk
 
 COMMONOBJS    = array.$(OBJEXT) \
@@ -47,6 +47,7 @@ COMMONOBJS    = array.$(OBJEXT) \
 		io.$(OBJEXT) \
 		marshal.$(OBJEXT) \
 		math.$(OBJEXT) \
+		node.$(OBJEXT) \
 		numeric.$(OBJEXT) \
 		object.$(OBJEXT) \
 		pack.$(OBJEXT) \
@@ -74,7 +75,6 @@ COMMONOBJS    = array.$(OBJEXT) \
 		transcode.$(OBJEXT) \
 		util.$(OBJEXT) \
 		variable.$(OBJEXT) \
-		version.$(OBJEXT) \
 		compile.$(OBJEXT) \
 		debug.$(OBJEXT) \
 		iseq.$(OBJEXT) \
@@ -89,6 +89,7 @@ COMMONOBJS    = array.$(OBJEXT) \
 
 EXPORTOBJS    = dln.$(OBJEXT) \
 		encoding.$(OBJEXT) \
+		version.$(OBJEXT) \
 		$(COMMONOBJS)
 
 OBJS          = $(EXPORTOBJS) prelude.$(OBJEXT)
@@ -123,9 +124,9 @@ TESTRUN_SCRIPT = $(srcdir)/test.rb
 
 BOOTSTRAPRUBY = $(BASERUBY)
 
-COMPILE_PRELUDE = $(MINIRUBY) -I$(srcdir) -I. -rrbconfig $(srcdir)/tool/compile_prelude.rb
+COMPILE_PRELUDE = $(MINIRUBY) -I$(srcdir) $(srcdir)/tool/compile_prelude.rb
 
-all: encs exts main docs
+all: main docs
 
 main: encs exts
 	@$(RUNCMD) $(MKMAIN_CMD) $(MAKE)
@@ -178,7 +179,7 @@ ruby.imp: $(EXPORTOBJS)
 install: install-$(INSTALLDOC)
 docs: $(DOCTARGETS)
 
-install-all: doc pre-install-all do-install-all post-install-all
+install-all: docs pre-install-all do-install-all post-install-all
 pre-install-all:: pre-install-local pre-install-ext pre-install-doc
 do-install-all: $(PROGRAM)
 	$(INSTRUBY) --make="$(MAKE)" $(INSTRUBY_ARGS) --install=all --rdoc-output="$(RDOCOUT)"
@@ -349,7 +350,7 @@ do-install-doc: $(PROGRAM)
 post-install-doc::
 	@$(NULLCMD)
 
-rdoc: $(PROGRAM) PHONY
+rdoc: main PHONY
 	@echo Generating RDoc documentation
 	$(XRUBY) "$(srcdir)/bin/rdoc" --all --ri --op "$(RDOCOUT)" "$(srcdir)"
 nodoc: PHONY
@@ -560,6 +561,8 @@ main.$(OBJEXT): {$(VPATH)}main.c $(RUBY_H_INCLUDES) {$(VPATH)}debug.h \
 marshal.$(OBJEXT): {$(VPATH)}marshal.c $(RUBY_H_INCLUDES) {$(VPATH)}io.h \
   $(ENCODING_H_INCLUDES) {$(VPATH)}util.h
 math.$(OBJEXT): {$(VPATH)}math.c $(RUBY_H_INCLUDES)
+node.$(OBJEXT): {$(VPATH)}node.c $(RUBY_H_INCLUDES) \
+  $(VM_CORE_H_INCLUDES)
 numeric.$(OBJEXT): {$(VPATH)}numeric.c $(RUBY_H_INCLUDES) \
   {$(VPATH)}util.h $(ENCODING_H_INCLUDES)
 object.$(OBJEXT): {$(VPATH)}object.c $(RUBY_H_INCLUDES) {$(VPATH)}util.h
@@ -630,10 +633,12 @@ variable.$(OBJEXT): {$(VPATH)}variable.c $(RUBY_H_INCLUDES) \
   {$(VPATH)}oniguruma.h {$(VPATH)}vm.h {$(VPATH)}vm_core.h
 version.$(OBJEXT): {$(VPATH)}version.c $(RUBY_H_INCLUDES) \
   {$(VPATH)}version.h $(srcdir)/revision.h {$(VPATH)}config.h
+dmyversion.$(OBJEXT): {$(VPATH)}dmyversion.c version.$(OBJEXT)
 
 compile.$(OBJEXT): {$(VPATH)}compile.c {$(VPATH)}iseq.h \
   $(RUBY_H_INCLUDES) $(VM_CORE_H_INCLUDES) {$(VPATH)}insns.inc \
-  {$(VPATH)}insns_info.inc {$(VPATH)}optinsn.inc {$(VPATH)}debug.h
+  {$(VPATH)}insns_info.inc {$(VPATH)}optinsn.inc {$(VPATH)}debug.h \
+  {$(VPATH)}optunifs.inc {$(VPATH)}opt_sc.inc
 iseq.$(OBJEXT): {$(VPATH)}iseq.c {$(VPATH)}gc.h {$(VPATH)}iseq.h \
   $(RUBY_H_INCLUDES) $(VM_CORE_H_INCLUDES) {$(VPATH)}insns.inc \
   {$(VPATH)}insns_info.inc {$(VPATH)}node_name.inc {$(VPATH)}debug.h
@@ -815,13 +820,16 @@ help: PHONY
 	@echo "                Makefile of Ruby"
 	@echo ""
 	@echo "targets:"
-	@echo "  all (default):   builds ruby"
+	@echo "  all (default):   builds all of below"
 	@echo "  miniruby:        builds only miniruby"
+	@echo "  encs:            builds encodings"
+	@echo "  exts:            builds extensions"
+	@echo "  main:            builds encodings, extensions and ruby"
+	@echo "  docs:            builds documents"
 	@echo "  run:             runs test.rb by miniruby"
 	@echo "  runruby:         runs test.rb by ruby you just built"
 	@echo "  gdb:             runs test.rb by miniruby under gdb"
 	@echo "  gdb-ruby:        runs test.rb by ruby under gdb"
-	@echo "  all:             compile ruby and extensions"
 	@echo "  check:           equals make test test-all"
 	@echo "  test:            ruby core tests"
 	@echo "  test-all:        all ruby tests"

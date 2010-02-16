@@ -1010,10 +1010,7 @@ iseq_s_disasm(VALUE klass, VALUE body)
 
     rb_secure(1);
 
-    if ((iseq = rb_method_get_iseq(body)) != 0) {
-	ret = rb_iseq_disasm(iseq->self);
-    }
-    else {
+    if (rb_obj_is_proc(body)) {
 	rb_proc_t *proc;
 	VALUE iseqval;
 	GetProcPtr(body, proc);
@@ -1021,6 +1018,9 @@ iseq_s_disasm(VALUE klass, VALUE body)
 	if (RUBY_VM_NORMAL_ISEQ_P(iseqval)) {
 	    ret = rb_iseq_disasm(iseqval);
 	}
+    }
+    else if ((iseq = rb_method_get_iseq(body)) != 0) {
+	ret = rb_iseq_disasm(iseq->self);
     }
 
     return ret;

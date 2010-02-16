@@ -38,10 +38,14 @@ class TestRubyOptions < Test::Unit::TestCase
   end
 
   def test_warning
+    save_rubyopt = ENV['RUBYOPT']
+    ENV['RUBYOPT'] = nil
     assert_in_out_err(%w(-W0 -e) + ['p $-W'], "", %w(0), [])
     assert_in_out_err(%w(-W1 -e) + ['p $-W'], "", %w(1), [])
     assert_in_out_err(%w(-Wx -e) + ['p $-W'], "", %w(1), [])
     assert_in_out_err(%w(-W -e) + ['p $-W'], "", %w(2), [])
+  ensure
+    ENV['RUBYOPT'] = save_rubyopt
   end
 
   def test_safe_level
@@ -271,7 +275,7 @@ class TestRubyOptions < Test::Unit::TestCase
 
   def test_sflag
     assert_in_out_err(%w(- -abc -def=foo -ghi-jkl -- -xyz),
-                      "#!ruby -s\np [$abc, $def, $ghi_jkl, $xyz]\n",
+                      "#!ruby -s\np [$abc, $def, $ghi_jkl, defined?($xyz)]\n",
                       ['[true, "foo", true, nil]'], [])
 
     assert_in_out_err(%w(- -#), "#!ruby -s\n", [],
@@ -319,5 +323,32 @@ class TestRubyOptions < Test::Unit::TestCase
     assert_equal(false, File.exist?(notexist))
     assert_in_out_err(["-r", notexist, "-ep"], "", [], pat)
     assert_in_out_err([notexist], "", [], pat)
+  end
+
+  def test_segv_test
+    assert_in_out_err(["-e", "Process.kill :SEGV, $$"], "", [],
+      %r(\A
+      -e:(?:1:)?\s\[BUG\]\sSegmentation\sfault\n
+      #{ Regexp.quote(RUBY_DESCRIPTION) }\n\n
+      --\scontrol\sframe\s----------\n
+      (?:c:.*\n)*
+      ---------------------------\n
+      (?:
+      --\sRuby\slevel\sbacktrace\sinformation\s----------------------------------------\n
+      -e:1:in\s`<main>'\n
+      -e:1:in\s`kill'\n
+      )?
+      \n
+      (?:
+        --\sC\slevel\sbacktrace\sinformation\s-------------------------------------------\n
+        (?:(?:.*\s)?\[0x\h+\]\n)*\n
+      )?
+      \[NOTE\]\n
+      You\smay\shave\sencountered\sa\sbug\sin\sthe\sRuby\sinterpreter\sor\sextension\slibraries.\n
+      Bug\sreports\sare\swelcome.\n
+      For\sdetails:\shttp:\/\/www.ruby-lang.org/bugreport.html\n\n\z
+      )x,
+      nil,
+      :rlimit_core=>0)
   end
 end

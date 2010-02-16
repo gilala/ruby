@@ -608,6 +608,7 @@ rb_dlptr_s_to_ptr(VALUE self, VALUE val)
 	ptr = rb_dlptr_new(NUM2PTR(rb_Integer(val)), 0, NULL);
     }
     OBJ_INFECT(ptr, val);
+    rb_iv_set(ptr, "wrapping", val);
     return ptr;
 }
 
@@ -625,6 +626,7 @@ Init_dlptr(void)
     rb_define_method(rb_cDLCPtr, "free=", rb_dlptr_free_set, 1);
     rb_define_method(rb_cDLCPtr, "free",  rb_dlptr_free_get, 0);
     rb_define_method(rb_cDLCPtr, "to_i",  rb_dlptr_to_i, 0);
+    rb_define_method(rb_cDLCPtr, "to_int",  rb_dlptr_to_i, 0);
     rb_define_method(rb_cDLCPtr, "to_value",  rb_dlptr_to_value, 0);
     rb_define_method(rb_cDLCPtr, "ptr",   rb_dlptr_ptr, 0);
     rb_define_method(rb_cDLCPtr, "+@", rb_dlptr_ptr, 0);

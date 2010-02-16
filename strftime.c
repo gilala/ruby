@@ -496,7 +496,13 @@ rb_strftime(char *s, size_t maxsize, const char *format, const struct vtm *vtm, 
 			continue;
 
 		case 'Y':	/* year with century */
-                        FMTV('0', 1, "d", vtm->year);
+                        if (FIXNUM_P(vtm->year)) {
+                            long y = FIX2LONG(vtm->year);
+                            FMT('0', 0 <= y ? 4 : 5, "ld", y);
+                        }
+                        else {
+                            FMTV('0', 4, "d", vtm->year);
+                        }
 			continue;
 
 #ifdef MAILHEADER_EXT
@@ -515,7 +521,7 @@ rb_strftime(char *s, size_t maxsize, const char *format, const struct vtm *vtm, 
 		 * live without, but it would be a great help to those of
 		 * us that muck around with various message processors.
 		 */
- 		case 'z':	/* time zone offset east of GMT e.g. -0600 */
+		case 'z':	/* time zone offset east of GMT e.g. -0600 */
 			if (precision < 4) precision = 4;
 			NEEDS(precision + 1);
 			if (gmt) {
@@ -943,7 +949,7 @@ iso8601wknum(const struct tm *timeptr)
 	 * and that
 	 * 	timeptr->tm_wday MOD 7 == timeptr->tm_wday
 	 * from which it follows that. . .
- 	 */
+	 */
 	jan1day = timeptr->tm_wday - (timeptr->tm_yday % 7);
 	if (jan1day < 0)
 		jan1day += 7;
@@ -1158,7 +1164,7 @@ static char *array[] =
 	"(%%h)                                should be same as (%%b)  %h",
 	"(%%j)                            day of the year (001..366)  %j",
 	"(%%k)               hour, 24-hour clock, blank pad ( 0..23)  %k",
-	"(%%l)               hour, 12-hour clock, blank pad ( 0..12)  %l",
+	"(%%l)               hour, 12-hour clock, blank pad ( 1..12)  %l",
 	"(%%m)                                        month (01..12)  %m",
 	"(%%p)              locale's AM or PM based on 12-hour clock  %p",
 	"(%%r)                   time, 12-hour (same as %%I:%%M:%%S %%p)  %r",

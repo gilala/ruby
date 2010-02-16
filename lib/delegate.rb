@@ -114,10 +114,20 @@
 # subclasses.  Subclasses should redefine \_\_getobj\_\_.  For a concrete
 # implementation, see SimpleDelegator.
 #
-class Delegator
-  [:to_s,:inspect,:=~,:!~,:===,:<=>].each do |m|
-    undef_method m
+class Delegator < BasicObject
+  kernel = ::Kernel.dup
+  kernel.class_eval do
+    [:to_s,:inspect,:=~,:!~,:===,:<=>].each do |m|
+      undef_method m
+    end
   end
+  include kernel
+
+  # :stopdoc:
+  def self.const_missing(n)
+    ::Object.const_get(n)
+  end
+  # :startdoc:
 
   #
   # Pass in the _obj_ to delegate method calls to.  All methods supported by
@@ -129,18 +139,11 @@ class Delegator
 
   # Handles the magic of delegation through \_\_getobj\_\_.
   def method_missing(m, *args, &block)
+    target = self.__getobj__
     begin
-      target = self.__getobj__
-      unless target.respond_to?(m)
-        super(m, *args, &block)
-      else
-        target.__send__(m, *args, &block)
-      end
-    rescue Exception
-      if i = $@.index{|s| %r"\A#{Regexp.quote(__FILE__)}:\d+:in `method_missing'\z"o =~ s}
-        $@[0..i] = []
-      end
-      ::Kernel::raise
+      target.respond_to?(m) ? target.__send__(m, *args, &block) : super(m, *args, &block)
+    ensure
+      $@.delete_if {|t| %r"\A#{Regexp.quote(__FILE__)}:#{__LINE__-2}:"o =~ t} if $@
     end
   end
 
@@ -183,25 +186,33 @@ class Delegator
 
   # Serialization support for the object returned by \_\_getobj\_\_.
   def marshal_dump
-    __getobj__
+    ivars = instance_variables.reject {|var| /\A@delegate_/ =~ var}
+    [
+      :__v2__,
+      ivars, ivars.map{|var| instance_variable_get(var)},
+      __getobj__
+    ]
   end
   # Reinitializes delegation from a serialized object.
-  def marshal_load(obj)
-    __setobj__(obj)
+  def marshal_load(data)
+    version, vars, values, obj = data
+    if version == :__v2__
+      vars.each_with_index{|var, i| instance_variable_set(var, values[i])}
+      __setobj__(obj)
+    else
+      __setobj__(data)
+    end
   end
 
-  # Clone support for the object returned by \_\_getobj\_\_.
-  def clone
-    new = super
-    new.__setobj__(__getobj__.clone)
-    new
+  # :nodoc:
+  def initialize_clone(obj)
+    self.__setobj__(obj.__getobj__.clone)
   end
-  # Duplication support for the object returned by \_\_getobj\_\_.
-  def dup
-    new = super
-    new.__setobj__(__getobj__.dup)
-    new
+  # :nodoc:
+  def initialize_dup(obj)
+    self.__setobj__(obj.__getobj__.dup)
   end
+  private :initialize_clone, :initialize_dup
 
   # Freeze self and target at once.
   def freeze
@@ -245,28 +256,16 @@ class SimpleDelegator<Delegator
     raise ArgumentError, "cannot delegate to self" if self.equal?(obj)
     @delegate_sd_obj = obj
   end
-
-  def initialize(obj)   # :nodoc:
-    (self.public_methods - Delegator.public_api).each do |m|
-      class << self
-        self
-      end.class_eval do
-        undef_method m
-      end
-    end
-    super
-  end
 end
 
 # :stopdoc:
 def Delegator.delegating_block(mid)
   lambda do |*args, &block|
+    target = self.__getobj__
     begin
-      __getobj__.__send__(mid, *args, &block)
-    rescue
-      re = /\A#{Regexp.quote(__FILE__)}:#{__LINE__-2}:/o
-      $!.backtrace.delete_if {|t| re =~ t}
-      raise
+      target.__send__(mid, *args, &block)
+    ensure
+      $@.delete_if {|t| /\A#{Regexp.quote(__FILE__)}:#{__LINE__-2}:/o =~ t} if $@
     end
   end
 end

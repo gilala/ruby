@@ -1030,7 +1030,10 @@ rb_enc_strlen_cr(const char *p, const char *e, rb_encoding *enc, int *cr)
 	}
 	else {
 	    *cr = ENC_CODERANGE_BROKEN;
-	    p++;
+            if (p + rb_enc_mbminlen(enc) <= e)
+                p += rb_enc_mbminlen(enc);
+            else
+                p = e;
 	}
     }
     if (!*cr) *cr = ENC_CODERANGE_7BIT;
@@ -1099,6 +1102,12 @@ str_strlen(VALUE str, rb_encoding *enc)
         ENC_CODERANGE_SET(str, cr);
     }
     return n;
+}
+
+long
+rb_str_strlen(VALUE str)
+{
+    return str_strlen(str, STR_ENC_GET(str));
 }
 
 /*
@@ -1362,12 +1371,7 @@ rb_string_value(volatile VALUE *ptr)
 {
     VALUE s = *ptr;
     if (TYPE(s) != T_STRING) {
-	if (SYMBOL_P(s)) {
-	    s = rb_sym_to_s(s);
-	}
-	else {
-	    s = rb_str_to_str(s);
-	}
+	s = rb_str_to_str(s);
 	*ptr = s;
     }
     return s;
@@ -1490,7 +1494,7 @@ rb_str_offset(VALUE str, long pos)
 static char *
 str_utf8_nth(const char *p, const char *e, long nth)
 {
-    if ((int)SIZEOF_VALUE * 2 < nth) {
+    if ((int)SIZEOF_VALUE < e - p && (int)SIZEOF_VALUE * 2 < nth) {
 	const VALUE *s, *t;
 	const VALUE lowbits = sizeof(VALUE) - 1;
 	s = (const VALUE*)(~lowbits & ((VALUE)p + lowbits));
@@ -1519,7 +1523,6 @@ static long
 str_utf8_offset(const char *p, const char *e, long nth)
 {
     const char *pp = str_utf8_nth(p, e, nth);
-    if (!pp) return e - p;
     return pp - p;
 }
 #endif
@@ -1684,6 +1687,7 @@ rb_str_unlocktmp(VALUE str)
 void
 rb_str_set_len(VALUE str, long len)
 {
+    rb_str_modify(str);
     STR_SET_LEN(str, len);
     RSTRING_PTR(str)[len] = '\0';
 }
@@ -1999,19 +2003,40 @@ rb_str_append(VALUE str, VALUE str2)
 VALUE
 rb_str_concat(VALUE str1, VALUE str2)
 {
-    if (FIXNUM_P(str2) || TYPE(str2) == T_BIGNUM) {
-	rb_encoding *enc = STR_ENC_GET(str1);
-	unsigned int c = NUM2UINT(str2);
-	long pos = RSTRING_LEN(str1);
-	int len = rb_enc_codelen(c, enc);
-	int cr = ENC_CODERANGE(str1);
+    SIGNED_VALUE lc;
 
+    if (FIXNUM_P(str2)) {
+	lc = FIX2LONG(str2);
+	if (lc < 0)
+	    rb_raise(rb_eRangeError, "negative argument");
+    }
+    else if (TYPE(str2) == T_BIGNUM) {
+	if (!RBIGNUM_SIGN(str2))
+	    rb_raise(rb_eRangeError, "negative argument");
+	lc = rb_big2ulong(str2);
+    }
+    else {
+	return rb_str_append(str1, str2);
+    }
+#if SIZEOF_INT < SIZEOF_VALUE
+    if ((VALUE)lc > UINT_MAX) {
+	rb_raise(rb_eRangeError, "%"PRIuVALUE" out of char range", lc);
+    }
+#endif
+    {
+	rb_encoding *enc = STR_ENC_GET(str1);
+	long pos = RSTRING_LEN(str1);
+	int cr = ENC_CODERANGE(str1);
+	int c, len;
+
+	if ((len = rb_enc_codelen(c = (int)lc, enc)) <= 0) {
+	    rb_raise(rb_eRangeError, "%u invalid char", c);
+	}
 	rb_str_resize(str1, pos+len);
 	rb_enc_mbcput(c, RSTRING_PTR(str1)+pos, enc);
 	ENC_CODERANGE_SET(str1, cr);
 	return str1;
     }
-    return rb_str_append(str1, str2);
 }
 
 st_index_t
@@ -3749,6 +3774,7 @@ rb_str_gsub(int argc, VALUE *argv, VALUE str)
 VALUE
 rb_str_replace(VALUE str, VALUE str2)
 {
+    str_modifiable(str);
     if (str == str2) return str;
 
     StringValue(str2);
@@ -3925,7 +3951,7 @@ rb_str_reverse_bang(VALUE str)
 	    while (s < e) {
 		c = *s;
 		*s++ = *e;
- 		*e-- = c;
+		*e-- = c;
 	    }
 	}
 	else {
@@ -4071,7 +4097,7 @@ rb_str_inspect(VALUE str)
 {
     rb_encoding *enc = STR_ENC_GET(str);
     const char *p, *pend, *prev;
-#define CHAR_ESC_LEN 12 /* sizeof(\x{ hex of 32bit unsigned int }) */
+#define CHAR_ESC_LEN 13 /* sizeof(\x{ hex of 32bit unsigned int } \0) */
     char buf[CHAR_ESC_LEN + 1];
     VALUE result = rb_str_buf_new(0);
     rb_encoding *resenc = rb_default_internal_encoding();
@@ -4091,9 +4117,14 @@ rb_str_inspect(VALUE str)
         n = rb_enc_precise_mbclen(p, pend, enc);
         if (!MBCLEN_CHARFOUND_P(n)) {
 	    if (p > prev) str_buf_cat(result, prev, p - prev);
-	    snprintf(buf, CHAR_ESC_LEN, "\\x%02X", *p & 0377);
-	    str_buf_cat(result, buf, strlen(buf));
-            prev = ++p;
+            n = rb_enc_mbminlen(enc);
+            if (pend < p + n)
+                n = (int)(pend - p);
+            while (n--) {
+                snprintf(buf, CHAR_ESC_LEN, "\\x%02X", *p & 0377);
+                str_buf_cat(result, buf, strlen(buf));
+                prev = ++p;
+            }
 	    continue;
 	}
         n = MBCLEN_CHARFOUND_LEN(n);
@@ -6616,7 +6647,7 @@ rb_str_justify(int argc, VALUE *argv, VALUE str, char jflag)
     VALUE res;
     char *p;
     const char *f = " ";
-    long n, llen, rlen;
+    long n, size, llen, rlen, llen2 = 0, rlen2 = 0;
     volatile VALUE pad;
     int singlebyte = 1, cr;
 
@@ -6640,44 +6671,49 @@ rb_str_justify(int argc, VALUE *argv, VALUE str, char jflag)
     llen = (jflag == 'l') ? 0 : ((jflag == 'r') ? n : n/2);
     rlen = n - llen;
     cr = ENC_CODERANGE(str);
-    res = rb_str_new5(str, 0, RSTRING_LEN(str)+n*flen/fclen+2);
+    if (flen > 1) {
+       llen2 = str_offset(f, f + flen, llen % fclen, enc, singlebyte);
+       rlen2 = str_offset(f, f + flen, rlen % fclen, enc, singlebyte);
+    }
+    size = RSTRING_LEN(str);
+    if ((len = llen / fclen + rlen / fclen) >= LONG_MAX / flen ||
+       (len *= flen) >= LONG_MAX - llen2 - rlen2 ||
+       (len += llen2 + rlen2) >= LONG_MAX - size) {
+       rb_raise(rb_eArgError, "argument too big");
+    }
+    len += size;
+    res = rb_str_new5(str, 0, len);
     p = RSTRING_PTR(res);
-    while (llen) {
-	if (flen <= 1) {
-	    *p++ = *f;
-	    llen--;
-	}
-	else if (llen > fclen) {
+    if (flen <= 1) {
+       memset(p, *f, llen);
+       p += llen;
+    }
+    else {
+       while (llen >= fclen) {
 	    memcpy(p,f,flen);
 	    p += flen;
 	    llen -= fclen;
 	}
-	else {
-	    char *fp = str_nth(f, f+flen, llen, enc, singlebyte);
-	    n = fp - f;
-	    memcpy(p,f,n);
-	    p+=n;
-	    break;
+       if (llen > 0) {
+           memcpy(p, f, llen2);
+           p += llen2;
 	}
     }
-    memcpy(p, RSTRING_PTR(str), RSTRING_LEN(str));
-    p+=RSTRING_LEN(str);
-    while (rlen) {
-	if (flen <= 1) {
-	    *p++ = *f;
-	    rlen--;
-	}
-	else if (rlen > fclen) {
+    memcpy(p, RSTRING_PTR(str), size);
+    p += size;
+    if (flen <= 1) {
+       memset(p, *f, rlen);
+       p += rlen;
+    }
+    else {
+       while (rlen >= fclen) {
 	    memcpy(p,f,flen);
 	    p += flen;
 	    rlen -= fclen;
 	}
-	else {
-	    char *fp = str_nth(f, f+flen, rlen, enc, singlebyte);
-	    n = fp - f;
-	    memcpy(p,f,n);
-	    p+=n;
-	    break;
+       if (rlen > 0) {
+           memcpy(p, f, rlen2);
+           p += rlen2;
 	}
     }
     *p = '\0';

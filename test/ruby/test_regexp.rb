@@ -10,6 +10,10 @@ class TestRegexp < Test::Unit::TestCase
     $VERBOSE = @verbose
   end
 
+  def test_ruby_core_27247
+    assert_match(/(a){2}z/, "aaz")
+  end
+
   def test_ruby_dev_24643
     assert_nothing_raised("[ruby-dev:24643]") {
       /(?:(?:[a]*[a])?b)*a*$/ =~ "aabaaca"
@@ -790,5 +794,10 @@ class TestRegexp < Test::Unit::TestCase
     assert_equal(a, b, '[ruby-core:24748]')
     h = {a => 42}
     assert_equal(42, h[b], '[ruby-core:24748]')
+  end
+
+  def test_regexp_poped
+    assert_nothing_raised { eval("a = 1; /\#{ a }/; a") }
+    assert_nothing_raised { eval("a = 1; /\#{ a }/o; a") }
   end
 end

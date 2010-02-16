@@ -25,6 +25,7 @@ module Net
   class FTPTempError < FTPError; end
   class FTPPermError < FTPError; end
   class FTPProtoError < FTPError; end
+  class FTPConnectionError < FTPError; end
   # :startdoc:
 
   #
@@ -132,7 +133,7 @@ module Net
       @passive = false
       @debug_mode = false
       @resume = false
-      @sock = nil
+      @sock = NullSocket.new
       @logged_in = false
       if host
 	connect(host)
@@ -461,7 +462,7 @@ module Net
       end
       synchronize do
 	with_binary(true) do
-          conn = transfercmd(cmd, rest_offset)
+          conn = transfercmd(cmd)
           loop do
             buf = file.read(blocksize)
             break if buf == nil
@@ -605,7 +606,11 @@ module Net
       f = open(localfile)
       begin
 	f.binmode
-	storbinary("STOR " + remotefile, f, blocksize, rest_offset, &block)
+        if rest_offset
+          storbinary("APPE " + remotefile, f, blocksize, rest_offset, &block)
+        else
+          storbinary("STOR " + remotefile, f, blocksize, rest_offset, &block)
+        end
       ensure
 	f.close
       end
@@ -962,8 +967,15 @@ module Net
       return dirname
     end
     private :parse257
-  end
 
+    # :stopdoc:
+    class NullSocket
+      def method_missing(mid, *args)
+        raise FTPConnectionError, "not connected"
+      end
+    end
+    # :startdoc:
+  end
 end
 
 

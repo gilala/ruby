@@ -11,6 +11,19 @@
 #include <time.h>
 #include <ruby/encoding.h>
 
+#ifdef HAVE_VALGRIND_MEMCHECK_H
+# include <valgrind/memcheck.h>
+# ifndef VALGRIND_MAKE_MEM_DEFINED
+#  define VALGRIND_MAKE_MEM_DEFINED(p, n) VALGRIND_MAKE_READABLE(p, n)
+# endif
+# ifndef VALGRIND_MAKE_MEM_UNDEFINED
+#  define VALGRIND_MAKE_MEM_UNDEFINED(p, n) VALGRIND_MAKE_WRITABLE(p, n)
+# endif
+#else
+# define VALGRIND_MAKE_MEM_DEFINED(p, n) /* empty */
+# define VALGRIND_MAKE_MEM_UNDEFINED(p, n) /* empty */
+#endif
+
 #define RUBY_ZLIB_VERSION  "0.6.0"
 
 
@@ -306,7 +319,7 @@ do_checksum(argc, argv, func)
 /*
  * call-seq: Zlib.adler32(string, adler)
  *
- * Calculates Alder-32 checksum for +string+, and returns updated value of
+ * Calculates Adler-32 checksum for +string+, and returns updated value of
  * +adler+. If +string+ is omitted, it returns the Adler-32 initial value. If
  * +adler+ is omitted, it assumes that the initial value is given to +adler+.
  *
@@ -317,6 +330,25 @@ rb_zlib_adler32(int argc, VALUE *argv, VALUE klass)
 {
     return do_checksum(argc, argv, adler32);
 }
+
+#ifdef HAVE_ADLER32_COMBINE
+/*
+ * call-seq: Zlib.adler32_combine(adler1, adler2, len2)
+ *
+ * Combine two Adler-32 check values in to one.  +alder1+ is the first Adler-32
+ * value, +adler2+ is the second Adler-32 value.  +len2+ is the length of the
+ * string used to generate +adler2+.
+ *
+ */
+static VALUE
+rb_zlib_adler32_combine(VALUE klass, VALUE adler1, VALUE adler2, VALUE len2)
+{
+  return ULONG2NUM(
+	adler32_combine(NUM2ULONG(adler1), NUM2ULONG(adler2), NUM2LONG(len2)));
+}
+#else
+#define rb_zlib_adler32_combine rb_f_notimplement
+#endif
 
 /*
  * call-seq: Zlib.crc32(string, adler)
@@ -332,6 +364,25 @@ rb_zlib_crc32(int argc, VALUE *argv, VALUE klass)
 {
     return do_checksum(argc, argv, crc32);
 }
+
+#ifdef HAVE_CRC32_COMBINE
+/*
+ * call-seq: Zlib.crc32_combine(crc1, crc2, len2)
+ *
+ * Combine two CRC-32 check values in to one.  +crc1+ is the first CRC-32
+ * value, +crc2+ is the second CRC-32 value.  +len2+ is the length of the
+ * string used to generate +crc2+.
+ *
+ */
+static VALUE
+rb_zlib_crc32_combine(VALUE klass, VALUE crc1, VALUE crc2, VALUE len2)
+{
+  return ULONG2NUM(
+	crc32_combine(NUM2ULONG(crc1), NUM2ULONG(crc2), NUM2LONG(len2)));
+}
+#else
+#define rb_zlib_crc32_combine rb_f_notimplement
+#endif
 
 /*
  * Returns the table for calculating CRC checksum as an array.
@@ -398,7 +449,13 @@ static const struct zstream_funcs inflate_funcs = {
 static voidpf
 zlib_mem_alloc(voidpf opaque, uInt items, uInt size)
 {
-    return xmalloc(items * size);
+    voidpf p = xmalloc(items * size);
+    /* zlib FAQ: Valgrind (or some similar memory access checker) says that
+       deflate is performing a conditional jump that depends on an
+       uninitialized value.  Isn't that a bug?
+       http://www.zlib.net/zlib_faq.html#faq36 */
+    VALGRIND_MAKE_MEM_DEFINED(p, items * size);
+    return p;
 }
 
 static void
@@ -2382,7 +2439,14 @@ gzfile_ensure_close(VALUE obj)
 }
 
 /*
- * See Zlib::GzipReader#wrap and Zlib::GzipWriter#wrap.
+ * call-seq: Zlib::GzipFile.wrap(io) { |gz| ... }
+ *
+ * Creates a GzipFile object associated with +io+, and
+ * executes the block with the newly created GzipFile object,
+ * just like File.open. The GzipFile object will be closed
+ * automatically after executing the block. If you want to keep
+ * the associated IO object opening, you may call
+ * +Zlib::GzipFile#finish+ method in the block.
  */
 static VALUE
 rb_gzfile_s_wrap(int argc, VALUE *argv, VALUE klass)
@@ -2747,7 +2811,7 @@ rb_gzwriter_s_allocate(VALUE klass)
  *
  * Opens a file specified by +filename+ for writing gzip compressed data, and
  * returns a GzipWriter object associated with that file.  Further details of
- * this method are found in Zlib::GzipWriter.new and Zlib::GzipWriter#wrap.
+ * this method are found in Zlib::GzipWriter.new and Zlib::GzipFile.wrap.
  */
 static VALUE
 rb_gzwriter_s_open(int argc, VALUE *argv, VALUE klass)
@@ -2947,7 +3011,7 @@ rb_gzreader_s_allocate(VALUE klass)
  *
  * Opens a file specified by +filename+ as a gzipped file, and returns a
  * GzipReader object associated with that file.  Further details of this method
- * are in Zlib::GzipReader.new and ZLib::GzipReader.wrap.
+ * are in Zlib::GzipReader.new and ZLib::GzipFile.wrap.
  */
 static VALUE
 rb_gzreader_s_open(int argc, VALUE *argv, VALUE klass)
@@ -3468,7 +3532,9 @@ Init_zlib()
 
     rb_define_module_function(mZlib, "zlib_version", rb_zlib_version, 0);
     rb_define_module_function(mZlib, "adler32", rb_zlib_adler32, -1);
+    rb_define_module_function(mZlib, "adler32_combine", rb_zlib_adler32_combine, 3);
     rb_define_module_function(mZlib, "crc32", rb_zlib_crc32, -1);
+    rb_define_module_function(mZlib, "crc32_combine", rb_zlib_crc32_combine, 3);
     rb_define_module_function(mZlib, "crc_table", rb_zlib_crc_table, 0);
 
     rb_define_const(mZlib, "VERSION", rb_str_new2(RUBY_ZLIB_VERSION));

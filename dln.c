@@ -84,7 +84,7 @@ char *getenv();
 # endif
 #endif
 
-#ifdef __BEOS__
+#if defined(__BEOS__) || defined(__HAIKU__)
 # include <image.h>
 #endif
 
@@ -1433,7 +1433,7 @@ dln_load(const char *file)
 #endif /* rld or dyld */
 #endif
 
-#ifdef __BEOS__
+#if defined(__BEOS__) || defined(__HAIKU__)
 # define DLN_DEFINED
     {
       status_t err_stat;  /* BeOS error status code */
@@ -1479,7 +1479,7 @@ dln_load(const char *file)
       (*init_fct)();
       return (void*)img_id;
     }
-#endif /* __BEOS__*/
+#endif /* __BEOS__ || __HAIKU__ */
 
 #ifndef DLN_DEFINED
     dln_notimplement();
@@ -1554,13 +1554,17 @@ dln_find_1(const char *fname, const char *path, char *fbuf, size_t size,
     size_t i, fspace;
 #ifdef DOSISH
     static const char extension[][5] = {
-	".exe", ".com", ".cmd", ".bat",
+	EXECUTABLE_EXTS,
     };
     size_t j;
     int is_abs = 0, has_path = 0;
     const char *ext = 0;
-    const char *p = fname;
 #endif
+    const char *p = fname;
+
+    static const char pathname_too_long[] = "openpath: pathname too long (ignored)\n\
+\tDirectory \"%.*s\"\n\tFile \"%s\"\n";
+#define PATHNAME_TOO_LONG() fprintf(stderr, pathname_too_long, (int)(bp - fbuf), fbuf, fname)
 
 #define RETURN_IF(expr) if (expr) return (char *)fname;
 
@@ -1618,10 +1622,11 @@ dln_find_1(const char *fname, const char *path, char *fbuf, size_t size,
 	memcpy(fbuf, fname, i + 1);
 	goto needs_extension;
     }
+    p = fname;
 #endif
 
-    RETURN_IF(fname[0] == '/');
-    RETURN_IF(strncmp("./", fname, 2) == 0 || strncmp("../", fname, 3) == 0);
+    if (*p == '.' && *++p == '.') ++p;
+    RETURN_IF(*p == '/');
     RETURN_IF(exe_flag && strchr(fname, '/'));
 
 #undef RETURN_IF
@@ -1683,10 +1688,7 @@ dln_find_1(const char *fname, const char *path, char *fbuf, size_t size,
 	i = strlen(fname);
 	if (fspace < i) {
 	  toolong:
-	    fprintf(stderr, "openpath: pathname too long (ignored)\n");
-	    *bp = '\0';
-	    fprintf(stderr, "\tDirectory \"%s\"\n", fbuf);
-	    fprintf(stderr, "\tFile \"%s\"\n", fname);
+	    PATHNAME_TOO_LONG();
 	    goto next;
 	}
 	fspace -= i;
@@ -1697,9 +1699,7 @@ dln_find_1(const char *fname, const char *path, char *fbuf, size_t size,
 	  needs_extension:
 	    for (j = 0; j < sizeof(extension) / sizeof(extension[0]); j++) {
 		if (fspace < strlen(extension[j])) {
-		    fprintf(stderr, "openpath: pathname too long (ignored)\n");
-		    fprintf(stderr, "\tDirectory \"%.*s\"\n", (int) (bp - fbuf), fbuf);
-		    fprintf(stderr, "\tFile \"%s%s\"\n", fname, extension[j]);
+		    PATHNAME_TOO_LONG();
 		    continue;
 		}
 		strlcpy(bp + i, extension[j], fspace);

@@ -909,7 +909,7 @@ class TestTranscode < Test::Unit::TestCase
     assert_raise(Encoding::UndefinedConversionError) { "\xFF".encode("utf-8", 'TIS-620') }
   end
 
-    def test_CP850
+  def test_CP850
     check_both_ways("\u00C7", "\x80", 'CP850') # Ç
     check_both_ways("\u00C5", "\x8F", 'CP850') # Å
     check_both_ways("\u00C9", "\x90", 'CP850') # É
@@ -1578,7 +1578,13 @@ class TestTranscode < Test::Unit::TestCase
   end
 
   def test_gb18030
-    # test from GBK
+    # overall roundtrip test
+    all_unicode = (0x0..0xD7FF).to_a.pack 'U*' #追加
+    all_unicode << (0xE000..0xFFFF).to_a.pack("U*") #追加
+
+    assert_equal(all_unicode, all_unicode.encode("gb18030").encode("UTF-8")) #追加
+
+    # tests from GBK
     check_both_ways("\u4E02", "\x81\x40", 'GB18030') #
     check_both_ways("\u4E8A", "\x81\x7E", 'GB18030') #
     check_both_ways("\u4E90", "\x81\x80", 'GB18030') #
@@ -1691,7 +1697,7 @@ class TestTranscode < Test::Unit::TestCase
     check_both_ways("\u9752\u5C71\u5B66\u9662\u5927\u5B66", "\xC7\xE0\xC9\xBD\xD1\xA7\xD4\xBA\xB4\xF3\xD1\xA7", 'GB18030') # 青山学院大学
     check_both_ways("\u795E\u6797\u7FA9\u535A", "\xC9\xF1\xC1\xD6\xC1\x78\xB2\xA9", 'GB18030') # 神林義
 
-	# new tests for GB18030
+    # new tests for GB18030
     check_both_ways("\u9FA6", "\x82\x35\x8F\x33", 'GB18030') # 龦
     check_both_ways("\uD7FF", "\x83\x36\xC7\x38", 'GB18030') # No name ()
 
@@ -1867,7 +1873,12 @@ class TestTranscode < Test::Unit::TestCase
     #assert_raise(Encoding::UndefinedConversionError) { "\xF9\xD6".encode("utf-8", 'Big5-HKSCS') }
     check_both_ways("\u795E\u6797\u7FA9\u535A", "\xAF\xAB\xAA\x4C\xB8\x71\xB3\xD5", 'Big5-HKSCS') # 神林義博
   end
-
+  
+  def
+	test_Big5_UAO
+    check_both_ways("\u4e17", "\x81\x40", 'Big5-UAO') # 丗
+  end
+  
   def test_nothing_changed
     a = "James".force_encoding("US-ASCII")
     b = a.encode("Shift_JIS")

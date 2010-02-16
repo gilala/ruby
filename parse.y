@@ -456,10 +456,10 @@ static int  local_id_gen(struct parser_params*, ID);
 static ID   internal_id_gen(struct parser_params*);
 #define internal_id() internal_id_gen(parser)
 
-static void dyna_push_gen(struct parser_params*);
+static const struct vtable *dyna_push_gen(struct parser_params *);
 #define dyna_push() dyna_push_gen(parser)
-static void dyna_pop_gen(struct parser_params*);
-#define dyna_pop() dyna_pop_gen(parser)
+static void dyna_pop_gen(struct parser_params*, const struct vtable *);
+#define dyna_pop(node) dyna_pop_gen(parser, node)
 static int dyna_in_block_gen(struct parser_params*);
 #define dyna_in_block() dyna_in_block_gen(parser)
 #define dyna_var(id) local_var(id)
@@ -622,6 +622,7 @@ static void token_info_pop(struct parser_params*, const char *token);
     NODE *node;
     ID id;
     int num;
+    const struct vtable *vars;
 }
 
 /*%%%*/
@@ -688,6 +689,7 @@ static void token_info_pop(struct parser_params*, const char *token);
 %type <node> string_contents xstring_contents string_content
 %type <node> words qwords word_list qword_list word
 %type <node> literal numeric dsym cpath
+%type <node> top_compstmt top_stmts top_stmt
 %type <node> bodystmt compstmt stmts stmt expr arg primary command command_call method_call
 %type <node> expr_value arg_value primary_value
 %type <node> if_tail opt_else case_body cases opt_rescue exc_list exc_var opt_ensure
@@ -790,7 +792,7 @@ program		:  {
 			local_push(0);
 		    %*/
 		    }
-		  compstmt
+		  top_compstmt
 		    {
 		    /*%%%*/
 			if ($2 && !$<num>1) {
@@ -810,6 +812,73 @@ program		:  {
 			parser->result = dispatch1(program, $$);
 		    %*/
 			local_pop();
+		    }
+		;
+
+top_compstmt	: top_stmts opt_terms
+		    {
+		    /*%%%*/
+			void_stmts($1);
+			fixup_nodes(&deferred_nodes);
+		    /*%
+		    %*/
+			$$ = $1;
+		    }
+		;
+
+top_stmts	: none
+                    {
+		    /*%%%*/
+			$$ = NEW_BEGIN(0);
+		    /*%
+			$$ = dispatch2(stmts_add, dispatch0(stmts_new),
+						  dispatch0(void_stmt));
+		    %*/
+		    }
+		| top_stmt
+		    {
+		    /*%%%*/
+			$$ = newline_node($1);
+		    /*%
+			$$ = dispatch2(stmts_add, dispatch0(stmts_new), $1);
+		    %*/
+		    }
+		| top_stmts terms top_stmt
+		    {
+		    /*%%%*/
+			$$ = block_append($1, newline_node($3));
+		    /*%
+			$$ = dispatch2(stmts_add, $1, $3);
+		    %*/
+		    }
+		| error top_stmt
+		    {
+			$$ = remove_begin($2);
+		    }
+		;
+
+top_stmt	: stmt
+		| keyword_BEGIN
+		    {
+			if (in_def || in_single) {
+			    yyerror("BEGIN in method");
+			}
+		    /*%%%*/
+			/* local_push(0); */
+		    /*%
+		    %*/
+		    }
+		  '{' top_compstmt '}'
+		    {
+		    /*%%%*/
+			ruby_eval_tree_begin = block_append(ruby_eval_tree_begin,
+							    $4);
+			/* NEW_PREEXE($4)); */
+			/* local_pop(); */
+			$$ = NEW_BEGIN(0);
+		    /*%
+			$$ = dispatch1(BEGIN, $4);
+		    %*/
 		    }
 		;
 
@@ -985,25 +1054,6 @@ stmt		: keyword_alias fitem {lex_state = EXPR_FNAME;} fitem
 		    /*%
 			$$ = dispatch2(rescue_mod, $3, $1);
 		    %*/
-		    }
-		| keyword_BEGIN
-		    {
-			if (in_def || in_single) {
-			    yyerror("BEGIN in method");
-			}
-			/* local_push(0); */
-		    }
-		  '{' compstmt '}'
-		    {
-		    /*%%%*/
-			ruby_eval_tree_begin = block_append(ruby_eval_tree_begin,
-							    $4);
-			/* NEW_PREEXE($4)); */
-			$$ = NEW_BEGIN(0);
-		    /*%
-			$$ = dispatch1(BEGIN, $4);
-		    %*/
-			/* local_pop(); */
 		    }
 		| keyword_END '{' compstmt '}'
 		    {
@@ -1257,7 +1307,7 @@ block_command	: block_call
 
 cmd_brace_block	: tLBRACE_ARG
 		    {
-			dyna_push();
+			$<vars>1 = dyna_push();
 		    /*%%%*/
 			$<num>$ = ruby_sourceline;
 		    /*%
@@ -1273,7 +1323,7 @@ cmd_brace_block	: tLBRACE_ARG
 		    /*%
 			$$ = dispatch2(brace_block, escape_Qundef($3), $4);
 		    %*/
-			dyna_pop();
+			dyna_pop($<vars>1);
 		    }
 		;
 
@@ -2904,7 +2954,7 @@ primary		: literal
 			NODE *body = remove_begin($5);
 			reduce_nodes(&body);
 			$$ = NEW_DEFN($2, $4, body, NOEX_PRIVATE);
-			fixpos($$, $4);
+			nd_set_line($$, $<num>1);
 		    /*%
 			$$ = dispatch3(def, $2, $4, $5);
 		    %*/
@@ -2926,7 +2976,7 @@ primary		: literal
 			NODE *body = remove_begin($8);
 			reduce_nodes(&body);
 			$$ = NEW_DEFS($2, $5, $7, body);
-			fixpos($$, $2);
+			nd_set_line($$, $<num>1);
 		    /*%
 			$$ = dispatch5(defs, $2, $3, $5, $7, $8);
 		    %*/
@@ -3036,6 +3086,10 @@ k_module	: keyword_module
 k_def		: keyword_def
 		    {
 			token_info_push("def");
+		    /*%%%*/
+			$<num>$ = ruby_sourceline;
+		    /*%
+		    %*/
 		    }
 		;
 
@@ -3413,21 +3467,23 @@ bvar		: tIDENTIFIER
 		;
 
 lambda		:   {
-			dyna_push();
+			$<vars>$ = dyna_push();
+		    }
+		    {
 			$<num>$ = lpar_beg;
 			lpar_beg = ++paren_nest;
 		    }
 		  f_larglist
 		  lambda_body
 		    {
-			lpar_beg = $<num>1;
+			lpar_beg = $<num>2;
 		    /*%%%*/
-			$$ = $2;
-			$$->nd_body = NEW_SCOPE($2->nd_head, $3);
+			$$ = $3;
+			$$->nd_body = NEW_SCOPE($3->nd_head, $4);
 		    /*%
-			$$ = dispatch2(lambda, $2, $3);
+			$$ = dispatch2(lambda, $3, $4);
 		    %*/
-			dyna_pop();
+			dyna_pop($<vars>1);
 		    }
 		;
 
@@ -3461,7 +3517,7 @@ lambda_body	: tLAMBEG compstmt '}'
 
 do_block	: keyword_do_block
 		    {
-			dyna_push();
+			$<vars>1 = dyna_push();
 		    /*%%%*/
 			$<num>$ = ruby_sourceline;
 		    /*% %*/
@@ -3476,7 +3532,7 @@ do_block	: keyword_do_block
 		    /*%
 			$$ = dispatch2(do_block, escape_Qundef($3), $4);
 		    %*/
-			dyna_pop();
+			dyna_pop($<vars>1);
 		    }
 		;
 
@@ -3607,7 +3663,7 @@ method_call	: operation paren_args
 
 brace_block	: '{'
 		    {
-			dyna_push();
+			$<vars>1 = dyna_push();
 		    /*%%%*/
 			$<num>$ = ruby_sourceline;
 		    /*%
@@ -3622,11 +3678,11 @@ brace_block	: '{'
 		    /*%
 			$$ = dispatch2(brace_block, escape_Qundef($3), $4);
 		    %*/
-			dyna_pop();
+			dyna_pop($<vars>1);
 		    }
 		| keyword_do
 		    {
-			dyna_push();
+			$<vars>1 = dyna_push();
 		    /*%%%*/
 			$<num>$ = ruby_sourceline;
 		    /*%
@@ -3641,7 +3697,7 @@ brace_block	: '{'
 		    /*%
 			$$ = dispatch2(do_block, escape_Qundef($3), $4);
 		    %*/
-			dyna_pop();
+			dyna_pop($<vars>1);
 		    }
 		;
 
@@ -6905,6 +6961,7 @@ parser_yylex(struct parser_params *parser)
 		c = nextc();
 	    }
 	    if (c == '0') {
+#define no_digits() do {yyerror("numeric literal without digits"); return 0;} while (0)
 		int start = toklen();
 		c = nextc();
 		if (c == 'x' || c == 'X') {
@@ -6925,7 +6982,7 @@ parser_yylex(struct parser_params *parser)
 		    pushback(c);
 		    tokfix();
 		    if (toklen() == start) {
-			yyerror("numeric literal without digits");
+			no_digits();
 		    }
 		    else if (nondigit) goto trailing_uc;
 		    set_yylval_literal(rb_cstr_to_inum(tok(), 16, FALSE));
@@ -6949,7 +7006,7 @@ parser_yylex(struct parser_params *parser)
 		    pushback(c);
 		    tokfix();
 		    if (toklen() == start) {
-			yyerror("numeric literal without digits");
+			no_digits();
 		    }
 		    else if (nondigit) goto trailing_uc;
 		    set_yylval_literal(rb_cstr_to_inum(tok(), 2, FALSE));
@@ -6973,7 +7030,7 @@ parser_yylex(struct parser_params *parser)
 		    pushback(c);
 		    tokfix();
 		    if (toklen() == start) {
-			yyerror("numeric literal without digits");
+			no_digits();
 		    }
 		    else if (nondigit) goto trailing_uc;
 		    set_yylval_literal(rb_cstr_to_inum(tok(), 10, FALSE));
@@ -6987,7 +7044,7 @@ parser_yylex(struct parser_params *parser)
 		    /* prefixed octal */
 		    c = nextc();
 		    if (c == -1 || c == '_' || !ISDIGIT(c)) {
-			yyerror("numeric literal without digits");
+			no_digits();
 		    }
 		}
 		if (c >= '0' && c <= '7') {
@@ -8878,15 +8935,16 @@ local_id_gen(struct parser_params *parser, ID id)
     }
 }
 
-static void
+static const struct vtable *
 dyna_push_gen(struct parser_params *parser)
 {
     lvtbl->args = vtable_alloc(lvtbl->args);
     lvtbl->vars = vtable_alloc(lvtbl->vars);
+    return lvtbl->args;
 }
 
 static void
-dyna_pop_gen(struct parser_params *parser)
+dyna_pop_1(struct parser_params *parser)
 {
     struct vtable *tmp;
 
@@ -8896,6 +8954,20 @@ dyna_pop_gen(struct parser_params *parser)
     tmp = lvtbl->vars;
     lvtbl->vars = lvtbl->vars->prev;
     vtable_free(tmp);
+}
+
+static void
+dyna_pop_gen(struct parser_params *parser, const struct vtable *lvargs)
+{
+    while (lvtbl->args != lvargs) {
+	dyna_pop_1(parser);
+	if (!lvtbl->args) {
+	    struct local_vars *local = lvtbl->prev;
+	    xfree(lvtbl);
+	    lvtbl = local;
+	}
+    }
+    dyna_pop_1(parser);
 }
 
 static int

@@ -181,6 +181,8 @@ class TestClass < Test::Unit::TestCase
     o = Object.new
     c = class << o; self; end
     assert_raise(TypeError) { c.dup }
+
+    assert_raise(TypeError) { BasicObject.dup }
   end
 
   def test_singleton_class
@@ -208,5 +210,14 @@ class TestClass < Test::Unit::TestCase
     assert_equal("C\u{df}", c.name, '[ruby-core:24600]')
     c = eval("class C\u{df}; self; end")
     assert_equal("TestClass::C\u{df}", c.name, '[ruby-core:24600]')
+  end
+
+  def test_invalid_jump_from_class_definition
+    assert_raise(SyntaxError) { eval("class C; next; end") }
+    assert_raise(SyntaxError) { eval("class C; break; end") }
+    assert_raise(SyntaxError) { eval("class C; redo; end") }
+    assert_raise(SyntaxError) { eval("class C; retry; end") }
+    assert_raise(SyntaxError) { eval("class C; return; end") }
+    assert_raise(SyntaxError) { eval("class C; yield; end") }
   end
 end

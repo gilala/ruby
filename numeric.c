@@ -63,6 +63,20 @@
 #define DBL_EPSILON 2.2204460492503131e-16
 #endif
 
+#ifdef HAVE_INFINITY
+#elif BYTE_ORDER == LITTLE_ENDIAN
+const unsigned char rb_infinity[] = "\x00\x00\x80\x7f";
+#else
+const unsigned char rb_infinity[] = "\x7f\x80\x00\x00";
+#endif
+
+#ifdef HAVE_NAN
+#elif BYTE_ORDER == LITTLE_ENDIAN
+const unsigned char rb_nan[] = "\x00\x00\xc0\x7f";
+#else
+const unsigned char rb_nan[] = "\x7f\xc0\x00\x00";
+#endif
+
 extern double round(double);
 
 #ifndef HAVE_ROUND
@@ -544,7 +558,7 @@ flo_to_s(VALUE flt)
 
     if (isinf(value))
 	return rb_usascii_str_new2(value < 0 ? "-Infinity" : "Infinity");
-    else if(isnan(value))
+    else if (isnan(value))
 	return rb_usascii_str_new2("NaN");
 
 # define FLOFMT(buf, size, fmt, prec, val) snprintf(buf, size, fmt, prec, val), \
@@ -615,7 +629,7 @@ flo_plus(VALUE x, VALUE y)
 
 /*
  * call-seq:
- *   float + other  ->  float
+ *   float - other  ->  float
  *
  * Returns a new float which is the difference of <code>float</code>
  * and <code>other</code>.
@@ -896,7 +910,7 @@ flo_eq(VALUE x, VALUE y)
 
     switch (TYPE(y)) {
       case T_FIXNUM:
-	b = FIX2LONG(y);
+	b = (double)FIX2LONG(y);
 	break;
       case T_BIGNUM:
 	b = rb_big2dbl(y);
@@ -934,7 +948,7 @@ flo_hash(VALUE num)
     /* normalize -0.0 to 0.0 */
     if (d == 0.0) d = 0.0;
     hash = rb_memhash(&d, sizeof(d));
-    return INT2FIX(hash);
+    return LONG2FIX(hash);
 }
 
 VALUE
@@ -1348,10 +1362,28 @@ flo_ceil(VALUE num)
  *
  *  Rounds <i>flt</i> to a given precision in decimal digits (default 0 digits).
  *  Precision may be negative.  Returns a floating point number when ndigits
- *  is more than one.
+ *  is more than zero.
  *
+ *     1.4.round      #=> 1
  *     1.5.round      #=> 2
+ *     1.6.round      #=> 2
  *     (-1.5).round   #=> -2
+ *
+ *     1.234567.round(2)  #=> 1.23
+ *     1.234567.round(3)  #=> 1.235
+ *     1.234567.round(4)  #=> 1.2346
+ *     1.234567.round(5)  #=> 1.23457
+ *
+ *     34567.89.round(-5) #=> 0
+ *     34567.89.round(-4) #=> 30000
+ *     34567.89.round(-3) #=> 35000
+ *     34567.89.round(-2) #=> 34600
+ *     34567.89.round(-1) #=> 34570
+ *     34567.89.round(0)  #=> 34568
+ *     34567.89.round(1)  #=> 34567.9
+ *     34567.89.round(2)  #=> 34567.89
+ *     34567.89.round(3)  #=> 34567.89
+ *
  */
 
 static VALUE
@@ -1462,7 +1494,7 @@ num_ceil(VALUE num)
  *
  *  Rounds <i>num</i> to a given precision in decimal digits (default 0 digits).
  *  Precision may be negative.  Returns a floating point number when ndigits
- *  is more than one.  <code>Numeric</code> implements this by converting itself
+ *  is more than zero.  <code>Numeric</code> implements this by converting itself
  *  to a <code>Float</code> and invoking <code>Float#round</code>.
  */
 
@@ -1953,7 +1985,7 @@ int_chr(int argc, VALUE *argv, VALUE num)
 {
     char c;
     int n;
-    long i = NUM2LONG(num);
+    SIGNED_VALUE i = NUM2LONG(num);
     rb_encoding *enc;
     VALUE str;
 
@@ -1984,8 +2016,8 @@ int_chr(int argc, VALUE *argv, VALUE num)
     enc = rb_to_encoding(argv[0]);
     if (!enc) enc = rb_ascii8bit_encoding();
   decode:
-#if SIZEOF_INT < SIZEOF_LONG
-    if (i > INT_MAX) goto out_of_range;
+#if SIZEOF_INT < SIZEOF_VALUE
+    if (i > UINT_MAX) goto out_of_range;
 #endif
     if (i < 0 || (n = rb_enc_codelen((int)i, enc)) <= 0) goto out_of_range;
     str = rb_enc_str_new(0, n, enc);
@@ -2459,8 +2491,6 @@ int_pow(long x, unsigned long y)
     return LONG2NUM(z);
 }
 
-#define infinite_value() ruby_div0(1.0)
-
 /*
  *  call-seq:
  *    fix ** numeric  ->  numeric_result
@@ -2488,7 +2518,7 @@ fix_pow(VALUE x, VALUE y)
 	if (b == 1) return x;
 	if (a == 0) {
 	    if (b > 0) return INT2FIX(0);
-	    return DBL2NUM(infinite_value());
+	    return DBL2NUM(INFINITY);
 	}
 	if (a == 1) return INT2FIX(1);
 	if (a == -1) {
@@ -2516,7 +2546,7 @@ fix_pow(VALUE x, VALUE y)
       case T_FLOAT:
 	if (RFLOAT_VALUE(y) == 0.0) return DBL2NUM(1.0);
 	if (a == 0) {
-	    return DBL2NUM(RFLOAT_VALUE(y) < 0 ? infinite_value() : 0.0);
+	    return DBL2NUM(RFLOAT_VALUE(y) < 0 ? INFINITY : 0.0);
 	}
 	if (a == 1) return DBL2NUM(1.0);
 	{
@@ -3301,6 +3331,8 @@ InitVM_Numeric(void)
     rb_define_const(rb_cFloat, "MIN", DBL2NUM(DBL_MIN));
     rb_define_const(rb_cFloat, "MAX", DBL2NUM(DBL_MAX));
     rb_define_const(rb_cFloat, "EPSILON", DBL2NUM(DBL_EPSILON));
+    rb_define_const(rb_cFloat, "INFINITY", DBL2NUM(INFINITY));
+    rb_define_const(rb_cFloat, "NAN", DBL2NUM(NAN));
 
     rb_define_method(rb_cFloat, "to_s", flo_to_s, 0);
     rb_define_method(rb_cFloat, "coerce", flo_coerce, 1);

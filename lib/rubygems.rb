@@ -5,12 +5,13 @@
 # See LICENSE.txt for permissions.
 #++
 
-require 'rubygems/rubygems_version'
 require 'rubygems/defaults'
 require 'thread'
 require 'etc'
 
 module Gem
+
+  RubyGemsVersion = VERSION = '1.3.5'
 
   ##
   # Raised when RubyGems is unable to load or activate a gem.  Contains the
@@ -34,6 +35,8 @@ module Gem
 end
 
 module Kernel
+  # defined in gem_prelude.rb
+  undef gem
 
   ##
   # Use Kernel#gem to activate a specific version of +gem_name+.
@@ -381,7 +384,7 @@ module Gem
       raise Gem::Exception, msg
     end
 
-    File.join(spec.full_gem_path, spec.bindir, exec_name).sub(/.*\s.*/m, '"\&"')
+    File.join(spec.full_gem_path, spec.bindir, exec_name)
   end
 
   ##
@@ -533,26 +536,8 @@ module Gem
 
   ##
   # Finds the user's home directory.
-  #--
-  # Some comments from the ruby-talk list regarding finding the home
-  # directory:
-  #
-  #   I have HOME, USERPROFILE and HOMEDRIVE + HOMEPATH. Ruby seems
-  #   to be depending on HOME in those code samples. I propose that
-  #   it should fallback to USERPROFILE and HOMEDRIVE + HOMEPATH (at
-  #   least on Win32).
 
   def self.find_home
-    unless RUBY_VERSION > '1.9' then
-      ['HOME', 'USERPROFILE'].each do |homekey|
-        return ENV[homekey] if ENV[homekey]
-      end
-
-      if ENV['HOMEDRIVE'] && ENV['HOMEPATH'] then
-        return "#{ENV['HOMEDRIVE']}#{ENV['HOMEPATH']}"
-      end
-    end
-
     File.expand_path "~"
   rescue
     if File::ALT_SEPARATOR then
@@ -1102,10 +1087,6 @@ if defined?(RUBY_ENGINE) then
 end
 
 require 'rubygems/config_file'
-
-if RUBY_VERSION < '1.9' then
-  require 'rubygems/custom_require'
-end
 
 Gem.clear_paths
 

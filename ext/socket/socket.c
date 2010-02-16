@@ -502,12 +502,12 @@ sock_listen(VALUE sock, VALUE log)
 
 /*
  * call-seq:
- * 	socket.recvfrom(maxlen) => [mesg, sender_sockaddr]
- * 	socket.recvfrom(maxlen, flags) => [mesg, sender_sockaddr]
+ * 	socket.recvfrom(maxlen) => [mesg, sender_addrinfo]
+ * 	socket.recvfrom(maxlen, flags) => [mesg, sender_addrinfo]
  * 
  * Receives up to _maxlen_ bytes from +socket+. _flags_ is zero or more
  * of the +MSG_+ options. The first element of the results, _mesg_, is the data
- * received. The second element, _sender_sockaddr_, contains protocol-specific information
+ * received. The second element, _sender_addrinfo_, contains protocol-specific information
  * on the sender.
  * 
  * === Parameters
@@ -522,7 +522,7 @@ sock_listen(VALUE sock, VALUE log)
  * 	sockaddr = Socket.pack_sockaddr_in( 2200, 'localhost' )
  * 	socket.bind( sockaddr )
  * 	socket.listen( 5 )
- * 	client, client_sockaddr = socket.accept
+ * 	client, client_addrinfo = socket.accept
  * 	data = client.recvfrom( 20 )[0].chomp
  * 	puts "I only received 20 bytes '#{data}'"
  * 	sleep 1
@@ -613,14 +613,14 @@ sock_recvfrom(int argc, VALUE *argv, VALUE sock)
 
 /*
  * call-seq:
- * 	socket.recvfrom_nonblock(maxlen) => [mesg, sender_sockaddr]
- * 	socket.recvfrom_nonblock(maxlen, flags) => [mesg, sender_sockaddr]
+ * 	socket.recvfrom_nonblock(maxlen) => [mesg, sender_addrinfo]
+ * 	socket.recvfrom_nonblock(maxlen, flags) => [mesg, sender_addrinfo]
  * 
  * Receives up to _maxlen_ bytes from +socket+ using recvfrom(2) after
  * O_NONBLOCK is set for the underlying file descriptor.
  * _flags_ is zero or more of the +MSG_+ options.
  * The first element of the results, _mesg_, is the data received.
- * The second element, _sender_sockaddr_, contains protocol-specific information
+ * The second element, _sender_addrinfo_, contains protocol-specific information
  * on the sender.
  *
  * When recvfrom(2) returns 0, Socket#recvfrom_nonblock returns
@@ -639,7 +639,7 @@ sock_recvfrom(int argc, VALUE *argv, VALUE sock)
  * 	sockaddr = Socket.sockaddr_in(2200, 'localhost')
  * 	socket.bind(sockaddr)
  * 	socket.listen(5)
- * 	client, client_sockaddr = socket.accept
+ * 	client, client_addrinfo = socket.accept
  * 	begin # emulate blocking recvfrom
  * 	  pair = client.recvfrom_nonblock(20)
  * 	rescue IO::WaitReadable
@@ -709,14 +709,13 @@ sock_accept(VALUE sock)
 
 /*
  * call-seq:
- * 	socket.accept_nonblock => [client_socket, client_sockaddr]
+ * 	socket.accept_nonblock => [client_socket, client_addrinfo]
  * 
  * Accepts an incoming connection using accept(2) after
  * O_NONBLOCK is set for the underlying file descriptor.
  * It returns an array containing the accepted socket
  * for the incoming connection, _client_socket_,
- * and a string that contains the +struct+ sockaddr information
- * about the caller, _client_sockaddr_.
+ * and an Addrinfo, _client_addrinfo_.
  * 
  * === Example
  * 	# In one script, start this first
@@ -727,7 +726,7 @@ sock_accept(VALUE sock)
  * 	socket.bind(sockaddr)
  * 	socket.listen(5)
  * 	begin # emulate blocking accept
- * 	  client_socket, client_sockaddr = socket.accept_nonblock
+ * 	  client_socket, client_addrinfo = socket.accept_nonblock
  * 	rescue IO::WaitReadable, Errno::EINTR
  * 	  IO.select([socket])
  * 	  retry
@@ -774,12 +773,11 @@ sock_accept_nonblock(VALUE sock)
 
 /*
  * call-seq:
- * 	socket.sysaccept => [client_socket_fd, client_sockaddr]
+ * 	socket.sysaccept => [client_socket_fd, client_addrinfo]
  * 
  * Accepts an incoming connection returning an array containing the (integer)
  * file descriptor for the incoming connection, _client_socket_fd_,
- * and a string that contains the +struct+ sockaddr information
- * about the caller, _client_sockaddr_.
+ * and an Addrinfo, _client_addrinfo_.
  * 
  * === Example
  * 	# In one script, start this first
@@ -789,7 +787,7 @@ sock_accept_nonblock(VALUE sock)
  * 	sockaddr = Socket.pack_sockaddr_in( 2200, 'localhost' )
  * 	socket.bind( sockaddr )
  * 	socket.listen( 5 )
- * 	client_fd, client_sockaddr = socket.sysaccept
+ * 	client_fd, client_addrinfo = socket.sysaccept
  * 	client_socket = Socket.for_fd( client_fd )
  * 	puts "The client said, '#{client_socket.readline.chomp}'"
  * 	client_socket.puts "Hello from script one!"
@@ -872,7 +870,7 @@ sock_gethostname(VALUE obj)
 #endif
 
 static VALUE
-make_addrinfo(struct addrinfo *res0)
+make_addrinfo(struct addrinfo *res0, int norevlookup)
 {
     VALUE base, ary;
     struct addrinfo *res;
@@ -882,7 +880,7 @@ make_addrinfo(struct addrinfo *res0)
     }
     base = rb_ary_new();
     for (res = res0; res; res = res->ai_next) {
-	ary = rsock_ipaddr(res->ai_addr, rsock_do_not_reverse_lookup);
+	ary = rsock_ipaddr(res->ai_addr, norevlookup);
 	if (res->ai_canonname) {
 	    RARRAY_PTR(ary)[2] = rb_str_new2(res->ai_canonname);
 	}
@@ -904,7 +902,7 @@ sock_sockaddr(struct sockaddr *addr, size_t len)
 	ptr = (char*)&((struct sockaddr_in*)addr)->sin_addr.s_addr;
 	len = sizeof(((struct sockaddr_in*)addr)->sin_addr.s_addr);
 	break;
-#ifdef INET6
+#ifdef AF_INET6
       case AF_INET6:
 	ptr = (char*)&((struct sockaddr_in6*)addr)->sin6_addr.s6_addr;
 	len = sizeof(((struct sockaddr_in6*)addr)->sin6_addr.s6_addr);
@@ -957,7 +955,7 @@ sock_s_gethostbyaddr(int argc, VALUE *argv)
     if (!NIL_P(family)) {
 	t = rsock_family_arg(family);
     }
-#ifdef INET6
+#ifdef AF_INET6
     else if (RSTRING_LEN(addr) == 16) {
 	t = AF_INET6;
     }
@@ -1071,7 +1069,7 @@ sock_s_getservbyport(int argc, VALUE *argv)
 
 /*
  * call-seq:
- *   Socket.getaddrinfo(nodename, servname[, family[, socktype[, protocol[, flags]]]]) => array
+ *   Socket.getaddrinfo(nodename, servname[, family[, socktype[, protocol[, flags[, reverse_lookup]]]]]) => array
  *
  * Obtains address information for _nodename_:_servname_.
  *
@@ -1092,14 +1090,22 @@ sock_s_getservbyport(int argc, VALUE *argv)
  *   #    ["AF_INET", 0, "localhost", "127.0.0.1", 2, 2, 17], # PF_INET/SOCK_DGRAM/IPPROTO_UDP
  *   #    ["AF_INET", 0, "localhost", "127.0.0.1", 2, 3, 0]]  # PF_INET/SOCK_RAW/IPPROTO_IP
  *
+ * _reverse_lookup_ directs the form of the third element, and has to
+ * be one of below.
+ * If it is ommitted, the default value is +nil+.
+ *
+ *   +true+, +:hostname+:  hostname is obtained from numeric address using reverse lookup, which may take a time.
+ *   +false+, +:numeric+:  hostname is same as numeric address.
+ *   +nil+:              obey to the current +do_not_reverse_lookup+ flag.
  */
 static VALUE
 sock_s_getaddrinfo(int argc, VALUE *argv)
 {
-    VALUE host, port, family, socktype, protocol, flags, ret;
+    VALUE host, port, family, socktype, protocol, flags, ret, revlookup;
     struct addrinfo hints, *res;
+    int norevlookup;
 
-    rb_scan_args(argc, argv, "24", &host, &port, &family, &socktype, &protocol, &flags);
+    rb_scan_args(argc, argv, "25", &host, &port, &family, &socktype, &protocol, &flags, &revlookup);
 
     MEMZERO(&hints, struct addrinfo, 1);
     hints.ai_family = NIL_P(family) ? PF_UNSPEC : rsock_family_arg(family);
@@ -1113,9 +1119,12 @@ sock_s_getaddrinfo(int argc, VALUE *argv)
     if (!NIL_P(flags)) {
 	hints.ai_flags = NUM2INT(flags);
     }
+    if (NIL_P(revlookup) || !rsock_revlookup_flag(revlookup, &norevlookup)) {
+	norevlookup = rsock_do_not_reverse_lookup;
+    }
     res = rsock_getaddrinfo(host, port, &hints, 0);
 
-    ret = make_addrinfo(res);
+    ret = make_addrinfo(res, norevlookup);
     freeaddrinfo(res);
     return ret;
 }
@@ -1414,7 +1423,7 @@ sock_s_unpack_sockaddr_un(VALUE self, VALUE addr)
 static VALUE
 sockaddr_obj(struct sockaddr *addr)
 {
-    socklen_t len;
+    size_t len;
 #if defined(AF_INET6) && defined(__KAME__)
     struct sockaddr_in6 addr6;
 #endif
@@ -1545,13 +1554,22 @@ socket_s_ip_address_list(VALUE self)
 	goto finish;
     }
 
-    close(fd);
-    fd = -1;
-
     list = rb_ary_new();
     for (i = 0; i < ln.lifn_count; i++) {
 	struct lifreq *req = &lc.lifc_req[i];
         if (IS_IP_FAMILY(req->lifr_addr.ss_family)) {
+            if (req->lifr_addr.ss_family == AF_INET6 &&
+                IN6_IS_ADDR_LINKLOCAL(&((struct sockaddr_in6 *)(&req->lifr_addr))->sin6_addr) &&
+                ((struct sockaddr_in6 *)(&req->lifr_addr))->sin6_scope_id == 0) {
+                struct lifreq req2;
+                memcpy(req2.lifr_name, req->lifr_name, LIFNAMSIZ);
+                ret = ioctl(fd, SIOCGLIFINDEX, &req2);
+                if (ret == -1) {
+                    reason = "SIOCGLIFINDEX";
+                    goto finish;
+                }
+                ((struct sockaddr_in6 *)(&req->lifr_addr))->sin6_scope_id = req2.lifr_index;
+            }
             rb_ary_push(list, sockaddr_obj((struct sockaddr *)&req->lifr_addr));
         }
     }

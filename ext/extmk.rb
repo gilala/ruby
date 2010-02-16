@@ -69,8 +69,10 @@ def extract_makefile(makefile, keep = true)
   end
   $target = target
   $extconf_h = m[/^RUBY_EXTCONF_H[ \t]*=[ \t]*(\S+)/, 1]
-  $static ||= m[/^EXTSTATIC[ \t]*=[ \t]*(\S+)/, 1] || false
-  /^STATIC_LIB[ \t]*=[ \t]*\S+/ =~ m or $static = nil
+  if $static.nil?
+    $static ||= m[/^EXTSTATIC[ \t]*=[ \t]*(\S+)/, 1] || false
+    /^STATIC_LIB[ \t]*=[ \t]*\S+/ =~ m or $static = false
+  end
   $preload = Shellwords.shellwords(m[/^preload[ \t]*=[ \t]*(.*)/, 1] || "")
   $DLDFLAGS += " " + (m[/^dldflags[ \t]*=[ \t]*(.*)/, 1] || "")
   if s = m[/^LIBS[ \t]*=[ \t]*(.*)/, 1]
@@ -265,7 +267,7 @@ def parse_args()
       if arg = v.first
         arg.insert(0, '-') if /\A[^-][^=]*\Z/ =~ arg
       end
-      $makeflags.concat(v.reject {|arg| /\AMINIRUBY=/ =~ arg}.quote)
+      $makeflags.concat(v.reject {|arg2| /\AMINIRUBY=/ =~ arg2}.quote)
       $mflags.concat(v)
     end
     opts.on('--message [MESSAGE]', String) do |v|
@@ -394,29 +396,27 @@ end unless $extstatic
 
 ext_prefix = "#{$top_srcdir}/ext"
 exts = $static_ext.sort_by {|t, i| i}.collect {|t, i| t}
-if $extension
-  exts |= $extension.select {|d| File.directory?("#{ext_prefix}/#{d}")}
-else
-  withes, withouts = %w[--with --without].collect {|w|
-    if not (w = %w[-extensions -ext].collect {|o|arg_config(w+o)}).any?
-      nil
-    elsif (w = w.grep(String)).empty?
-      proc {true}
-    else
-      proc {|c1| w.collect {|o| o.split(/,/)}.flatten.any?(&c1)}
-    end
-  }
-  if withes
-    withouts ||= proc {true}
+withes, withouts = %w[--with --without].collect {|w|
+  if not (w = %w[-extensions -ext].collect {|o|arg_config(w+o)}).any?
+    nil
+  elsif (w = w.grep(String)).empty?
+    proc {true}
   else
-    withes = proc {false}
-    withouts ||= withes
+    proc {|c1| w.collect {|o| o.split(/,/)}.flatten.any?(&c1)}
   end
-  cond = proc {|ext, *|
-    cond1 = proc {|n| File.fnmatch(n, ext)}
-    withes.call(cond1) or !withouts.call(cond1)
-  }
-  exts |= Dir.glob("#{ext_prefix}/*/**/extconf.rb").collect {|d|
+}
+if withes
+  withouts ||= proc {true}
+else
+  withes = proc {false}
+  withouts ||= withes
+end
+cond = proc {|ext, *|
+  cond1 = proc {|n| File.fnmatch(n, ext)}
+  withes.call(cond1) or !withouts.call(cond1)
+}
+($extension || %w[*]).each do |e|
+  exts |= Dir.glob("#{ext_prefix}/#{e}/**/extconf.rb").collect {|d|
     d = File.dirname(d)
     d.slice!(0, ext_prefix.length + 1)
     d
@@ -439,7 +439,7 @@ Dir::chdir('ext')
 hdrdir = $hdrdir
 $hdrdir = ($top_srcdir = relative_from(srcdir, $topdir = "..")) + "/include"
 exts.each do |d|
-  $static = $force_static ? $static_ext[target] : false
+  $static = $force_static ? $static_ext[target] : nil
 
   if $ignore or !$nodynamic or $static
     extmake(d) or abort
@@ -491,7 +491,7 @@ unless $extlist.empty?
       end
       next
     end
-    f = format("%s/%s.%s", s, i, $LIBEXT)
+    f = format("%s/%s.%s", t, i, $LIBEXT)
     if File.exist?(f)
       $extinit << "    init(Init_#{i}, \"#{t}.so\");\n"
       $extobjs << "ext/#{f} "
@@ -570,19 +570,19 @@ $mflags.unshift("topdir=#$topdir")
 ENV.delete("RUBYOPT")
 if $command_output
   message = "echo #{message}"
-  cmd = $makeflags.quote.join(' ')
-  open($command_output, 'wb') do |f|
+  cmd = $makeflags.map {|ss|ss.sub(/.*[$(){};\s].*/, %q['\&'])}.join(' ')
+  open($command_output, 'wb') do |ff|
     case $command_output
     when /\.sh\z/
-      f.puts message, "rm -f $0; exec \"$@\" #{cmd}"
+      ff.puts message, "rm -f $0; exec \"$@\" #{cmd}"
     when /\.bat\z/
-      ["@echo off", message, "%* #{cmd}", "del %0 & exit %ERRORLEVEL%"].each do |s|
-        f.print s, "\r\n"
+      ["@echo off", message, "%* #{cmd}", "del %0 & exit %ERRORLEVEL%"].each do |ss|
+        ff.print ss, "\r\n"
       end
     else
-      f.puts cmd
+      ff.puts cmd
     end
-    f.chmod(0755)
+    ff.chmod(0755)
   end
 else
   puts message

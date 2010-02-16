@@ -1936,7 +1936,8 @@ iseq_insns_unification(rb_iseq_t *iseq, LINK_ANCHOR *anchor)
 #if OPT_INSTRUCTIONS_UNIFICATION
     LINK_ELEMENT *list;
     INSN *iobj, *niobj;
-    int id, j, k;
+    int id, k;
+    intptr_t j;
 
     list = FIRST_ELEMENT(anchor);
     while (list) {
@@ -1945,7 +1946,7 @@ iseq_insns_unification(rb_iseq_t *iseq, LINK_ANCHOR *anchor)
 	    id = iobj->insn_id;
 	    if (unified_insns_data[id] != 0) {
 		const int *const *entry = unified_insns_data[id];
-		for (j = 1; j < (int)entry[0]; j++) {
+		for (j = 1; j < (intptr_t)entry[0]; j++) {
 		    const int *unified = entry[j];
 		    LINK_ELEMENT *li = list->next;
 		    for (k = 2; k < unified[1]; k++) {
@@ -2549,7 +2550,8 @@ compile_cpath(LINK_ANCHOR *ret, rb_iseq_t *iseq, NODE *cpath)
     }
     else {
 	/* class at cbase Foo */
-	ADD_INSN1(ret, nd_line(cpath), putspecialobject, INT2FIX(VM_SPECIAL_OBJECT_CBASE));
+	ADD_INSN1(ret, nd_line(cpath), putspecialobject,
+		  INT2FIX(VM_SPECIAL_OBJECT_CONST_BASE));
 	return Qtrue;
     }
 }
@@ -3710,7 +3712,8 @@ iseq_compile_each(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE * node, int poped)
 	}
 
 	if (node->nd_vid) {
-	    ADD_INSN1(ret, nd_line(node), putspecialobject, INT2FIX(VM_SPECIAL_OBJECT_CBASE));
+	    ADD_INSN1(ret, nd_line(node), putspecialobject,
+		      INT2FIX(VM_SPECIAL_OBJECT_CONST_BASE));
 	    ADD_INSN1(ret, nd_line(node), setconstant, ID2SYM(node->nd_vid));
 	}
 	else {
