@@ -2223,7 +2223,6 @@ InitVM_VM(void)
     rb_define_method(rb_cRubyVM, "parent", rb_vm_parent, 0);
     rb_define_singleton_method(rb_cRubyVM, "current", rb_vm_s_current, 0);
     rb_define_singleton_method(rb_cRubyVM, "parent", rb_vm_s_parent, 0);
-    rb_undef_method(CLASS_OF(rb_cRubyVM), "new");
 
     /* ::VM::FrozenCore */
     fcore = rb_class_new(rb_cBasicObject);
