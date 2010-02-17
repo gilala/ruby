@@ -1,3 +1,56 @@
+Wed Feb 17 17:05:39 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm_insnhelper.c (vm_call_cfunc): removed unused variable.
+
+	* vm.c (vm_frametype_name): define only when VMDEBUG.
+
+Wed Feb 17 15:34:45 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/dl/dl_conversions.c (rb_dl_type_to_ffi_type): support signed
+	  long long.
+
+	* ext/dl/cfunc.c (rb_dlcfunc_inspect): get rid of overflow.
+
+	* ext/dl/closure.c (dlc_callback, rb_dlclosure_init): ditto.
+
+	* ext/dl/cptr.c (rb_dlptr_s_malloc): ditto.
+
+	* ext/dl/method.c (rb_dlfunction_initialize): ditto.
+
+Wed Feb 17 01:16:12 2010  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* hash.c (hash_update): always raise an exception when adding a new
+	  key during iteration.  Traditionally, an exception was raised only
+	  when rehash occurs, but it may lead to difficult bug to reproduce.
+	  [ruby-core:23614]
+
+Tue Feb 16 22:09:27 2010  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* gc.c (chain_finalized_object): fix precedence.
+
+Tue Feb 16 21:32:01 2010  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* gc.c (rb_objspace_call_finalizer): always run finalizer at exit,
+	  before object is free'd.  [ruby-dev:40382]
+
+Tue Feb 16 20:56:39 2010  Tanaka Akira  <akr@fsij.org>
+
+	* file.c (rb_group_member): renamed from group_member.
+	  don't use group_member() in glibc because it's not valgrind clean.
+	  http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=570047
+
+Tue Feb 16 19:19:21 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/dl/cfunc.c (rb_dlcfunc_call): convert signed value to
+	  unsigned.
+
+Tue Feb 16 19:02:59 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* test/dl/test_{base,handle}.rb: use more verbose assertions.
+
+	* test/dl/test_import.rb (DL::LIBC::BoundQsortCallback): renamed
+	  to get rid of overwriting warning.
+
 Tue Feb 16 11:03:19 2010  Aaron Patterson <aaron@tenderlovemaking.com>
 
 	* ext/dl/method.c: Adding DL::Method as a superclass for DL::Function

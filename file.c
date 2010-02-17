@@ -920,9 +920,8 @@ rb_file_lstat(VALUE obj)
 #endif
 }
 
-#ifndef HAVE_GROUP_MEMBER
 static int
-group_member(GETGROUPS_T gid)
+rb_group_member(GETGROUPS_T gid)
 {
 #ifndef _WIN32
     if (getgid() == gid || getegid() == gid)
@@ -949,7 +948,6 @@ group_member(GETGROUPS_T gid)
 #endif
     return FALSE;
 }
-#endif
 
 #ifndef S_IXUGO
 #  define S_IXUGO		(S_IXUSR | S_IXGRP | S_IXOTH)
@@ -986,7 +984,7 @@ eaccess(const char *path, int mode)
 
     if (st.st_uid == euid)        /* owner */
 	mode <<= 6;
-    else if (group_member(st.st_gid))
+    else if (rb_group_member(st.st_gid))
 	mode <<= 3;
 
     if ((int)(st.st_mode & mode) == mode) return 0;
@@ -1486,7 +1484,7 @@ rb_file_grpowned_p(VALUE obj, VALUE fname)
     struct stat st;
 
     if (rb_stat(fname, &st) < 0) return Qfalse;
-    if (group_member(st.st_gid)) return Qtrue;
+    if (rb_group_member(st.st_gid)) return Qtrue;
 #endif
     return Qfalse;
 }
@@ -4323,7 +4321,7 @@ static VALUE
 rb_stat_grpowned(VALUE obj)
 {
 #ifndef _WIN32
-    if (group_member(get_stat(obj)->st_gid)) return Qtrue;
+    if (rb_group_member(get_stat(obj)->st_gid)) return Qtrue;
 #endif
     return Qfalse;
 }
@@ -4385,7 +4383,7 @@ rb_stat_R(VALUE obj)
 	return st->st_mode & S_IRUSR ? Qtrue : Qfalse;
 #endif
 #ifdef S_IRGRP
-    if (group_member(get_stat(obj)->st_gid))
+    if (rb_group_member(get_stat(obj)->st_gid))
 	return st->st_mode & S_IRGRP ? Qtrue : Qfalse;
 #endif
 #ifdef S_IROTH
@@ -4477,7 +4475,7 @@ rb_stat_W(VALUE obj)
 	return st->st_mode & S_IWUSR ? Qtrue : Qfalse;
 #endif
 #ifdef S_IWGRP
-    if (group_member(get_stat(obj)->st_gid))
+    if (rb_group_member(get_stat(obj)->st_gid))
 	return st->st_mode & S_IWGRP ? Qtrue : Qfalse;
 #endif
 #ifdef S_IWOTH
@@ -4572,7 +4570,7 @@ rb_stat_X(VALUE obj)
 	return st->st_mode & S_IXUSR ? Qtrue : Qfalse;
 #endif
 #ifdef S_IXGRP
-    if (group_member(get_stat(obj)->st_gid))
+    if (rb_group_member(get_stat(obj)->st_gid))
 	return st->st_mode & S_IXGRP ? Qtrue : Qfalse;
 #endif
 #ifdef S_IXOTH

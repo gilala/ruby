@@ -981,6 +981,7 @@ vm_init_redefined_flag(rb_vm_t *vm)
 
 /* for vm development */
 
+#if VMDEBUG
 static const char *
 vm_frametype_name(const rb_control_frame_t *cfp)
 {
@@ -999,6 +1000,7 @@ vm_frametype_name(const rb_control_frame_t *cfp)
 	rb_bug("unknown frame");
     }
 }
+#endif
 
 /* evaluator body */
 
