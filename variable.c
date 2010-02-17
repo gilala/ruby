@@ -1311,7 +1311,9 @@ rb_ivar_foreach(VALUE obj, int (*func)(ANYARGS), st_data_t arg)
 st_index_t
 rb_ivar_count(VALUE obj)
 {
+    VALUE generic_iv = rb_generic_iv_tbl;
     st_table *tbl;
+
     switch (TYPE(obj)) {
       case T_OBJECT:
 	if ((tbl = ROBJECT_IV_INDEX_TBL(obj)) != 0) {
@@ -1332,7 +1334,7 @@ rb_ivar_count(VALUE obj)
 	}
 	break;
       default:
-	if (!generic_iv_tbl) break;
+	if (!generic_iv) break;
 	if (FL_TEST(obj, FL_EXIVAR) || rb_special_const_p(obj)) {
 	    st_data_t data;
 

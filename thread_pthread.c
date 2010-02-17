@@ -353,9 +353,9 @@ native_thread_init_stack(rb_thread_t *th)
 	    th->machine_stack_maxsize = size;
 	}
 #else
-    th->machine_stack_start = native_main_thread.stack_start;
-    th->machine_stack_maxsize = native_main_thread.stack_maxsize;
+	rb_raise(rb_eNotImpError, "ruby engine can initialize only in the main thread");
 #endif
+    }
 #ifdef __ia64
     th->machine_stack_maxsize += sizeof(VALUE);
 #ifdef STACKADDR_AVAILABLE
