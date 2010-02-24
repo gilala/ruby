@@ -823,15 +823,15 @@ class TestIO < Test::Unit::TestCase
     end)
   end
 
-  def test_readpartial_error
+  def test_readpartial_lock
     with_pipe do |r, w|
       s = ""
       t = Thread.new { r.readpartial(5, s) }
       0 until s.size == 5
-      s.clear
+      assert_raise(RuntimeError) { s.clear }
       w.write "foobarbaz"
       w.close
-      assert_raise(RuntimeError) { t.join }
+      assert_equal("fooba", t.value)
     end
   end
 
@@ -858,15 +858,15 @@ class TestIO < Test::Unit::TestCase
     end)
   end
 
-  def test_read_error
+  def test_read_lock
     with_pipe do |r, w|
       s = ""
       t = Thread.new { r.read(5, s) }
       0 until s.size == 5
-      s.clear
+      assert_raise(RuntimeError) { s.clear }
       w.write "foobarbaz"
       w.close
-      assert_raise(RuntimeError) { t.join }
+      assert_equal("fooba", t.value)
     end
   end
 
@@ -1310,6 +1310,19 @@ class TestIO < Test::Unit::TestCase
       f.reopen(f2)
       assert_equal("baz\n", f.gets, '[ruby-dev:39479]')
     end
+  end
+
+  def test_reopen_inherit
+    mkcdtmpdir {
+      system(EnvUtil.rubybin, '-e', <<"End")
+        f = open("out", "w")
+        STDOUT.reopen(f)
+        STDERR.reopen(f)
+        system(#{EnvUtil.rubybin.dump}, '-e', 'STDOUT.print "out"')
+        system(#{EnvUtil.rubybin.dump}, '-e', 'STDERR.print "err"')
+End
+      assert_equal("outerr", File.read("out"))
+    }
   end
 
   def test_foreach

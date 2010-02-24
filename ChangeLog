@@ -1,3 +1,91 @@
+Wed Feb 24 11:52:05 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* dln.c (translit_separator): moved back from load.c again.
+
+	* dln_find.c: split from dln.c.
+
+Wed Feb 24 09:31:33 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/digest/extconf.rb: use OpenSSL only when all transform
+	  functions are available.
+
+Wed Feb 24 00:39:17 2010  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* string.c (str_new_empty): String#split, partition, rpartition
+	  taints the resulting strings if self is tainted.
+
+Mon Feb 22 21:35:33 2010  Tanaka Akira  <akr@fsij.org>
+
+	* ext/digest/sha2/sha2init.c: test OpenSSL more strictly.
+
+Mon Feb 22 11:52:30 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/rubygems: update to 1.3.6.
+
+Mon Feb 22 11:21:18 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/digest/sha2: Use OpenSSL's SHA1 engine if available.
+
+Sun Feb 21 21:20:17 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/mkmf.rb (create_makefile, install_files): honor srcprefix
+	  argument if given.  [ruby-dev:40449]
+
+Sun Feb 21 13:29:57 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/rubygems/rubygems_version.rb: outdated.  [ruby-core:28275]
+
+Sun Feb 21 06:24:12 2010  Alexander Zavorine  <alexandre.zavorine@nokia.com>
+
+	* symbian/setup (config.h): HAVE_STRUCT_TIMEZONE, VOID_UNSETENV, and RUBY_LIB_VERSION_STYLE defined.
+	* symbian/setup (ruby.mmp): SOURCE node.c added.
+
+Sat Feb 20 14:36:16 2010  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* vm.c (vm_backtrace_each): use called_id when method definition
+	  structure is already freed.  [ruby-dev:40234] [ruby-core:27959]
+
+Fri Feb 19 00:04:19 2010  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* lib/drb/drb.rb (DRbServer#stop_service): join killed thread to
+	  ensure service stops.  [ruby-dev:40441]
+
+Thu Feb 18 22:31:15 2010  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* math.c (math_atanh): raise ERANGE without calling atanh if absolute
+	  value is 1 to achieve platform-independent math.  [ruby-core:28219]
+
+	* math.c (math_lgamma): return [Infinity, 1] without calling lgamma_r
+	  if argument is infinity or -infinity.  [ruby-core:28219]
+
+Thu Feb 18 22:28:00 2010  Kenta Murata  <mrkn@mrkn.jp>
+
+	* configure.in: new --with-ext and --with-out-ext options for extmk.
+	* tool/mkconfig.rb: normalizing --with-out-ext to --without-ext.
+
+Thu Feb 18 21:50:00 2010  Tanaka Akira  <akr@fsij.org>
+
+	* pack.c (pack_unpack): call PACK_ITEM_ADJUST for 'Q'.
+
+Thu Feb 18 02:14:26 2010  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* io.c (io_fread, io_getpartial, io_read, io_sysread): by using lock,
+	  prohibit modification of buffer string during read (which had caused
+	  EFAULT or SEGV).  [ruby-dev:40437]
+
+	* test/ruby/test_io.rb: rewrite tests for the old behavior.
+
+Wed Feb 17 21:34:01 2010  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* regcomp.c (setup_tree, onig_compile): optimize .* at last by
+	  converting into (?>.*), which does not backtrack.  [ruby-core:27791]
+
+	* test/ruby/test_regexp.rb: add a test for above.
+
+Wed Feb 17 21:26:53 2010  Tanaka Akira  <akr@fsij.org>
+
+	* bootstraptest/runner.rb (assert_normal_exit): add :timeout option.
+
 Wed Feb 17 17:05:39 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* vm_insnhelper.c (vm_call_cfunc): removed unused variable.

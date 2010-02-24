@@ -2,7 +2,11 @@
 /* $Id$ */
 
 #include "digest.h"
+#if defined(SHA2_USE_OPENSSL)
+#include "sha2ossl.h"
+#else
 #include "sha2.h"
+#endif
 
 #define FOREACH_BITLEN(func)	func(256) func(384) func(512)
 

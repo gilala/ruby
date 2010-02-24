@@ -6,10 +6,19 @@ require "mkmf"
 $defs << "-DHAVE_CONFIG_H"
 $INCFLAGS << " -I$(srcdir)/.."
 
-$objs = [
-  "sha2.#{$OBJEXT}",
-  "sha2init.#{$OBJEXT}",
-]
+$objs = [ "sha2init.#{$OBJEXT}" ]
+
+dir_config("openssl")
+
+if !with_config("bundled-sha2") &&
+    have_library("crypto") &&
+    %w[SHA256 SHA512].all? {|d| have_func("#{d}_Transform", "openssl/sha.h")}
+  $objs << "sha2ossl.#{$OBJEXT}"
+  $defs << "-DSHA2_USE_OPENSSL"
+else
+  have_type("u_int8_t")
+  $objs << "sha2.#{$OBJEXT}"
+end
 
 have_header("sys/cdefs.h")
 
