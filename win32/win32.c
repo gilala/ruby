@@ -181,7 +181,7 @@ rb_w32_map_errno(DWORD winerr)
 	return 0;
     }
 
-    for (i = 0; i < sizeof(errmap) / sizeof(*errmap); i++) {
+    for (i = 0; i < (int)(sizeof(errmap) / sizeof(*errmap)); i++) {
 	if (errmap[i].winerr == winerr) {
 	    return errmap[i].err;
 	}
@@ -434,10 +434,18 @@ static void
 init_env(void)
 {
     static const WCHAR TMPDIR[] = L"TMPDIR";
-    WCHAR env[_MAX_PATH];
-    WCHAR *buf;
+    struct {WCHAR name[6], eq, val[_MAX_PATH];} wk;
     DWORD len;
     BOOL f;
+#define env wk.val
+#define set_env_val(vname) do { \
+	typedef char namesizecheck[numberof(wk.name) < numberof(vname) - 1 ? -1 : 1]; \
+	WCHAR *const buf = wk.name + numberof(wk.name) - numberof(vname); \
+	MEMCPY(buf, vname, WCHAR, numberof(vname) - 1); \
+	_wputenv(buf); \
+    } while (0)
+
+    wk.eq = L'=';
 
     if (!GetEnvironmentVariableW(L"HOME", env, numberof(env))) {
 	f = FALSE;
@@ -459,9 +467,7 @@ init_env(void)
 	}
 	if (f) {
 	    regulate_path(env);
-	    buf = ALLOCA_N(WCHAR, 5 + lstrlenW(env) + 1);
-	    wsprintfW(buf, L"HOME=%s", env);
-	    _wputenv(buf);
+	    set_env_val(L"HOME");
 	}
     }
 
@@ -471,9 +477,7 @@ init_env(void)
 	    NTLoginName = "<Unknown>";
 	    return;
 	}
-	buf = ALLOCA_N(WCHAR, 5 + lstrlenW(env) + 1);
-	wsprintfW(buf, L"USER=%s", env);
-	_wputenv(buf);
+	set_env_val(L"USER");
     }
     NTLoginName = strdup(rb_w32_getenv("USER"));
 
@@ -487,11 +491,12 @@ init_env(void)
 	if (*(p - 1) != L'/') *p++ = L'/';
 	if (p - env + numberof(temp) < numberof(env)) {
 	    memcpy(p, temp, sizeof(temp));
-	    buf = ALLOCA_N(WCHAR, lstrlenW(TMPDIR) + 1 + lstrlenW(env) + 1);
-	    wsprintfW(buf, L"%s=%s", TMPDIR, env);
-	    _wputenv(buf);
+	    set_env_val(TMPDIR);
 	}
     }
+
+#undef env
+#undef set_env_val
 }
 
 
@@ -1115,7 +1120,8 @@ rb_w32_spawn(int mode, const char *cmd, const char *prog)
 rb_pid_t
 rb_w32_aspawn(int mode, const char *prog, char *const *argv)
 {
-    int len, c_switch = 0;
+    int c_switch = 0;
+    size_t len;
     BOOL ntcmd = FALSE, tmpnt;
     const char *shell;
     char *cmd, fbuf[MAXPATHLEN];
@@ -3975,7 +3981,7 @@ winnt_stat(const char *path, struct stati64 *st)
 	// If runtime stat(2) is called for network shares, it fails on WinNT.
 	// Because GetDriveType returns 1 for network shares. (Win98 returns 4)
 	DWORD attr = GetFileAttributes(path);
-	if (attr == -1) {
+	if (attr == (DWORD)-1L) {
 	    errno = map_errno(GetLastError());
 	    return -1;
 	}
@@ -4091,7 +4097,7 @@ rb_chsize(HANDLE h, off_t size)
     end = ((off_t)uend << 32) | (unsigned long)lend;
     usize = (long)(size >> 32);
     lsize = (long)size;
-    if (SetFilePointer(h, lsize, &usize, SEEK_SET) == -1L &&
+    if (SetFilePointer(h, lsize, &usize, SEEK_SET) == (DWORD)-1L &&
 	(e = GetLastError())) {
 	errno = map_errno(e);
     }
@@ -5270,5 +5276,14 @@ long
 _ftol2_sse(double d)
 {
     return _ftol(d);
+}
+#endif
+
+#ifndef signbit
+int
+signbit(double x)
+{
+    int *ip = (int *)(&x + 1) - 1;
+    return *ip < 0;
 }
 #endif

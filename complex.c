@@ -375,7 +375,7 @@ nucomp_real_check(VALUE num)
 	break;
       default:
 	if (!k_numeric_p(num) || !f_real_p(num))
-	    rb_raise(rb_eArgError, "not a real");
+	    rb_raise(rb_eTypeError, "not a real");
     }
 }
 
@@ -802,35 +802,6 @@ nucomp_fdiv(VALUE self, VALUE other)
     return f_divide(self, other, f_fdiv, id_fdiv);
 }
 
-static VALUE
-m_log(VALUE x)
-{
-    if (f_real_p(x) && f_positive_p(x))
-	return m_log_bang(x);
-    return rb_complex_new2(m_log_bang(f_abs(x)), f_arg(x));
-}
-
-static VALUE
-m_exp(VALUE x)
-{
-    VALUE ere, im;
-
-    if (f_real_p(x))
-	return m_exp_bang(x);
-    ere = m_exp_bang(f_real(x));
-    im = f_imag(x);
-    return rb_complex_new2(f_mul(ere, m_cos_bang(im)),
-			   f_mul(ere, m_sin_bang(im)));
-}
-
-VALUE
-rb_fexpt(VALUE x, VALUE y)
-{
-    if (f_zero_p(x) || (!k_float_p(x) && !k_float_p(y)))
-	return f_expt(x, y);
-    return m_exp(f_mul(m_log(x), y));
-}
-
 inline static VALUE
 f_reciprocal(VALUE x)
 {
@@ -1181,28 +1152,13 @@ nucomp_eql_p(VALUE self, VALUE other)
     return Qfalse;
 }
 
-#ifndef HAVE_SIGNBIT
-#ifdef signbit
-#define HAVE_SIGNBIT 1
-#endif
-#endif
-
 inline static VALUE
 f_signbit(VALUE x)
 {
     switch (TYPE(x)) {
       case T_FLOAT: {
-#ifdef HAVE_SIGNBIT
 	double f = RFLOAT_VALUE(x);
 	return f_boolcast(!isnan(f) && signbit(f));
-#else
-	char s[2];
-	double f = RFLOAT_VALUE(x);
-
-	if (isnan(f)) return Qfalse;
-	(void)snprintf(s, sizeof s, "%.0f", f);
-	return f_boolcast(s[0] == '-');
-#endif
       }
     }
     return f_negative_p(x);

@@ -1597,7 +1597,7 @@ gc_mark_children(rb_objspace_t *objspace, VALUE ptr, int lev)
 	    ptr = (VALUE)obj->as.node.u3.node;
 	    goto again;
 
-	  case NODE_WHILE:
+	  case NODE_WHILE:	/* 1,2 */
 	  case NODE_UNTIL:
 	  case NODE_AND:
 	  case NODE_OR:
@@ -1617,7 +1617,7 @@ gc_mark_children(rb_objspace_t *objspace, VALUE ptr, int lev)
 	  case NODE_ARGSCAT:
 	    gc_mark(objspace, (VALUE)obj->as.node.u1.node, lev);
 	    /* fall through */
-	  case NODE_GASGN:
+	  case NODE_GASGN:	/* 2 */
 	  case NODE_LASGN:
 	  case NODE_DASGN:
 	  case NODE_DASGN_CURR:
@@ -3144,6 +3144,28 @@ gc_profile_report(int argc, VALUE *argv, VALUE self)
 }
 
 /*
+ *  call-seq:
+ *     GC::Profiler.total_time -> float
+ *
+ *  return total time that GC used. (msec)
+ */
+
+static VALUE
+gc_profile_total_time(VALUE self)
+{
+    double time = 0;
+    rb_objspace_t *objspace = &rb_objspace;
+    size_t i;
+
+    if (objspace->profile.run && objspace->profile.count) {
+	for (i = 0; i < objspace->profile.count; i++) {
+	    time += objspace->profile.record[i].gc_time;
+	}
+    }
+    return DBL2NUM(time);
+}
+
+/*
  *  The <code>GC</code> module provides an interface to Ruby's mark and
  *  sweep garbage collection mechanism. Some of the underlying methods
  *  are also available via the <code>ObjectSpace</code> module.
@@ -3176,6 +3198,7 @@ InitVM_GC(void)
     rb_define_singleton_method(rb_mProfiler, "clear", gc_profile_clear, 0);
     rb_define_singleton_method(rb_mProfiler, "result", gc_profile_result, 0);
     rb_define_singleton_method(rb_mProfiler, "report", gc_profile_report, -1);
+    rb_define_singleton_method(rb_mProfiler, "total_time", gc_profile_total_time, 0);
 
     rb_mObSpace = rb_define_module("ObjectSpace");
     rb_define_module_function(rb_mObSpace, "each_object", os_each_obj, -1);

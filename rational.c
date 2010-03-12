@@ -417,7 +417,7 @@ nurat_int_check(VALUE num)
 	break;
       default:
 	if (!k_numeric_p(num) || !f_integer_p(num))
-	    rb_raise(rb_eArgError, "not an integer");
+	    rb_raise(rb_eTypeError, "not an integer");
     }
 }
 
@@ -899,8 +899,6 @@ nurat_fdiv(VALUE self, VALUE other)
     return f_to_f(f_div(self, other));
 }
 
-extern VALUE rb_fexpt(VALUE x, VALUE y);
-
 /*
  * call-seq:
  *    rat ** numeric  ->  numeric_result
@@ -957,7 +955,7 @@ nurat_expt(VALUE self, VALUE other)
 	/* fall through */
       case T_FLOAT:
       case T_RATIONAL:
-	return rb_fexpt(f_to_f(self), other);
+	return f_expt(f_to_f(self), other);
       default:
 	return rb_num_coerce_bin(self, other, id_expt);
     }

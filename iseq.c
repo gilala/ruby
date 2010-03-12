@@ -795,7 +795,7 @@ insn_operand_intern(rb_iseq_t *iseq,
 	break;
 
       case TS_IC:
-	ret = rb_str_new2("<ic>");
+	ret = rb_sprintf("<ic:%d>", (struct iseq_inline_cache_entry *)op - iseq->ic_entries);
 	break;
 
       case TS_CDHASH:
@@ -1226,8 +1226,10 @@ iseq_data_to_ary(rb_iseq_t *iseq)
 		    rb_ary_push(ary, ID2SYM(entry->id));
 		}
 		break;
-	      case TS_IC:
-		rb_ary_push(ary, Qnil);
+	      case TS_IC: {
+		  struct iseq_inline_cache_entry *ic = (struct iseq_inline_cache_entry *)*seq;
+		    rb_ary_push(ary, INT2FIX(ic - iseq->ic_entries));
+	        }
 		break;
 	      case TS_ID:
 		rb_ary_push(ary, ID2SYM(*seq));
@@ -1340,11 +1342,15 @@ rb_iseq_clone(VALUE iseqval, VALUE newcbase)
     if (!iseq1->orig) {
 	iseq1->orig = iseqval;
     }
+    if (iseq0->local_iseq == iseq0) {
+	iseq1->local_iseq = iseq1;
+    }
     if (newcbase) {
 	iseq1->cref_stack = NEW_BLOCK(newcbase);
 	if (iseq0->cref_stack->nd_next) {
 	    iseq1->cref_stack->nd_next = iseq0->cref_stack->nd_next;
 	}
+	iseq1->klass = newcbase;
     }
 
     return newiseq;

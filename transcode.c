@@ -2397,6 +2397,11 @@ econv_opts(VALUE opt)
         rb_raise(rb_eArgError, "unknown value for undefined character option");
     }
 
+    v = rb_hash_aref(opt, sym_replace);
+    if (!NIL_P(v) && !(ecflags & ECONV_INVALID_REPLACE)) {
+        ecflags |= ECONV_UNDEF_REPLACE;
+    }
+
     v = rb_hash_aref(opt, sym_xml);
     if (!NIL_P(v)) {
         if (v==sym_text) {
@@ -2588,7 +2593,7 @@ str_transcode0(int argc, VALUE *argv, VALUE *self, int ecflags, VALUE ecopts)
             return NIL_P(arg2) ? -1 : dencidx;
         }
         if (senc && denc && rb_enc_asciicompat(senc) && rb_enc_asciicompat(denc)) {
-            if (ENC_CODERANGE(str) == ENC_CODERANGE_7BIT) {
+            if (rb_enc_str_coderange(str) == ENC_CODERANGE_7BIT) {
                 return dencidx;
             }
         }

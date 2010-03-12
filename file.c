@@ -106,16 +106,6 @@ file_path_convert(VALUE name)
 #ifndef _WIN32 /* non Windows == Unix */
     rb_encoding *fname_encoding = rb_enc_from_index(ENCODING_GET(name));
     rb_encoding *fs_encoding;
-#  ifdef __APPLE__
-    /* Mac OS X's file system encoding is UTF-8 */
-    if (rb_usascii_encoding() != fname_encoding
-	    && rb_ascii8bit_encoding() != fname_encoding
-	    && (fs_encoding = rb_filesystem_encoding()) != fname_encoding
-	    && rb_enc_find("UTF8-MAC") != fname_encoding) {
-	/* Don't call rb_enc_find() before UTF-8 */
-	name = rb_str_conv_enc(name, fname_encoding, fs_encoding);
-    }
-#  else /* Unix other than Mac OS X */
     if (rb_default_internal_encoding() != NULL
 	    && rb_usascii_encoding() != fname_encoding
 	    && rb_ascii8bit_encoding() != fname_encoding
@@ -123,7 +113,6 @@ file_path_convert(VALUE name)
 	/* Don't call rb_filesystem_encoding() before US-ASCII and ASCII-8BIT */
 	name = rb_str_conv_enc(name, fname_encoding, fs_encoding);
     }
-#  endif
 #endif
     return name;
 }
@@ -2800,7 +2789,6 @@ file_expand_path(VALUE fname, VALUE dname, int abs_mode, VALUE result)
     int tainted;
     rb_encoding *extenc = 0;
 
-    FilePathValue(fname);
     s = StringValuePtr(fname);
     BUFINIT();
     tainted = OBJ_TAINTED(fname);
@@ -3060,10 +3048,23 @@ file_expand_path(VALUE fname, VALUE dname, int abs_mode, VALUE result)
     return result;
 }
 
+#define EXPAND_PATH_BUFFER() rb_usascii_str_new(0, MAXPATHLEN + 2)
+
+#define check_expand_path_args(fname, dname) \
+    ((fname = rb_get_path(fname)), \
+     (NIL_P(dname) ? dname : (dname = rb_get_path(dname))))
+
+static VALUE
+file_expand_path_1(VALUE fname)
+{
+    return file_expand_path(fname, Qnil, 0, EXPAND_PATH_BUFFER());
+}
+
 VALUE
 rb_file_expand_path(VALUE fname, VALUE dname)
 {
-    return file_expand_path(fname, dname, 0, rb_usascii_str_new(0, MAXPATHLEN + 2));
+    check_expand_path_args(fname, dname);
+    return file_expand_path(fname, dname, 0, EXPAND_PATH_BUFFER());
 }
 
 /*
@@ -3099,7 +3100,8 @@ rb_file_s_expand_path(int argc, VALUE *argv)
 VALUE
 rb_file_absolute_path(VALUE fname, VALUE dname)
 {
-    return file_expand_path(fname, dname, 1, rb_usascii_str_new(0, MAXPATHLEN + 2));
+    check_expand_path_args(fname, dname);
+    return file_expand_path(fname, dname, 1, EXPAND_PATH_BUFFER());
 }
 
 /*
@@ -3212,65 +3214,105 @@ realpath_rec(long *prefixlenp, VALUE *resolvedp, char *unresolved, VALUE loopche
 }
 
 static VALUE
-realpath_internal(VALUE path, int strict)
+realpath_internal(VALUE basedir, VALUE path, int strict)
 {
     long prefixlen;
     VALUE resolved;
     volatile VALUE unresolved_path;
-    char *unresolved_names;
     VALUE loopcheck;
+    volatile VALUE curdir = Qnil;
+    
+    char *path_names = NULL, *basedir_names = NULL, *curdir_names = NULL;
+    char *ptr;
 
     rb_secure(2);
 
     FilePathValue(path);
     unresolved_path = rb_str_dup_frozen(path);
-    unresolved_names = skiproot(RSTRING_PTR(unresolved_path));
-    prefixlen = unresolved_names - RSTRING_PTR(unresolved_path);
+
+    if (!NIL_P(basedir)) {
+        FilePathValue(basedir);
+        basedir = rb_str_dup_frozen(basedir);
+    }
+
+    ptr = RSTRING_PTR(unresolved_path);
+    path_names = skiproot(ptr);
+    if (ptr != path_names) {
+        resolved = rb_str_new(ptr, path_names - ptr);
+        goto root_found;
+    }
+
+    if (!NIL_P(basedir)) {
+        ptr = RSTRING_PTR(basedir);
+        basedir_names = skiproot(ptr);
+        if (ptr != basedir_names) {
+            resolved = rb_str_new(ptr, basedir_names - ptr);
+            goto root_found;
+        }
+    }
+
+    curdir = rb_dir_getwd();
+    ptr = RSTRING_PTR(curdir);
+    curdir_names = skiproot(ptr);
+    resolved = rb_str_new(ptr, curdir_names - ptr);
+
+  root_found:
+    ptr = chompdirsep(RSTRING_PTR(resolved));
+    if (*ptr) {
+        rb_str_set_len(resolved, ptr - RSTRING_PTR(resolved) + 1);
+    }
+    prefixlen = RSTRING_LEN(resolved);
+
     loopcheck = rb_hash_new();
-    if (prefixlen == 0) {
-        volatile VALUE curdir = rb_dir_getwd();
-        char *unresolved_curdir_names = skiproot(RSTRING_PTR(curdir));
-        prefixlen = unresolved_curdir_names - RSTRING_PTR(curdir);
-        resolved = rb_str_new(RSTRING_PTR(curdir), prefixlen);
-        realpath_rec(&prefixlen, &resolved, unresolved_curdir_names, loopcheck, 1, 0);
-    }
-    else {
-        resolved = rb_str_new(RSTRING_PTR(unresolved_path), prefixlen);
-    }
-    realpath_rec(&prefixlen, &resolved, unresolved_names, loopcheck, strict, 1);
+    if (curdir_names)
+        realpath_rec(&prefixlen, &resolved, curdir_names, loopcheck, 1, 0);
+    if (basedir_names)
+        realpath_rec(&prefixlen, &resolved, basedir_names, loopcheck, 1, 0);
+    realpath_rec(&prefixlen, &resolved, path_names, loopcheck, strict, 1);
+
     OBJ_TAINT(resolved);
     return resolved;
 }
 
 /*
  * call-seq:
- *     File.realpath(pathname) -> real_pathname
+ *     File.realpath(pathname [, dir_string]) -> real_pathname
  *
- *  Returns the real (absolute) pathname of +pathname+ in the actual
+ *  Returns the real (absolute) pathname of _pathname_ in the actual
  *  filesystem not containing symlinks or useless dots.
+ *
+ *  If _dir_string_ is given, it is used as a base directory
+ *  for interpreting relative pathname instead of the current directory.
  * 
  *  All components of the pathname must exist when this method is
  *  called.
  */
 static VALUE
-rb_file_s_realpath(VALUE klass, VALUE path)
+rb_file_s_realpath(int argc, VALUE *argv, VALUE klass)
 {
-    return realpath_internal(path, 1);
+    VALUE path, basedir;
+    rb_scan_args(argc, argv, "11", &path, &basedir);
+    return realpath_internal(basedir, path, 1);
 }
 
 /*
  * call-seq:
- *     File.realdirpath(pathname) -> real_pathname
+ *     File.realdirpath(pathname [, dir_string]) -> real_pathname
  *
- *  Returns the real (absolute) pathname of +pathname+ in the actual filesystem.
+ *  Returns the real (absolute) pathname of _pathname_ in the actual filesystem.
  *  The real pathname doesn't contain symlinks or useless dots.
+ * 
+ *  If _dir_string_ is given, it is used as a base directory
+ *  for interpreting relative pathname instead of the current directory.
  * 
  *  The last component of the real pathname can be nonexistent.
  */
 static VALUE
-rb_file_s_realdirpath(VALUE klass, VALUE path)
+rb_file_s_realdirpath(int argc, VALUE *argv, VALUE klass)
 {
-    return realpath_internal(path, 0);
+    VALUE path, basedir;
+    rb_scan_args(argc, argv, "11", &path, &basedir);
+    return realpath_internal(basedir, path, 0);
 }
 
 static size_t
@@ -4861,7 +4903,7 @@ rb_find_file_ext_safe(VALUE *filep, const char *const *ext, int safe_level)
     if (!ext[0]) return 0;
 
     if (f[0] == '~') {
-	fname = rb_file_expand_path(*filep, Qnil);
+	fname = file_expand_path_1(fname);
 	if (safe_level >= 1 && OBJ_TAINTED(fname)) {
 	    rb_raise(rb_eSecurityError, "loading from unsafe file %s", f);
 	}
@@ -4874,7 +4916,7 @@ rb_find_file_ext_safe(VALUE *filep, const char *const *ext, int safe_level)
 	if (safe_level >= 1 && !fpath_check(fname)) {
 	    rb_raise(rb_eSecurityError, "loading from unsafe path %s", f);
 	}
-	if (!expanded) fname = rb_file_expand_path(fname, Qnil);
+	if (!expanded) fname = file_expand_path_1(fname);
 	fnlen = RSTRING_LEN(fname);
 	for (i=0; ext[i]; i++) {
 	    rb_str_cat2(fname, ext[i]);
@@ -4932,7 +4974,7 @@ rb_find_file_safe(VALUE path, int safe_level)
     int expanded = 0;
 
     if (f[0] == '~') {
-	tmp = rb_file_expand_path(path, Qnil);
+	tmp = file_expand_path_1(path);
 	if (safe_level >= 1 && OBJ_TAINTED(tmp)) {
 	    rb_raise(rb_eSecurityError, "loading from unsafe file %s", f);
 	}
@@ -4947,7 +4989,7 @@ rb_find_file_safe(VALUE path, int safe_level)
 	}
 	if (!file_load_ok(f)) return 0;
 	if (!expanded)
-	    path = copy_path_class(rb_file_expand_path(path, Qnil), path);
+	    path = copy_path_class(file_expand_path_1(path), path);
 	return path;
     }
 
@@ -5093,8 +5135,8 @@ InitVM_File(void)
     rb_define_singleton_method(rb_cFile, "truncate", rb_file_s_truncate, 2);
     rb_define_singleton_method(rb_cFile, "expand_path", rb_file_s_expand_path, -1);
     rb_define_singleton_method(rb_cFile, "absolute_path", rb_file_s_absolute_path, -1);
-    rb_define_singleton_method(rb_cFile, "realpath", rb_file_s_realpath, 1);
-    rb_define_singleton_method(rb_cFile, "realdirpath", rb_file_s_realdirpath, 1);
+    rb_define_singleton_method(rb_cFile, "realpath", rb_file_s_realpath, -1);
+    rb_define_singleton_method(rb_cFile, "realdirpath", rb_file_s_realdirpath, -1);
     rb_define_singleton_method(rb_cFile, "basename", rb_file_s_basename, -1);
     rb_define_singleton_method(rb_cFile, "dirname", rb_file_s_dirname, 1);
     rb_define_singleton_method(rb_cFile, "extname", rb_file_s_extname, 1);

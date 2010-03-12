@@ -18,30 +18,35 @@ def c_esc(str)
   '"' + str.gsub(C_ESC_PAT) { C_ESC[$&] } + '"'
 end
 
+HEX2 = /[0-9A-Fa-f]{2}/
+
 class StrSet
   attr_reader :pat
+
+  SINGLE_BYTE_RANGES = (0..255).map {|i| [i..i] }
+
   def self.parse(pattern)
-    if /\A\s*(([0-9a-f][0-9a-f]|\{([0-9a-f][0-9a-f]|[0-9a-f][0-9a-f]-[0-9a-f][0-9a-f])(,([0-9a-f][0-9a-f]|[0-9a-f][0-9a-f]-[0-9a-f][0-9a-f]))*\})+(\s+|\z))*\z/i !~ pattern
+    if /\A\s*((#{HEX2}|\{(#{HEX2}|#{HEX2}-#{HEX2})(,(#{HEX2}|#{HEX2}-#{HEX2}))*\})+(\s+|\z))*\z/o !~ pattern
       raise ArgumentError, "invalid pattern: #{pattern.inspect}"
     end
     result = []
     pattern.scan(/\S+/) {|seq|
       seq_result = []
       while !seq.empty?
-        if /\A([0-9a-f][0-9a-f])/i =~ seq
+        if /\A(#{HEX2})/o =~ seq
           byte = $1.to_i(16)
-          seq_result << [byte..byte]
+          seq_result << SINGLE_BYTE_RANGES[byte]
           seq = $'
         elsif /\A\{([^\}]+)\}/ =~ seq
           set = $1
           seq = $'
           set_result = []
           set.scan(/[^,]+/) {|range|
-            if /\A([0-9a-f][0-9a-f])-([0-9a-f][0-9a-f])\z/i =~ range
+            if /\A(#{HEX2})-(#{HEX2})\z/o =~ range
               b = $1.to_i(16)
               e = $2.to_i(16)
               set_result << (b..e)
-            elsif /\A([0-9a-f][0-9a-f])\z/i =~ range
+            elsif /\A(#{HEX2})\z/o =~ range
               byte = $1.to_i(16)
               set_result << (byte..byte)
             else
@@ -333,19 +338,19 @@ class ActionMap
       "FUNio"
     when :func_so
       "FUNso"
-    when /\A([0-9a-f][0-9a-f])\z/i
+    when /\A(#{HEX2})\z/o
       "o1(0x#$1)"
-    when /\A([0-9a-f][0-9a-f])([0-9a-f][0-9a-f])\z/i
+    when /\A(#{HEX2})(#{HEX2})\z/o
       "o2(0x#$1,0x#$2)"
-    when /\A([0-9a-f][0-9a-f])([0-9a-f][0-9a-f])([0-9a-f][0-9a-f])\z/i
+    when /\A(#{HEX2})(#{HEX2})(#{HEX2})\z/o
       "o3(0x#$1,0x#$2,0x#$3)"
     when /funsio\((\d+)\)/
       "funsio(#{$1})"
-    when /\A([0-9a-f][0-9a-f])(3[0-9])([0-9a-f][0-9a-f])(3[0-9])\z/i
+    when /\A(#{HEX2})(3[0-9])(#{HEX2})(3[0-9])\z/o
       "g4(0x#$1,0x#$2,0x#$3,0x#$4)"
-    when /\A(f[0-7])([0-9a-f][0-9a-f])([0-9a-f][0-9a-f])([0-9a-f][0-9a-f])\z/i
+    when /\A(f[0-7])(#{HEX2})(#{HEX2})(#{HEX2})\z/o
       "o4(0x#$1,0x#$2,0x#$3,0x#$4)"
-    when /\A([0-9a-f][0-9a-f]){4,259}\z/i
+    when /\A(#{HEX2}){4,259}\z/o
       gen_str(info.upcase)
     when /\A\/\*BYTE_LOOKUP\*\// # pointer to BYTE_LOOKUP structure
       $'.to_s
@@ -445,11 +450,11 @@ End
     }
 
     if n = PostMemo[table]
-      return n
+      return PreMemo[[self,valid_encoding]] = n
     end
 
     if !name_hint
-      name_hint = "fun_" + NextName.dup
+      name_hint = "fun_" + NextName
       NextName.succ!
     end
 
@@ -519,16 +524,22 @@ def citrus_euc_cstomb(csid, index)
   end.to_s(16)
 end
 
+def citrus_stateless_iso_cstomb(csid, index)
+  (index | 0x8080 | (csid << 16)).to_s(16)
+end
+
 def citrus_cstomb(ces, csid, index)
   case ces
   when 'mskanji'
     citrus_mskanji_cstomb(csid, index)
   when 'euc'
     citrus_euc_cstomb(csid, index)
+  when 'stateless_iso'
+    citrus_stateless_iso_cstomb(csid, index)
   end
 end
 
-SUBDIR = %w/APPLE AST BIG5 CNS CP EBCDIC GB GEORGIAN ISO646 ISO-8859 JIS KAZAKH KOI KS MISC TCVN/
+SUBDIR = %w/APPLE AST BIG5 CNS CP EBCDIC EMOJI GB GEORGIAN ISO646 ISO-8859 JIS KAZAKH KOI KS MISC TCVN/
 
 
 def citrus_decode_mapsrc(ces, csid, mapsrcs)
@@ -631,7 +642,6 @@ def transcode_tbl_only(from, to, map)
   else
     tree_name = "from_#{id_from}_to_#{id_to}"
   end
-  map = encode_utf8(map)
   real_tree_name, max_input = transcode_compile_tree(tree_name, from, map)
   return map, tree_name, real_tree_name, max_input
 end
@@ -740,7 +750,7 @@ ValidEncoding = {
                     {81-fe}{30-39}{81-fe}{30-39}',
 }
 
-def set_valid_byte_pattern (encoding, pattern_or_label)
+def set_valid_byte_pattern(encoding, pattern_or_label)
   pattern =
     if ValidEncoding[pattern_or_label]
       ValidEncoding[pattern_or_label]
@@ -762,95 +772,97 @@ def make_signature(filename, src)
   "src=#{filename.dump}, len=#{src.length}, checksum=#{src.sum}"
 end
 
-output_filename = nil
-verbose_mode = false
-force_mode = false
+if __FILE__ == $0
+  output_filename = nil
+  verbose_mode = false
+  force_mode = false
 
-op = OptionParser.new
-op.def_option("--help", "show help message") { puts op; exit 0 }
-op.def_option("--verbose", "verbose mode") { verbose_mode = true }
-op.def_option("--force", "force table generation") { force_mode = true }
-op.def_option("--output=FILE", "specify output file") {|arg| output_filename = arg }
-op.parse!
+  op = OptionParser.new
+  op.def_option("--help", "show help message") { puts op; exit 0 }
+  op.def_option("--verbose", "verbose mode") { verbose_mode = true }
+  op.def_option("--force", "force table generation") { force_mode = true }
+  op.def_option("--output=FILE", "specify output file") {|arg| output_filename = arg }
+  op.parse!
 
-VERBOSE_MODE = verbose_mode
+  VERBOSE_MODE = verbose_mode
 
-OUTPUT_FILENAME = output_filename
-OUTPUT_PREFIX = output_filename ? File.basename(output_filename)[/\A[A-Za-z0-9_]*/] : ""
-OUTPUT_PREFIX.sub!(/\A_+/, '')
-OUTPUT_PREFIX.sub!(/_*\z/, '_')
+  OUTPUT_FILENAME = output_filename
+  OUTPUT_PREFIX = output_filename ? File.basename(output_filename)[/\A[A-Za-z0-9_]*/] : ""
+  OUTPUT_PREFIX.sub!(/\A_+/, '')
+  OUTPUT_PREFIX.sub!(/_*\z/, '_')
 
-TRANSCODE_GENERATED_BYTES_CODE = ArrayCode.new("unsigned char", "#{OUTPUT_PREFIX}byte_array")
-TRANSCODE_GENERATED_WORDS_CODE = ArrayCode.new("unsigned int", "#{OUTPUT_PREFIX}word_array")
+  TRANSCODE_GENERATED_BYTES_CODE = ArrayCode.new("unsigned char", "#{OUTPUT_PREFIX}byte_array")
+  TRANSCODE_GENERATED_WORDS_CODE = ArrayCode.new("unsigned int", "#{OUTPUT_PREFIX}word_array")
 
-arg = ARGV.shift
-$srcdir = File.dirname(arg)
-$:.unshift $srcdir unless $:.include? $srcdir
-src = File.read(arg)
-src.force_encoding("ascii-8bit") if src.respond_to? :force_encoding
-this_script = File.read(__FILE__)
-this_script.force_encoding("ascii-8bit") if this_script.respond_to? :force_encoding
+  arg = ARGV.shift
+  $srcdir = File.dirname(arg)
+  $:.unshift $srcdir unless $:.include? $srcdir
+  src = File.read(arg)
+  src.force_encoding("ascii-8bit") if src.respond_to? :force_encoding
+  this_script = File.read(__FILE__)
+  this_script.force_encoding("ascii-8bit") if this_script.respond_to? :force_encoding
 
-base_signature = "/* autogenerated. */\n"
-base_signature << "/* #{make_signature(File.basename(__FILE__), this_script)} */\n"
-base_signature << "/* #{make_signature(File.basename(arg), src)} */\n"
+  base_signature = "/* autogenerated. */\n"
+  base_signature << "/* #{make_signature(File.basename(__FILE__), this_script)} */\n"
+  base_signature << "/* #{make_signature(File.basename(arg), src)} */\n"
 
-if !force_mode && output_filename && File.readable?(output_filename)
-  old_signature = File.open(output_filename) {|f| f.gets("").chomp }
-  chk_signature = base_signature.dup
-  old_signature.each_line {|line|
-    if %r{/\* src="([0-9a-z_.-]+)",} =~ line
-      name = $1
-      next if name == File.basename(arg) || name == File.basename(__FILE__)
-      path = File.join($srcdir, name)
-      if File.readable? path
-        chk_signature << "/* #{make_signature(name, File.read(path))} */\n"
+  if !force_mode && output_filename && File.readable?(output_filename)
+    old_signature = File.open(output_filename) {|f| f.gets("").chomp }
+    chk_signature = base_signature.dup
+    old_signature.each_line {|line|
+      if %r{/\* src="([0-9a-z_.-]+)",} =~ line
+        name = $1
+        next if name == File.basename(arg) || name == File.basename(__FILE__)
+        path = File.join($srcdir, name)
+        if File.readable? path
+          chk_signature << "/* #{make_signature(name, File.read(path))} */\n"
+        end
       end
+    }
+    if old_signature == chk_signature
+      now = Time.now
+      File.utime(now, now, output_filename)
+      STDERR.puts "already up-to-date: #{output_filename}" if VERBOSE_MODE
+      exit
+    end
+  end
+
+  if VERBOSE_MODE
+    if output_filename
+      STDERR.puts "generating #{output_filename} ..."
+    end
+  end
+
+  libs1 = $".dup
+  erb = ERB.new(src, nil, '%')
+  erb.filename = arg
+  erb_result = erb.result(binding)
+  libs2 = $".dup
+
+  libs = libs2 - libs1
+  lib_sigs = ''
+  libs.each {|lib|
+    lib = File.basename(lib)
+    path = File.join($srcdir, lib)
+    if File.readable? path
+      lib_sigs << "/* #{make_signature(lib, File.read(path))} */\n"
     end
   }
-  if old_signature == chk_signature
-    now = Time.now
-    File.utime(now, now, output_filename)
-    STDERR.puts "already up-to-date: #{output_filename}" if VERBOSE_MODE
-    exit
-  end
-end
 
-if VERBOSE_MODE
+  result = ''
+  result << base_signature
+  result << lib_sigs
+  result << "\n"
+  result << erb_result
+  result << "\n"
+
   if output_filename
-    STDERR.puts "generating #{output_filename} ..."
+    new_filename = output_filename + ".new"
+    FileUtils.mkdir_p(File.dirname(output_filename))
+    File.open(new_filename, "wb") {|f| f << result }
+    File.rename(new_filename, output_filename)
+    STDERR.puts "done." if VERBOSE_MODE
+  else
+    print result
   end
-end
-
-libs1 = $".dup
-erb = ERB.new(src, nil, '%')
-erb.filename = arg
-erb_result = erb.result(binding)
-libs2 = $".dup
-
-libs = libs2 - libs1
-lib_sigs = ''
-libs.each {|lib|
-  lib = File.basename(lib)
-  path = File.join($srcdir, lib)
-  if File.readable? path
-    lib_sigs << "/* #{make_signature(lib, File.read(path))} */\n"
-  end
-}
-
-result = ''
-result << base_signature
-result << lib_sigs
-result << "\n"
-result << erb_result
-result << "\n"
-
-if output_filename
-  new_filename = output_filename + ".new"
-  FileUtils.mkdir_p(File.dirname(output_filename))
-  File.open(new_filename, "wb") {|f| f << result }
-  File.rename(new_filename, output_filename)
-  STDERR.puts "done." if VERBOSE_MODE
-else
-  print result
 end

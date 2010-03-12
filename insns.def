@@ -764,7 +764,7 @@ defined
 	klass = vm_get_cbase(GET_ISEQ(), GET_LFP(), GET_DFP());
 	break;
       case DEFINED_GVAR:
-	if (rb_gvar_defined((struct rb_global_entry *)(obj & ~1))) {
+	if (rb_gvar_defined(rb_global_entry(SYM2ID(obj)))) {
 	    expr_type = "global-variable";
 	}
 	break;
@@ -1217,12 +1217,10 @@ onceinlinecache
  */
 DEFINE_INSN
 setinlinecache
-(OFFSET dst)
+(IC ic)
 (VALUE val)
 (VALUE val)
 {
-    IC ic = GET_CONST_INLINE_CACHE(dst);
-
     if (ic->ic_value.value == Qundef) {
 	rb_ary_push(GET_ISEQ()->mark_ary, val);
     }

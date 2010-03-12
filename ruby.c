@@ -356,7 +356,7 @@ ruby_init_loadpath_safe(int safe_level)
 
 #if defined _WIN32 || defined __CYGWIN__
 # if VARIABLE_LIBPATH
-    sopath = rb_str_tmp_new(MAXPATHLEN);
+    sopath = rb_str_new(0, MAXPATHLEN);
     libpath = RSTRING_PTR(sopath);
     GetModuleFileName(libruby, libpath, MAXPATHLEN);
 # else
@@ -388,7 +388,7 @@ ruby_init_loadpath_safe(int safe_level)
 	const int win_to_posix = CCP_WIN_A_TO_POSIX | CCP_RELATIVE;
 	size_t newsize = cygwin_conv_path(win_to_posix, libpath, 0, 0);
 	if (newsize > 0) {
-	    VALUE rubylib = rb_str_tmp_new(newsize);
+	    VALUE rubylib = rb_str_new(0, newsize);
 	    p = RSTRING_PTR(rubylib);
 	    if (cygwin_conv_path(win_to_posix, libpath, p, newsize) == 0) {
 		rb_str_resize(sopath, 0);
@@ -416,8 +416,10 @@ ruby_init_loadpath_safe(int safe_level)
 	strlcpy(libpath, ".", sizeof(libpath));
 	p = libpath + 1;
     }
+#define PREFIX_PATH() rb_str_new(libpath, baselen)
 #else
     rb_str_set_len(sopath, p - libpath);
+#define PREFIX_PATH() sopath
 #endif
 
     baselen = p - libpath;
@@ -426,6 +428,7 @@ ruby_init_loadpath_safe(int safe_level)
 #define RUBY_RELATIVE(path, len) rb_str_buf_cat(BASEPATH(), path, len)
 #else
 #define RUBY_RELATIVE(path, len) rubylib_mangled_path(path, len)
+#define PREFIX_PATH() rubylib_mangled_path(RUBY_LIB_PREFIX, sizeof(RUBY_LIB_PREFIX)-1)
 #endif
 #define incpush(path) rb_ary_push(load_path, (path))
     load_path = GET_VM()->load_path;
@@ -439,6 +442,8 @@ ruby_init_loadpath_safe(int safe_level)
 	incpush(RUBY_RELATIVE(paths, len));
 	paths += len + 1;
     }
+
+    rb_const_set(rb_cObject, rb_intern_const("TMP_RUBY_PREFIX"), rb_obj_freeze(PREFIX_PATH()));
 }
 
 
@@ -1087,6 +1092,7 @@ ruby_init_gems(int enable)
 {
     if (enable) rb_define_module("Gem");
     Init_prelude();
+    rb_const_remove(rb_cObject, rb_intern_const("TMP_RUBY_PREFIX"));
 }
 
 static int

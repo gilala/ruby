@@ -2615,13 +2615,23 @@ rb_io_readlines(int argc, VALUE *argv, VALUE io)
  *     ios.each(sep=$/) {|line| block }         => ios
  *     ios.each(limit) {|line| block }          => ios
  *     ios.each(sep,limit) {|line| block }      => ios
+ *     ios.each(...)                            => anEnumerator
+ *
  *     ios.each_line(sep=$/) {|line| block }    => ios
  *     ios.each_line(limit) {|line| block }     => ios
  *     ios.each_line(sep,limit) {|line| block } => ios
+ *     ios.each_line(...)                       => anEnumerator
+ *
+ *     ios.lines(sep=$/) {|line| block }        => ios
+ *     ios.lines(limit) {|line| block }         => ios
+ *     ios.lines(sep,limit) {|line| block }     => ios
+ *     ios.lines(...)                           => anEnumerator
  *
  *  Executes the block for every line in <em>ios</em>, where lines are
  *  separated by <i>sep</i>. <em>ios</em> must be opened for
  *  reading or an <code>IOError</code> will be raised.
+ *
+ *  If no block is given, an enumerator is returned instead.
  *
  *     f = File.new("testfile")
  *     f.each {|line| puts "#{f.lineno}: #{line}" }
@@ -2650,11 +2660,17 @@ rb_io_each_line(int argc, VALUE *argv, VALUE io)
 
 /*
  *  call-seq:
+ *     ios.bytes {|byte| block }      => ios
+ *     ios.bytes                      => anEnumerator
+ *
  *     ios.each_byte {|byte| block }  => ios
+ *     ios.each_byte                  => anEnumerator
  *
  *  Calls the given block once for each byte (0..255) in <em>ios</em>,
  *  passing the byte as an argument. The stream must be opened for
  *  reading or an <code>IOError</code> will be raised.
+ *
+ *  If no block is given, an enumerator is returned instead.
  *
  *     f = File.new("testfile")
  *     checksum = 0
@@ -2782,11 +2798,17 @@ io_getc(rb_io_t *fptr, rb_encoding *enc)
 
 /*
  *  call-seq:
+ *     ios.chars {|c| block }      => ios
+ *     ios.chars                   => anEnumerator
+ *
  *     ios.each_char {|c| block }  => ios
+ *     ios.each_char               => anEnumerator
  *
  *  Calls the given block once for each character in <em>ios</em>,
  *  passing the character as an argument. The stream must be opened for
  *  reading or an <code>IOError</code> will be raised.
+ *
+ *  If no block is given, an enumerator is returned instead.
  *
  *     f = File.new("testfile")
  *     f.each_char {|c| print c, ' ' }   #=> #<File:testfile>
@@ -2812,6 +2834,15 @@ rb_io_each_char(VALUE io)
 }
 
 
+
+/*
+ *  call-seq:
+ *     ios.codepoints   => anEnumerator
+ *
+ *  Returns an enumerator that gives each codepoint in <em>ios</em>.
+ *  The stream must be opened for reading or an <code>IOError</code>
+ *  will be raised.
+ */
 
 /*
  *  call-seq:
@@ -2897,83 +2928,6 @@ rb_io_each_codepoint(VALUE io)
 }
 
 
-
-/*
- *  call-seq:
- *     ios.lines(sep=$/)     => anEnumerator
- *     ios.lines(limit)      => anEnumerator
- *     ios.lines(sep, limit) => anEnumerator
- *
- *  Returns an enumerator that gives each line in <em>ios</em>.
- *  The stream must be opened for reading or an <code>IOError</code>
- *  will be raised.
- *
- *     f = File.new("testfile")
- *     f.lines.to_a  #=> ["foo\n", "bar\n"]
- *     f.rewind
- *     f.lines.sort  #=> ["bar\n", "foo\n"]
- */
-
-static VALUE
-rb_io_lines(int argc, VALUE *argv, VALUE io)
-{
-    return rb_enumeratorize(io, ID2SYM(rb_intern("each_line")), argc, argv);
-}
-
-/*
- *  call-seq:
- *     ios.bytes   => anEnumerator
- *
- *  Returns an enumerator that gives each byte (0..255) in <em>ios</em>.
- *  The stream must be opened for reading or an <code>IOError</code>
- *  will be raised.
- *
- *     f = File.new("testfile")
- *     f.bytes.to_a  #=> [104, 101, 108, 108, 111]
- *     f.rewind
- *     f.bytes.sort  #=> [101, 104, 108, 108, 111]
- */
-
-static VALUE
-rb_io_bytes(VALUE io)
-{
-    return rb_enumeratorize(io, ID2SYM(rb_intern("each_byte")), 0, 0);
-}
-
-/*
- *  call-seq:
- *     ios.chars   => anEnumerator
- *
- *  Returns an enumerator that gives each character in <em>ios</em>.
- *  The stream must be opened for reading or an <code>IOError</code>
- *  will be raised.
- *
- *     f = File.new("testfile")
- *     f.chars.to_a  #=> ["h", "e", "l", "l", "o"]
- *     f.rewind
- *     f.chars.sort  #=> ["e", "h", "l", "l", "o"]
- */
-
-static VALUE
-rb_io_chars(VALUE io)
-{
-    return rb_enumeratorize(io, ID2SYM(rb_intern("each_char")), 0, 0);
-}
-
-/*
- *  call-seq:
- *     ios.codepoints   => anEnumerator
- *
- *  Returns an enumerator that gives each codepoint in <em>ios</em>.
- *  The stream must be opened for reading or an <code>IOError</code>
- *  will be raised.
- */
-
-static VALUE
-rb_io_codepoints(VALUE io)
-{
-    return rb_enumeratorize(io, ID2SYM(rb_intern("each_codepoint")), 0, 0);
-}
 
 /*
  *  call-seq:
@@ -5111,7 +5065,7 @@ pipe_open(struct rb_exec_arg *eargp, VALUE prog, const char *modestr, int fmode,
     if (argc) {
 	int i;
 
-	if (argc >= FIXNUM_MAX / sizeof(char *)) {
+	if (argc >= (int)(FIXNUM_MAX / sizeof(char *))) {
 	    rb_raise(rb_eArgError, "too many arguments");
 	}
 	argbuf = rb_str_tmp_new((argc+1) * sizeof(char *));
@@ -9279,24 +9233,23 @@ argf_readbyte(VALUE argf)
 
 /*
  *  call-seq:
- *     ARGF.lines(sep=$/)                      => Enumerator
- *     ARGF.lines(sep=$/)          {|line| }   => Enumerator
- *     ARGF.lines(sep=$/,limit)                => Enumerator
- *     ARGF.lines(sep=$/,limit)    {|line| }   => Enumerator
+ *     ARGF.each(sep=$/)            {|line| block }  => ARGF
+ *     ARGF.each(sep=$/,limit)      {|line| block }  => ARGF
+ *     ARGF.each(...)                                => anEnumerator
  *
- *     ARGF.each_line(sep=$/)                  => Enumerator
- *     ARGF.each_line(sep=$/)       {|line| }  => Enumerator
- *     ARGF.each_line(sep=$/,limit)            => Enumerator
- *     ARGF.each_line(sep=$/,limit) {|line| }  => Enumerator
- *     ARGF.each(sep=$/)                       => Enumerator
- *     ARGF.each(sep=$/)            {|line| }  => Enumerator
- *     ARGF.each(sep=$/,limit)                 => Enumerator
- *     ARGF.each(sep=$/,limit)      {|line| }  => Enumerator
+ *     ARGF.each_line(sep=$/)       {|line| block }  => ARGF
+ *     ARGF.each_line(sep=$/,limit) {|line| block }  => ARGF
+ *     ARGF.each_line(...)                           => anEnumerator
+ *
+ *     ARGF.lines(sep=$/)           {|line| block }   => ARGF
+ *     ARGF.lines(sep=$/,limit)     {|line| block }   => ARGF
+ *     ARGF.lines(...)                                => anEnumerator
  *
  *  Returns an enumerator which iterates over each line (separated by _sep_,
  *  which defaults to your platform's newline character) of each file in
  *  +ARGV+. If a block is supplied, each line in turn will be yielded to the
- *  block. The optional _limit_ argument is a +Fixnum+ specifying the maximum
+ *  block, otherwise an enumerator is returned.
+ *  The optional _limit_ argument is a +Fixnum+ specifying the maximum
  *  length of each line; longer lines will be split according to this limit.
  *
  *  This method allows you to treat the files supplied on the command line as
@@ -9327,21 +9280,22 @@ argf_each_line(int argc, VALUE *argv, VALUE argf)
 
 /*
  *  call-seq:
- *     ARGF.bytes                => Enumerator
- *     ARGF.bytes     {|byte| }  => Enumerator
+ *     ARGF.bytes     {|byte| block }  => ARGF
+ *     ARGF.bytes                      => anEnumerator
  *
- *     ARGF.each_byte            => Enumerator
- *     ARGF.each_byte {|byte| }  => Enumerator
+ *     ARGF.each_byte {|byte| block }  => ARGF
+ *     ARGF.each_byte                  => anEnumerator
  *
- *  Returns an enumerator which iterates over each byte of each file in
- *  +ARGV+. If a block is supplied, each byte in turn will be yielded to the
- *  block. A byte is returned as a +Fixnum+ in the range 0..255.
+ *  Iterates over each byte of each file in +ARGV+.
+ *  A byte is returned as a +Fixnum+ in the range 0..255.
  *
  *  This method allows you to treat the files supplied on the command line as
  *  a single file consisting of the concatenation of each named file. After
  *  the last byte of the first file has been returned, the first byte of the
  *  second file is returned. The +ARGF.filename+ method can be used to
  *  determine the filename of the current byte.
+ *
+ *  If no block is given, an enumerator is returned instead.
  *
  * For example:
  *
@@ -9361,15 +9315,13 @@ argf_each_byte(VALUE argf)
 
 /*
  *  call-seq:
- *     ARGF.chars                 => Enumerator
- *     ARGF.chars      {|char| }  => Enumerator
+ *     ARGF.chars      {|char| block }  => ARGF
+ *     ARGF.chars                       => anEnumerator
  *
- *     ARGF.each_char             => Enumerator
- *     ARGF.each_char  {|char| }  => Enumerator
+ *     ARGF.each_char  {|char| block }  => ARGF
+ *     ARGF.each_char                   => anEnumerator
  *
- *  Returns an enumerator which iterates over each character of each file in
- *  +ARGV+. If a block is supplied, each character in turn will be yielded to
- *  the block.
+ *  Iterates over each character of each file in +ARGF+.
  *
  *  This method allows you to treat the files supplied on the command line as
  *  a single file consisting of the concatenation of each named file. After
@@ -9377,6 +9329,8 @@ argf_each_byte(VALUE argf)
  *  character of the second file is returned. The +ARGF.filename+ method can
  *  be used to determine the name of the file in which the current character
  *  appears.
+ *
+ *  If no block is given, an enumerator is returned instead.
  */
 static VALUE
 argf_each_char(VALUE argf)
@@ -9944,10 +9898,10 @@ InitVM_IO(void)
     rb_define_method(rb_cIO, "each_byte",  rb_io_each_byte, 0);
     rb_define_method(rb_cIO, "each_char",  rb_io_each_char, 0);
     rb_define_method(rb_cIO, "each_codepoint",  rb_io_each_codepoint, 0);
-    rb_define_method(rb_cIO, "lines",  rb_io_lines, -1);
-    rb_define_method(rb_cIO, "bytes",  rb_io_bytes, 0);
-    rb_define_method(rb_cIO, "chars",  rb_io_chars, 0);
-    rb_define_method(rb_cIO, "codepoints",  rb_io_codepoints, 0);
+    rb_define_method(rb_cIO, "lines",  rb_io_each_line, -1);
+    rb_define_method(rb_cIO, "bytes",  rb_io_each_byte, 0);
+    rb_define_method(rb_cIO, "chars",  rb_io_each_char, 0);
+    rb_define_method(rb_cIO, "codepoints",  rb_io_each_codepoint, 0);
 
     rb_define_method(rb_cIO, "syswrite", rb_io_syswrite, 1);
     rb_define_method(rb_cIO, "sysread",  rb_io_sysread, -1);

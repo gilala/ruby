@@ -172,6 +172,9 @@ enum ruby_public_object_vmkey {
 #define rb_eInvalidByteSequenceError (*rb_vm_specific_ptr(rb_vmkey_eInvalidByteSequenceError))
     rb_vmkey_eConverterNotFoundError,
 #define rb_eConverterNotFoundError (*rb_vm_specific_ptr(rb_vmkey_eConverterNotFoundError))
+    rb_vmkey_eMathDomainError,
+#define rb_eMathDomainError (*rb_vm_specific_ptr(rb_vmkey_eMathDomainError))
+
     rb_vmkey_stdin,
 #define rb_stdin (*rb_vm_specific_ptr(rb_vmkey_stdin))
     rb_vmkey_stdout,
