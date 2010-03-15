@@ -1333,7 +1333,7 @@ min_by_i(VALUE i, VALUE *memo, int argc, VALUE *argv)
 
 /*
  *  call-seq:
- *     enum.min_by {| obj| block }   => obj
+ *     enum.min_by {|obj| block }   => obj
  *
  *  Returns the object in <i>enum</i> that gives the minimum
  *  value from the given block.
@@ -1376,7 +1376,7 @@ max_by_i(VALUE i, VALUE *memo, int argc, VALUE *argv)
 
 /*
  *  call-seq:
- *     enum.max_by {| obj| block }   => obj
+ *     enum.max_by {|obj| block }   => obj
  *
  *  Returns the object in <i>enum</i> that gives the maximum
  *  value from the given block.
@@ -1470,7 +1470,7 @@ minmax_by_i(VALUE i, VALUE _memo, int argc, VALUE *argv)
 
 /*
  *  call-seq:
- *     enum.minmax_by {| obj| block }   => [min, max]
+ *     enum.minmax_by {|obj| block }   => [min, max]
  *
  *  Returns two elements array array containing the objects in
  *  <i>enum</i> that gives the minimum and maximum values respectively
@@ -2417,15 +2417,18 @@ slicebefore_i(VALUE yielder, VALUE enumerator, int argc, VALUE *argv)
  *
  *  If the block needs to maintain state over multiple elements,
  *  local variables can be used.
- *  For example, monotonically increasing elements can be chunked as follows.
+ *  For example, three or more consecutive increasing numbers can be squashed
+ *  as follows:
  *
- *    a = [3,1,4,1,5,9,2,6,5,3,5]
- *    n = 0
- *    p a.slice_before {|elt|
- *      prev, n = n, elt
- *      prev > elt
- *    }.to_a
- *    #=> [[3], [1, 4], [1, 5, 9], [2, 6], [5], [3, 5]]
+ *    a = [0,2,3,4,6,7,9] 
+ *    prev = a[0]
+ *    p a.slice_before {|e|
+ *      prev, prev2 = e, prev
+ *      prev2 + 1 != e
+ *    }.map {|es|
+ *      es.length <= 2 ? es.join(",") : "#{es.first}-#{es.last}"
+ *    }.join(",")
+ *    #=> "0,2-4,6,7,9"
  *
  *  However local variables are not appropriate to maintain state
  *  if the result enumerator is used twice or more.
@@ -2519,25 +2522,6 @@ enum_slice_before(int argc, VALUE *argv, VALUE enumerable)
 }
 
 /*
- *  call-seq:
- *     enum.join(sep=$,)    -> str
- *
- *  Returns a string created by converting each element of the
- *  <i>enum</i> to a string, separated by <i>sep</i>.
- */
-
-static VALUE
-enum_join(int argc, VALUE *argv, VALUE obj)
-{
-    VALUE sep;
-
-    rb_scan_args(argc, argv, "01", &sep);
-    if (NIL_P(sep)) sep = rb_output_fs;
-
-    return rb_ary_join(enum_to_a(0, 0, obj), sep);
-}
-
-/*
  *  The <code>Enumerable</code> mixin provides collection classes with
  *  several traversal and searching methods, and with the ability to
  *  sort. The class must provide a method <code>each</code>, which
@@ -2612,7 +2596,6 @@ InitVM_Enumerable(void)
     rb_define_method(rb_mEnumerable, "drop", enum_drop, 1);
     rb_define_method(rb_mEnumerable, "drop_while", enum_drop_while, 0);
     rb_define_method(rb_mEnumerable, "cycle", enum_cycle, -1);
-    rb_define_method(rb_mEnumerable, "join", enum_join, -1);
     rb_define_method(rb_mEnumerable, "chunk", enum_chunk, -1);
     rb_define_method(rb_mEnumerable, "slice_before", enum_slice_before, -1);
 }

@@ -137,10 +137,6 @@ next_state(struct MT *mt)
     unsigned int *p = mt->state;
     int j;
 
-    /* if init_genrand() has not been called, */
-    /* a default initial seed is used         */
-    if (!genrand_initialized(mt)) init_genrand(mt, 5489U);
-
     mt->left = N;
     mt->next = mt->state;
 
@@ -157,6 +153,7 @@ next_state(struct MT *mt)
 static unsigned int
 genrand_int32(struct MT *mt)
 {
+    /* mt must be initialized */
     unsigned int y;
 
     if (--mt->left <= 0) next_state(mt);
@@ -175,6 +172,7 @@ genrand_int32(struct MT *mt)
 static double
 genrand_real(struct MT *mt)
 {
+    /* mt must be initialized */
     unsigned int a = genrand_int32(mt)>>5, b = genrand_int32(mt)>>6;
     return(a*67108864.0+b)*(1.0/9007199254740992.0);
 }
@@ -184,6 +182,7 @@ static double int_pair_to_real_inclusive(unsigned int a, unsigned int b);
 static double
 genrand_real2(struct MT *mt)
 {
+    /* mt must be initialized */
     unsigned int a = genrand_int32(mt), b = genrand_int32(mt);
     return int_pair_to_real_inclusive(a, b);
 }
@@ -217,23 +216,34 @@ typedef struct {
 
 #define DEFAULT_SEED_CNT 4
 
-struct Random {
-    rb_random_t rnd;
-    unsigned int initial[DEFAULT_SEED_CNT];
-};
-
 #define default_rand (*(rb_random_t *)DATA_PTR(*rb_vm_specific_ptr(rb_vmkey_default_rand)))
+
+static VALUE rand_init(struct MT *mt, VALUE vseed);
+static VALUE random_seed(void);
+
+static struct MT *
+default_mt(void)
+{
+    rb_random_t *r = &default_rand;
+    struct MT *mt = &r->mt;
+    if (!genrand_initialized(mt)) {
+	r->seed = rand_init(mt, random_seed());
+    }
+    return mt;
+}
 
 unsigned int
 rb_genrand_int32(void)
 {
-    return genrand_int32(&default_rand.mt);
+    struct MT *mt = default_mt();
+    return genrand_int32(mt);
 }
 
 double
 rb_genrand_real(void)
 {
-    return genrand_real(&default_rand.mt);
+    struct MT *mt = default_mt();
+    return genrand_real(mt);
 }
 
 #define BDIGITS(x) (RBIGNUM_DIGITS(x))
@@ -303,8 +313,6 @@ int_pair_to_real_inclusive(unsigned int a, unsigned int b)
 VALUE rb_cRandom;
 #define id_minus '-'
 #define id_plus  '+'
-
-static VALUE random_seed(void);
 
 /* :nodoc: */
 static void
@@ -759,6 +767,7 @@ make_mask(unsigned long x)
 static unsigned long
 limited_rand(struct MT *mt, unsigned long limit)
 {
+    /* mt must be initialized */
     int i;
     unsigned long val, mask;
 
@@ -780,6 +789,7 @@ limited_rand(struct MT *mt, unsigned long limit)
 static VALUE
 limited_big_rand(struct MT *mt, struct RBignum *limit)
 {
+    /* mt must be initialized */
     unsigned long mask, lim, rnd;
     struct RBignum *val;
     long i, len;
@@ -830,10 +840,7 @@ limited_big_rand(struct MT *mt, struct RBignum *limit)
 unsigned long
 rb_rand_internal(unsigned long i)
 {
-    struct MT *mt = &default_rand.mt;
-    if (!genrand_initialized(mt)) {
-	rand_init(mt, random_seed());
-    }
+    struct MT *mt = default_mt();
     return limited_rand(mt, i);
 }
 
@@ -904,6 +911,7 @@ range_values(VALUE vmax, VALUE *begp, int *exclp)
 static VALUE
 rand_int(struct MT *mt, VALUE vmax, int restrictive)
 {
+    /* mt must be initialized */
     long max;
     unsigned long r;
 
@@ -1109,11 +1117,8 @@ static VALUE
 rb_f_rand(int argc, VALUE *argv, VALUE obj)
 {
     VALUE vmax, r;
-    struct MT *mt = &default_rand.mt;
+    struct MT *mt = default_mt();
 
-    if (!genrand_initialized(mt)) {
-	rand_init(mt, random_seed());
-    }
     if (argc == 0) goto zero_arg;
     rb_scan_args(argc, argv, "01", &vmax);
     if (NIL_P(vmax)) goto zero_arg;
@@ -1126,20 +1131,26 @@ rb_f_rand(int argc, VALUE *argv, VALUE obj)
 }
 
 static st_index_t hashseed;
-static struct Random initial_rand;
 
-static struct Random *
-init_randomseed(struct Random *r)
+static VALUE
+init_randomseed(struct MT *mt, unsigned int initial[DEFAULT_SEED_CNT])
 {
-    fill_random_seed(r->initial);
-    init_by_array(&r->rnd.mt, r->initial, DEFAULT_SEED_CNT);
-    return r;
+    VALUE seed;
+    fill_random_seed(initial);
+    init_by_array(mt, initial, DEFAULT_SEED_CNT);
+    seed = make_seed_value(initial);
+    memset(initial, 0, DEFAULT_SEED_LEN);
+    return seed;
 }
 
 void
 Init_RandomSeed(void)
 {
-    struct MT *mt = &init_randomseed(&initial_rand)->rnd.mt;
+    VALUE rv = *rb_vm_specific_ptr(rb_vmkey_default_rand) = random_alloc(0);
+    rb_random_t *r = DATA_PTR(rv);
+    unsigned int initial[DEFAULT_SEED_CNT];
+    struct MT *mt = &r->mt;
+    VALUE seed = init_randomseed(mt, initial);
 
     hashseed = genrand_int32(mt);
 #if SIZEOF_ST_INDEX_T*CHAR_BIT > 4*8
@@ -1154,11 +1165,23 @@ Init_RandomSeed(void)
     hashseed <<= 32;
     hashseed |= genrand_int32(mt);
 #endif
+
+    r->seed = seed;
 }
 
 void
 InitVM_RandomSeed(void)
 {
+    VALUE *rp = rb_vm_specific_ptr(rb_vmkey_default_rand), rv = *rp;
+    unsigned int initial[DEFAULT_SEED_CNT];
+    rb_random_t *r;
+
+    if (rv) return;		/* main VM */
+    *rp = rv = random_alloc(0);
+    r = DATA_PTR(rv);
+    init_randomseed(&r->mt, initial);
+    r->seed = make_seed_value(initial);
+    memset(initial, 0, DEFAULT_SEED_LEN);
 }
 
 st_index_t
@@ -1168,24 +1191,13 @@ rb_hash_start(st_index_t h)
 }
 
 static void
-InitVM_RandomSeed2(void)
+Init_RandomSeed2(void)
 {
-    unsigned int *ini, initial[DEFAULT_SEED_CNT];
-    VALUE rv = random_alloc(0);
-    rb_random_t *r = DATA_PTR(rv);
+    VALUE seed = default_rand.seed;
 
-    *rb_vm_specific_ptr(rb_vmkey_default_rand) = rv;
-    if (initial_rand.rnd.seed) {
-	fill_random_seed(initial);
-	init_by_array(&r->mt, initial, DEFAULT_SEED_CNT);
-	ini = initial;
+    if (RB_TYPE_P(seed, T_BIGNUM)) {
+	RBASIC(seed)->klass = rb_cBignum;
     }
-    else {
-	*r = initial_rand.rnd;
-	initial_rand.rnd.seed = Qtrue;
-	ini = initial_rand.initial;
-    }
-    r->seed = make_seed_value(ini);
 }
 
 void
@@ -1204,7 +1216,7 @@ Init_Random(void)
 void
 InitVM_Random(void)
 {
-    InitVM_RandomSeed2();
+    Init_RandomSeed2();
     rb_define_global_function("srand", rb_f_srand, -1);
     rb_define_global_function("rand", rb_f_rand, -1);
 

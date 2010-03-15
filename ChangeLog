@@ -1,3 +1,198 @@
+Mon Mar 15 18:33:36 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* random.c (default_rand): removed initial buffer.
+
+	* random.c (Init_RandomSeed): initialize seed of default random.
+
+	* random.c (Init_RandomSeed2): turn the seed to Bignum object.
+
+Mon Mar 15 17:28:30 2010  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* io.c (rb_io_print): RDoc update.  a patch from Daniel Kelley
+	  in [ruby-core:28643].
+
+Mon Mar 15 14:06:07 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* random.c (next_state): no initialization here.
+
+	* random.c (default_mt): always return initialized MT.
+
+Mon Mar 15 11:49:48 2010  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* random.c (rb_reset_random_seed): set seed in this.
+	  [ruby-core:28655]
+
+Mon Mar 15 10:26:02 2010  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ext/nkf/nkf-utf8/nkf.c: import latest nkf. [master 9306cb0]
+	  this also fixes [ruby-dev:40607]
+
+Mon Mar 15 09:34:17 2010  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* lib/uri/common.rb (URI.encode_www_component):
+	  call str.to_s at first.
+
+Mon Mar 15 09:36:22 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* symbian/README.SYMBIAN: fixed broken patch and converted to
+	  unified diff.
+
+Mon Mar 15 07:51:05 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* file.c (Init_File): do not define File::ALT_SEPARATOR on cygwin.
+
+Mon Mar 15 07:41:00 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* file.c (realpath_rec): use same cache.
+
+	* file.c (realpath_internal): regulate separators in prefix.
+	  [ruby-core:28653]
+
+	* file.c (FILE_ALT_SEPARATOR): separated condition.
+
+Mon Mar 15 04:41:25 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* io.c (rb_io_each_codepoint): read directly when readconv is
+	  needed but internal encoding is not set.  [ruby-core:28650]
+
+Mon Mar 15 04:18:31 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* tool/file2lastrev.rb (VCS::{SVN,GIT}#get_revisions):
+	  use block argument 'path' to get the path given by super.
+
+Mon Mar 15 02:43:59 2010  Tanaka Akira  <akr@fsij.org>
+
+	* tool/transcode-tblgen.rb (Action#hash): defined.
+	  (Action#eql?): ditto.
+	  (Action#==): ditto.
+
+Mon Mar 15 01:52:46 2010  Tanaka Akira  <akr@fsij.org>
+
+	* tool/transcode-tblgen.rb: refactored.
+
+Mon Mar 15 01:18:31 2010  Alexander Zavorine  <alexandre.zavorine@nokia.com>
+
+	* symbian/setup (*.pkg): Ruby Core installation separated from standard extensions.
+
+	* symbian/configure.bat: ditto.
+
+	* symbian/README.SYMBIAN: ditto.
+
+	* symbian/setup (config.h): support for 2nd internal drive added.
+
+Mon Mar 15 00:11:23 2010  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* tool/file2lastrev.rb (VCS::GIT_SVN#get_revisions) :
+	  use block argument 'path' to get the path given by super.
+
+	* tool/file2lastrev.rb (VCS::GIT#get_revisions):
+	  use double quotes for Windows.
+	  patched by Vladimir Sizikov [ruby-core:28651]
+
+Sun Mar 14 22:38:31 2010  Tanaka Akira  <akr@fsij.org>
+
+	* tool/transcode-tblgen.rb: consider valid_encoding for max_input.
+
+Sun Mar 14 15:46:09 2010  Tanaka Akira  <akr@fsij.org>
+
+	* enc/trans/emoji.trans: fix nomap_table.
+
+Sun Mar 14 09:50:03 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* compile.c (insn_data_to_s_detail), iseq.c (insn_operand_intern):
+	  fixed format specifiers.
+
+Sun Mar 14 07:20:17 2010  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* file.c (EXPAND_PATH_BUFFER): make it back to usascii, to prevent
+	  infinite loop on some platform. [ruby-dev:40629]
+
+Sun Mar 14 02:40:38 2010  Tanaka Akira  <akr@fsij.org>
+
+	* tool/transcode-tblgen.rb: reject ambiguous mapping.
+
+	* enc/trans/single_byte.trans: remove ambiguous maping such as
+	  \xD6 -> U+05F2 and \xD6\xC7 -> U+FB1F in Windows-1255
+
+Sat Mar 13 23:48:27 2010  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* file.c (file_expand_path): should not just copy the encoding
+	  from fname.  [ruby-core:28635]
+
+	* file.c (EXPAND_PATH_BUFFER): set filesystem_encoding, not
+	  usascii for path buffer.
+
+Sat Mar 13 17:48:43 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* tool/file2lastrev.rb: refactord.  fixed changed revision of git.
+
+Sat Mar 13 15:44:20 2010  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* io.c (rb_io_print): should not print field separator at the end
+	  of arguments.  [ruby-talk:358633]
+
+Sat Mar 13 14:49:55 2010  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* enum.c (enum_join): remove Enumerable#join. [ruby-core:24786]
+
+	* array.c (ary_join_1): use #to_ary to detect recursive array.
+
+Sat Mar 13 12:26:13 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby/io.h (MakeOpenFile): finalize fptr to get rid of
+	  memory leak.
+
+Sat Mar 13 11:14:26 2010  Shugo Maeda  <shugo@ruby-lang.org>
+
+	* load.c (rb_get_expanded_load_path): expand paths if any item in $:
+	  is not a string.
+
+Sat Mar 13 10:16:32 2010  Shugo Maeda  <shugo@ruby-lang.org>
+
+	* load.c (rb_get_expanded_load_path): does not expand paths if all
+	  the items in $: are absolute paths.  [ruby-core:28113]
+
+Sat Mar 13 10:03:52 2010  Hidetoshi NAGAI  <nagai@ai.kyutech.ac.jp>
+
+	* ext/tk/extconf.rb: fix [Bug #2840] Tk doesn't built in mingw.
+
+Sat Mar 13 03:24:15 2010  Tanaka Akira  <akr@fsij.org>
+
+	* tool/transcode-tblgen.rb: show consumed time at last.
+
+Sat Mar 13 00:44:20 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* file.c (rb_file_s_basename): check encoding of suffix.
+
+Sat Mar 13 00:11:05 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ruby.c (ruby_init_loadpath_safe): mark initial load paths.
+
+	* gem_prelude.rb (push_all_highest_version_gems_on_load_path):
+	  search insertion position by initial load path mark.
+
+	* lib/rubygems.rb (Gem.load_path_insert_index): ditto.
+
+Fri Mar 12 21:34:00 2010  Kenta Murata  <mrkn@mrkn.jp>
+
+	* NEWS: emoji encodings.
+
+Fri Mar 12 17:14:12 2010  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* lib/uri/common.rb (URI.encode_www_form): new method to
+	  generate URL-encoded form data. [ruby-dev:39246]
+
+	* lib/uri/common.rb (URI.encode_www_component,
+	  URI.decode_www_component): new method for encode/decode
+	  a name/value of HTML form.
+
+Fri Mar 12 17:36:35 2010  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* lib/webrick/httpservlet/cgihandler.rb
+	  (WEBrick::HTTPServlet::CGIHandler#do_GET):
+	  set binary mode for tempfile.
+	  http://pc12.2ch.net/test/read.cgi/tech/1265467681/286
+
 Fri Mar 12 13:52:00 2010  Kenta Murata  <mrkn@mrkn.jp>
 
 	* tool/compile_prelude.rb: TMP_RUBY_PREFIX should replace

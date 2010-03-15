@@ -150,6 +150,16 @@ class TestIO < Test::Unit::TestCase
     r.close
   end
 
+  def test_each_codepoint
+    t = make_tempfile
+    bug2959 = '[ruby-core:28650]'
+    a = ""
+    File.open(t, 'rt') {|f|
+      f.each_codepoint {|c| a << c}
+    }
+    assert_equal("foo\nbar\nbaz\n", a, bug2959)
+  end
+
   def test_rubydev33072
     assert_raise(Errno::ENOENT, "[ruby-dev:33072]") do
       File.read("empty", nil, nil, {})
@@ -1384,6 +1394,23 @@ End
     t = make_tempfile
 
     assert_in_out_err(["-", t.path], "print while $<.gets", %w(foo bar baz), [])
+  end
+
+  def test_print_separators
+    $, = ':'
+    $\ = "\n"
+    r, w = IO.pipe
+    w.print('a')
+    w.print('a','b','c')
+    w.close
+    assert_equal("a\n", r.gets)
+    assert_equal("a:b:c\n", r.gets)
+    assert_nil r.gets
+    r.close
+    
+  ensure
+    $, = nil
+    $\ = nil
   end
 
   def test_putc

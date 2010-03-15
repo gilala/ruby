@@ -2894,9 +2894,14 @@ rb_io_each_codepoint(VALUE io)
 			 rb_enc_name(fptr->encs.enc));
 	    }
 	    n = MBCLEN_CHARFOUND_LEN(r);
-	    c = rb_enc_codepoint(fptr->cbuf+fptr->cbuf_off,
-				 fptr->cbuf+fptr->cbuf_off+fptr->cbuf_len,
-				 fptr->encs.enc);
+	    if (fptr->encs.enc) {
+		c = rb_enc_codepoint(fptr->cbuf+fptr->cbuf_off,
+				     fptr->cbuf+fptr->cbuf_off+fptr->cbuf_len,
+				     fptr->encs.enc);
+	    }
+	    else {
+		c = (unsigned char)fptr->cbuf[fptr->cbuf_off];
+	    }
 	    fptr->cbuf_off += n;
 	    fptr->cbuf_len -= n;
 	    rb_yield(UINT2NUM(c));
@@ -4495,7 +4500,7 @@ rb_sysopenat(VALUE fname, const struct openat_args *base, int oflags, mode_t per
 #if USE_OPENAT
     data.base = (base && base->fd != -1) ? base->fd : DEFAULT_BASE_FD;
 #else
-    if (base && !ruby_absolute_path_p(RSTRING_PTR(fname))) {
+    if (base && !rb_is_absolute_path(RSTRING_PTR(fname))) {
 	VALUE fullpath = Qnil;
 	if (base->fd != -1) {
 	    char *basecwd;
@@ -5964,7 +5969,9 @@ rb_f_printf(int argc, VALUE *argv)
  *     ios.print(obj, ...)     => nil
  *
  *  Writes the given object(s) to <em>ios</em>. The stream must be
- *  opened for writing. If the output record separator (<code>$\\</code>)
+ *  opened for writing. If the output field separator (<code>$,</code>)
+ *  is not <code>nil</code>, it will be inserted between each object.
+ *  If the output record separator (<code>$\\</code>)
  *  is not <code>nil</code>, it will be appended to the output. If no
  *  arguments are given, prints <code>$_</code>. Objects that aren't
  *  strings will be converted by calling their <code>to_s</code> method.
@@ -5991,10 +5998,10 @@ rb_io_print(int argc, VALUE *argv, VALUE out)
 	argv = &line;
     }
     for (i=0; i<argc; i++) {
-	rb_io_write(out, argv[i]);
-	if (!NIL_P(rb_output_fs)) {
+	if (!NIL_P(rb_output_fs) && i>0) {
 	    rb_io_write(out, rb_output_fs);
 	}
+	rb_io_write(out, argv[i]);
     }
     if (argc > 0 && !NIL_P(rb_output_rs)) {
 	rb_io_write(out, rb_output_rs);

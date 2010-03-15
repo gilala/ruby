@@ -101,7 +101,7 @@ typedef struct rb_io_t {
 #define MakeOpenFile(obj, fp) do {\
     if (RFILE(obj)->fptr) {\
 	rb_io_close(obj);\
-	free(RFILE(obj)->fptr);\
+	rb_io_fptr_finalize(RFILE(obj)->fptr);\
 	RFILE(obj)->fptr = 0;\
     }\
     fp = 0;\
@@ -165,8 +165,6 @@ NORETURN(void rb_eof_error(void));
 void rb_io_read_check(rb_io_t*);
 int rb_io_read_pending(rb_io_t*);
 DEPRECATED(void rb_read_check(FILE*));
-
-int ruby_absolute_path_p(const char*);
 
 #if defined(__cplusplus)
 #if 0

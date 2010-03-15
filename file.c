@@ -2539,7 +2539,11 @@ rb_file_s_umask(int argc, VALUE *argv)
 #if defined __CYGWIN__ || defined DOSISH
 #define DOSISH_UNC
 #define DOSISH_DRIVE_LETTER
-#define isdirsep(x) ((x) == '/' || (x) == '\\')
+#define FILE_ALT_SEPARATOR '\\'
+#endif
+#ifdef FILE_ALT_SEPARATOR
+#define isdirsep(x) ((x) == '/' || (x) == FILE_ALT_SEPARATOR)
+static const char file_alt_separator[] = {FILE_ALT_SEPARATOR, '\0'};
 #else
 #define isdirsep(x) ((x) == '/')
 #endif
@@ -2735,8 +2739,6 @@ ntfs_tail(const char *path)
     (void)(extenc || (extenc = rb_default_external_encoding())),\
     rb_enc_associate(result, extenc))
 
-#define is_absolute_path(path) ruby_absolute_path_p(path)
-
 VALUE
 rb_home_dir(const char *user, VALUE result)
 {
@@ -2850,7 +2852,7 @@ file_expand_path(VALUE fname, VALUE dname, int abs_mode, VALUE result)
 	}
     }
 #endif
-    else if (!is_absolute_path(s)) {
+    else if (!rb_is_absolute_path(s)) {
 	if (!NIL_P(dname)) {
 	    file_expand_path(dname, Qnil, abs_mode, result);
 	    BUFINIT();
@@ -2881,7 +2883,7 @@ file_expand_path(VALUE fname, VALUE dname, int abs_mode, VALUE result)
 	p = buf + (s - b);
 	BUFCHECK(bdiff >= buflen);
 	memset(buf, '/', p - buf);
-	rb_enc_copy(result, fname);
+	rb_enc_associate(result, rb_enc_check(result, fname));
     }
     if (p > buf && p[-1] == '/')
 	--p;
@@ -3133,6 +3135,8 @@ rb_file_s_absolute_path(int argc, VALUE *argv)
 static void
 realpath_rec(long *prefixlenp, VALUE *resolvedp, char *unresolved, VALUE loopcheck, int strict, int last)
 {
+    ID resolving;
+    CONST_ID(resolving, "resolving");
     while (*unresolved) {
         char *testname = unresolved;
         char *unresolved_firstsep = rb_path_next(unresolved);
@@ -3158,7 +3162,7 @@ realpath_rec(long *prefixlenp, VALUE *resolvedp, char *unresolved, VALUE loopche
             rb_str_cat(testpath, testname, testnamelen);
             checkval = rb_hash_aref(loopcheck, testpath);
             if (!NIL_P(checkval)) {
-                if (checkval == ID2SYM(rb_intern("resolving"))) {
+                if (checkval == ID2SYM(resolving)) {
                     errno = ELOOP;
                     rb_sys_fail(RSTRING_PTR(testpath));
                 }
@@ -3186,7 +3190,7 @@ realpath_rec(long *prefixlenp, VALUE *resolvedp, char *unresolved, VALUE loopche
                     volatile VALUE link;
                     char *link_prefix, *link_names;
                     long link_prefixlen;
-                    rb_hash_aset(loopcheck, testpath, ID2SYM(rb_intern("resolving")));
+                    rb_hash_aset(loopcheck, testpath, ID2SYM(resolving));
                     link = rb_file_s_readlink(rb_cFile, testpath);
                     link_prefix = RSTRING_PTR(link);
                     link_names = skiproot(link_prefix);
@@ -3221,9 +3225,9 @@ realpath_internal(VALUE basedir, VALUE path, int strict)
     volatile VALUE unresolved_path;
     VALUE loopcheck;
     volatile VALUE curdir = Qnil;
-    
+
     char *path_names = NULL, *basedir_names = NULL, *curdir_names = NULL;
-    char *ptr;
+    char *ptr, *prefixptr = NULL;
 
     rb_secure(2);
 
@@ -3257,11 +3261,21 @@ realpath_internal(VALUE basedir, VALUE path, int strict)
     resolved = rb_str_new(ptr, curdir_names - ptr);
 
   root_found:
-    ptr = chompdirsep(RSTRING_PTR(resolved));
-    if (*ptr) {
-        rb_str_set_len(resolved, ptr - RSTRING_PTR(resolved) + 1);
-    }
+    prefixptr = RSTRING_PTR(resolved);
     prefixlen = RSTRING_LEN(resolved);
+    ptr = chompdirsep(prefixptr);
+    if (*ptr) {
+        prefixlen = ++ptr - prefixptr;
+        rb_str_set_len(resolved, prefixlen);
+    }
+#ifdef FILE_ALT_SEPARATOR
+    while (prefixptr < ptr) {
+	if (*prefixptr == FILE_ALT_SEPARATOR) {
+	    *prefixptr = '/';
+	}
+	prefixptr = CharNext(prefixptr);
+    }
+#endif
 
     loopcheck = rb_hash_new();
     if (curdir_names)
@@ -3372,9 +3386,15 @@ rb_file_s_basename(int argc, VALUE *argv)
     long f, n;
 
     if (rb_scan_args(argc, argv, "11", &fname, &fext) == 2) {
+	rb_encoding *enc;
 	StringValue(fext);
+	if (!rb_enc_asciicompat(enc = rb_enc_get(fext))) {
+	    rb_raise(rb_eEncCompatError, "ascii incompatible character encodings: %s",
+		     rb_enc_name(enc));
+	}
     }
     FilePathStringValue(fname);
+    if (!NIL_P(fext)) rb_enc_check(fname, fext);
     if (RSTRING_LEN(fname) == 0 || !*(name = RSTRING_PTR(fname)))
 	return rb_str_new_shared(fname);
     name = skipprefix(name);
@@ -4745,7 +4765,7 @@ rb_file_const(const char *name, VALUE value)
 }
 
 int
-ruby_absolute_path_p(const char *path)
+rb_is_absolute_path(const char *path)
 {
 #ifdef DOSISH_DRIVE_LETTER
     if (has_drive_letter(path) && isdirsep(path[2])) return 1;
@@ -4775,7 +4795,7 @@ path_check_0(VALUE path, int execpath)
     const char *p0 = StringValueCStr(path);
     char *p = 0, *s;
 
-    if (!is_absolute_path(p0)) {
+    if (!rb_is_absolute_path(p0)) {
 	char *buf = my_getcwd();
 	VALUE newpath;
 
@@ -4912,7 +4932,7 @@ rb_find_file_ext_safe(VALUE *filep, const char *const *ext, int safe_level)
 	expanded = 1;
     }
 
-    if (expanded || is_absolute_path(f) || is_explicit_relative(f)) {
+    if (expanded || rb_is_absolute_path(f) || is_explicit_relative(f)) {
 	if (safe_level >= 1 && !fpath_check(fname)) {
 	    rb_raise(rb_eSecurityError, "loading from unsafe path %s", f);
 	}
@@ -4983,7 +5003,7 @@ rb_find_file_safe(VALUE path, int safe_level)
 	expanded = 1;
     }
 
-    if (expanded || is_absolute_path(f) || is_explicit_relative(f)) {
+    if (expanded || rb_is_absolute_path(f) || is_explicit_relative(f)) {
 	if (safe_level >= 1 && !fpath_check(path)) {
 	    rb_raise(rb_eSecurityError, "loading from unsafe path %s", f);
 	}
@@ -5150,7 +5170,7 @@ InitVM_File(void)
     rb_define_singleton_method(rb_cFile, "join",   rb_file_s_join, -2);
 
 #ifdef DOSISH
-    rb_define_const(rb_cFile, "ALT_SEPARATOR", rb_obj_freeze(rb_usascii_str_new2("\\")));
+    rb_define_const(rb_cFile, "ALT_SEPARATOR", rb_obj_freeze(rb_usascii_str_new2(file_alt_separator)));
 #else
     rb_define_const(rb_cFile, "ALT_SEPARATOR", Qnil);
 #endif
