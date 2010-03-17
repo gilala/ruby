@@ -9616,6 +9616,10 @@ rb_intern3(const char *name, long len, rb_encoding *enc)
     str = (VALUE)&fake_str;
     rb_enc_associate(str, enc);
 
+    if (rb_enc_str_coderange(str) == ENC_CODERANGE_BROKEN) {
+    	rb_raise(rb_eEncodingError, "invalid encoding symbol");
+    }
+
     if (st_lookup(global_symbols.sym_id, str, &data))
 	return (ID)data;
 

@@ -95,6 +95,7 @@ VALUE rb_enc_str_buf_cat(VALUE str, const char *ptr, long len, rb_encoding *enc)
 VALUE rb_external_str_new_with_enc(const char *ptr, long len, rb_encoding *);
 VALUE rb_str_export_to_enc(VALUE, rb_encoding *);
 VALUE rb_str_conv_enc(VALUE str, rb_encoding *from, rb_encoding *to);
+VALUE rb_str_conv_enc_opts(VALUE str, rb_encoding *from, rb_encoding *to, int ecflags, VALUE ecopts);
 
 /* index -> rb_encoding */
 rb_encoding* rb_enc_from_index(int idx);
@@ -197,7 +198,7 @@ long rb_memsearch(const void*,long,const void*,long,rb_encoding*);
 #define ENC_DUMMY_FLAG (1<<24)
 #define ENC_INDEX_MASK (~(~0U<<24))
 
-#define ENC_TO_ENCINDEX(enc)   ((enc)->ruby_encoding_index & ENC_INDEX_MASK)
+#define ENC_TO_ENCINDEX(enc) (int)((enc)->ruby_encoding_index & ENC_INDEX_MASK)
 
 #define ENC_DUMMY_P(enc) ((enc)->ruby_encoding_index & ENC_DUMMY_FLAG)
 #define ENC_SET_DUMMY(enc) ((enc)->ruby_encoding_index |= ENC_DUMMY_FLAG)

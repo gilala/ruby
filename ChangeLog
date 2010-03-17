@@ -1,3 +1,132 @@
+Thu Mar 18 04:40:56 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* parse.y (rb_intern3): get rid of type-punning cast.
+
+Thu Mar 18 02:29:42 2010  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* compile.c (iseq_build_body): add mark to jump table hash of case.
+
+Thu Mar 18 00:58:27 2010  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* util.c (ruby_strtod): Add support for Hexadecimal
+	  floating-point expression [ruby-dev:40650] #2969
+
+Thu Mar 18 00:00:58 2010  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* lib/uri/common.rb (URI#{en,de}code_www_form_component):
+	  renamed from URI#{en,de}code_www_component. [ruby-dev:40672]
+
+	* lib/uri/common.rb (URI#encode_www_form_component): %-encoded
+	  element should have always two hex.
+
+	* lib/uri/common.rb (URI#encode_www_form_component):
+	  better treatment for ASCII incompatible encodings and
+	  encodings whose lead byte may use 7bit.
+
+	* lib/uri/common.rb (URI#decode_www_form_component): add %20.
+
+	* lib/uri/common.rb (URI#decode_www_form_component): add
+	  result's encoding as 2nd argument.
+
+	* lib/uri/common.rb (URI#decode_www_form): added.
+
+Wed Mar 17 16:25:53 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* hash.c (rb_hash_aset): allow recursive key.  [ruby-core:24648]
+
+Wed Mar 17 06:39:59 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ruby.h (rb_warning, rb_sys_warning): fixed typo in rdoc.
+	  [ruby-core:28696]
+
+Wed Mar 17 02:29:46 2010  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* compile.c, iseq.c, ruby.c, vm.c, vm_core.h, vm_eval.c: add absolute
+	  path field into rb_iseq_t.  The field contains a string representing
+	  a path to corresponding source file. or nil when the iseq is created
+	  from -e, stdin, eval, etc.  This field is used for require_relative.
+	  [ruby-dev:40004]
+
+	* load.c (rb_f_require_relative): add C implementation of
+	  require_relative.
+
+	* prelude.rb (require_relative): get rid of Ruby implementation of
+	  require_relative.
+
+Wed Mar 17 01:24:01 2010  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* parse.y (rb_intern3): prohibit Symbol with an invalid encoding.
+	  [ruby-core:24621]
+
+	* test/ruby/test_m17n_comb.rb: modify a test for above.
+
+Tue Mar 16 22:51:11 2010  Tanaka Akira  <akr@fsij.org>
+
+	* tool/transcode-tblgen.rb: specialize for singleton mappings.
+
+Tue Mar 16 20:13:00 2010  Kenta Murata  <mrkn@mrkn.jp>
+
+	* enc/trans/emoji.trans: added codepoints leading 0xf4 into
+	  nomap_table.
+
+Tue Mar 16 17:33:30 2010  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ext/bigdecimal/bigdecimal.c (VpCtoV): keep e's sign.
+	  When e doesn't over flow e * BASE_FIG but overflow e * 10,
+	  e will overflow.
+
+Tue Mar 16 17:18:44 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby/encoding.h (rb_str_conv_enc_opts): missing prototype.
+
+Tue Mar 16 15:20:13 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/tmpdir: split from lib/tmpdir.rb.
+
+	* win32/win32.c (rb_w32_system_tmpdir): extracted from init_env.
+
+	* win32/win32.c (rb_w32_getcwd): removed duplicated code.
+
+Tue Mar 16 14:06:13 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby/encoding.h (ENC_TO_ENCINDEX): suppress warnings.
+
+Tue Mar 16 14:03:24 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in (RSHIFT): parenthesize the argument of cast instead
+	  of the result.
+
+Tue Mar 16 11:23:42 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* file.c (file_expand_path): ignore dname if it has different
+	  drive letter or UNC.
+
+Tue Mar 16 07:16:56 2010  Tanaka Akira  <akr@fsij.org>
+
+	* tool/transcode-tblgen.rb: redundant loop removed.
+
+Tue Mar 16 07:01:43 2010  Tanaka Akira  <akr@fsij.org>
+
+	* tool/transcode-tblgen.rb: refactored to use tree as memo key.
+
+Tue Mar 16 04:05:13 2010  Tanaka Akira  <akr@fsij.org>
+
+	* tool/transcode-tblgen.rb: more info in generating macro names.
+
+Mon Mar 15 21:58:03 2010  Tanaka Akira  <akr@fsij.org>
+
+	* tool/transcode-tblgen.rb: ActionMap#each_firstbyte inlined.
+
+Mon Mar 15 21:22:49 2010  Tanaka Akira  <akr@fsij.org>
+
+	* tool/transcode-tblgen.rb (transcode_tblgen): add valid_encoding
+	  optional argument.
+
+	* enc/trans/single_byte.trans use valid_encoding argument for
+	  transcode_tblgen.
+
+	* enc/trans/chinese.trans: ditto.
+
 Mon Mar 15 18:33:36 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* random.c (default_rand): removed initial buffer.
@@ -111,7 +240,7 @@ Sun Mar 14 02:40:38 2010  Tanaka Akira  <akr@fsij.org>
 
 	* tool/transcode-tblgen.rb: reject ambiguous mapping.
 
-	* enc/trans/single_byte.trans: remove ambiguous maping such as
+	* enc/trans/single_byte.trans: remove ambiguous mapping such as
 	  \xD6 -> U+05F2 and \xD6\xC7 -> U+FB1F in Windows-1255
 
 Sat Mar 13 23:48:27 2010  Yukihiro Matsumoto  <matz@ruby-lang.org>
@@ -124,7 +253,7 @@ Sat Mar 13 23:48:27 2010  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 Sat Mar 13 17:48:43 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
-	* tool/file2lastrev.rb: refactord.  fixed changed revision of git.
+	* tool/file2lastrev.rb: refactored.  fixed changed revision of git.
 
 Sat Mar 13 15:44:20 2010  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
@@ -465,7 +594,7 @@ Wed Mar  3 14:28:23 2010  Yukihiro Matsumoto  <matz@ruby-lang.org>
 
 Wed Mar  3 06:19:25 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
-	* win32/win32.c (signbig): defined.
+	* win32/win32.c (signbit): defined.
 
 	* win32/Makefile.sub, symbian/setup (config.h): pack.c requires
 	  SIZEOF_INT*_T now.

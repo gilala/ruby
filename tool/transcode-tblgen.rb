@@ -81,18 +81,31 @@ class Action
   alias == eql?
 end
 
-class ActionMap
-  def self.parse_to_rects(hash)
-    h = {}
-    hash.each {|pat, action|
-      pat = pat.to_s
-      h[pat] = action
-    }
-    hash = h
+class Branch
+  def initialize(byte_min, byte_max, child_tree)
+    @byte_min = byte_min
+    @byte_max = byte_max
+    @child_tree = child_tree
+    @hash = byte_min.hash ^ byte_max.hash ^ child_tree.hash
+  end
+  attr_reader :byte_min, :byte_max, :child_tree, :hash
 
+  def eql?(other)
+    self.class == other.class &&
+    @hash == other.hash &&
+    @byte_min == other.byte_min &&
+    @byte_max == other.byte_max &&
+    @child_tree == other.child_tree
+  end
+  alias == eql?
+end
+
+class ActionMap
+  def self.parse_to_rects(mapping)
     rects = []
     n = 0
-    hash.each {|pat, action|
+    mapping.each {|pat, action|
+      pat = pat.to_s
       if /\A\s*\(empset\)\s*\z/ =~ pat
         next
       elsif /\A\s*\(empstr\)\s*\z/ =~ pat
@@ -165,18 +178,18 @@ class ActionMap
   end
 
   def self.build_tree(rects)
-    expand("", rects) {|actions|
+    expand("", rects) {|prefix, actions|
       unambiguous_action(actions)
     }
   end
 
-  def self.parse(hash)
-    rects = parse_to_rects(hash)
+  def self.parse(mapping)
+    rects = parse_to_rects(mapping)
     tree = build_tree(rects)
-    self.new("", tree)
+    self.new(tree)
   end
 
-  def self.merge(*rects_list)
+  def self.merge_rects(*rects_list)
     if rects_list.length < 2
       raise ArgumentError, "not enough arguments"
     end
@@ -186,98 +199,121 @@ class ActionMap
       all_rects.concat rects.map {|min, max, action| [min, max, [i, action]] }
     }
 
-    tree = expand("", all_rects) {|actions|
+    tree = expand("", all_rects) {|prefix, actions|
       args = Array.new(rects_list.length) { [] }
       actions.each {|i, action|
         args[i] << action
       }
-      yield(args)
+      yield(prefix, *args)
     }
 
-    self.new("", tree)
+    self.new(tree)
+  end
+
+  def self.merge(*mappings, &block)
+    merge_rects(*mappings.map {|m| parse_to_rects(m) }, &block)
   end
 
   def self.expand(prefix, rects, &block)
-    return [] if rects.empty?
-    has_empty = false
-    has_nonempty = false
-    rects.each {|min, max, action|
-      if min.empty?
-        has_empty = true
+    #numsing = numreg = 0
+    #rects.each {|min, max, action| if min == max then numsing += 1 else numreg += 1 end }
+    #puts "#{numsing} singleton mappings and #{numreg} region mappings."
+    singleton_rects = []
+    region_rects = []
+    rects.each {|rect|
+      min, max, action = rect
+      if min == max
+        singleton_rects << rect
       else
-        has_nonempty = true
+        region_rects << rect
       end
     }
-    if has_empty && has_nonempty
-      raise ArgumentError, "ambiguous pattern: #{prefix}"
-    end
-    if has_empty
-      actions = rects.map {|min, max, action| action }.uniq
-      act = block.call(actions)
+    expand_rec(prefix, singleton_rects, region_rects, &block)
+  end
+
+  def self.expand_rec(prefix, singleton_rects, region_rects, &block)
+    some_mapping = singleton_rects[0] || region_rects[0]
+    return [] if !some_mapping
+    if some_mapping[0].empty?
+      h = {}
+      (singleton_rects + region_rects).each {|min, max, action|
+        raise ArgumentError, "ambiguous pattern: #{prefix}" if !min.empty?
+        h[action] = true
+      }
+      actions = h.keys
+      act = block.call(prefix, actions)
       tree = Action.new(act)
     else
       tree = []
-      each_firstbyte_range(prefix, rects) {|byte_min, byte_max, rects2|
-        prefix2 = prefix
+      each_firstbyte_range(prefix, singleton_rects, region_rects) {|byte_min, byte_max, s_rects2, r_rects2|
         if byte_min == byte_max
-          prefix2 += "%02X" % byte_min
+          prefix2 = prefix + "%02X" % byte_min
         else
-          prefix2 += "{%02X-%02X}" % [byte_min, byte_max]
+          prefix2 = prefix + "{%02X-%02X}" % [byte_min, byte_max]
         end
-        child_tree = expand(prefix2, rects2, &block)
-        tree << [byte_min, byte_max, child_tree]
+        child_tree = expand_rec(prefix2, s_rects2, r_rects2, &block)
+        tree << Branch.new(byte_min, byte_max, child_tree)
       }
     end
     return tree
   end
 
-  def self.each_firstbyte_range(prefix, rects)
-    a = []
+  def self.each_firstbyte_range(prefix, singleton_rects, region_rects)
     index_from = {}
-    rects.each {|min, max, action|
-      raise ArgumentError, "emptyable pattern" if min.empty?
+
+    singleton_ary = []
+    singleton_rects.each {|seq, _, action|
+      raise ArgumentError, "ambiguous pattern: #{prefix}" if seq.empty?
+      seq_firstbyte = seq[0,2].to_i(16)
+      seq_rest = seq[2..-1]
+      singleton_ary << [seq_firstbyte, [seq_rest, seq_rest, action]]
+      index_from[seq_firstbyte] = true
+      index_from[seq_firstbyte+1] = true
+    }
+
+    region_ary = []
+    region_rects.each {|min, max, action|
+      raise ArgumentError, "ambiguous pattern: #{prefix}" if min.empty?
       min_firstbyte = min[0,2].to_i(16)
       min_rest = min[2..-1]
       max_firstbyte = max[0,2].to_i(16)
       max_rest = max[2..-1]
-      a << [min_firstbyte, max_firstbyte, [min_rest, max_rest, action]]
+      region_ary << [min_firstbyte, max_firstbyte, [min_rest, max_rest, action]]
       index_from[min_firstbyte] = true
       index_from[max_firstbyte+1] = true
     }
-    byte_from = {}
+
+    byte_from = Array.new(index_from.size)
     index_from.keys.sort.each_with_index {|byte, i|
       index_from[byte] = i
       byte_from[i] = byte
     }
-    rects_hash = {}
-    a.each {|min_firstbyte, max_firstbyte, rest_elt|
+
+    singleton_rects_hash = {}
+    singleton_ary.each {|seq_firstbyte, rest_elt|
+      i = index_from[seq_firstbyte]
+      (singleton_rects_hash[i] ||= []) << rest_elt
+    }
+
+    region_rects_hash = {}
+    region_ary.each {|min_firstbyte, max_firstbyte, rest_elt|
       index_from[min_firstbyte].upto(index_from[max_firstbyte+1]-1) {|i|
-        rects_hash[i] ||= []
-        rects_hash[i] << rest_elt
+        (region_rects_hash[i] ||= []) << rest_elt
       }
     }
+
     0.upto(index_from.size-1) {|i|
-      rects2 = rects_hash[i]
-      yield byte_from[i], byte_from[i+1]-1, rects2 if rects2
+      s_rects = singleton_rects_hash[i]
+      r_rects = region_rects_hash[i]
+      if s_rects || r_rects
+        yield byte_from[i], byte_from[i+1]-1, (s_rects || []), (r_rects || [])
+      end
     }
   end
 
-  def initialize(prefix, tree)
-    @prefix = prefix # just for debug
+  def initialize(tree)
     @tree = tree
   end
-
-  def hash
-    return @hash if defined? @hash
-    @hash = @tree.hash
-  end
-
-  def eql?(other)
-    self.class == other.class &&
-    @tree == other.instance_eval { @tree }
-  end
-
-  alias == eql?
 
   def inspect
     "\#<#{self.class}:" + 
@@ -290,8 +326,8 @@ class ActionMap
     when Action
       0
     else
-      tree.map {|byte_min, byte_max, child_tree|
-        max_input_length_rec(child_tree)
+      tree.map {|branch|
+        max_input_length_rec(branch.child_tree)
       }.max + 1
     end
   end
@@ -306,16 +342,6 @@ class ActionMap
     else
       nil
     end
-  end
-
-  def each_firstbyte
-    @tree.each {|byte_min, byte_max, child_tree|
-      byte_min.upto(byte_max) {|byte|
-        prefix = @prefix + ("%02X" % byte)
-        am = ActionMap.new(prefix, child_tree)
-        yield byte, am
-      }
-    }
   end
 
   OffsetsMemo = {}
@@ -422,7 +448,9 @@ class ActionMap
     code
   end
 
-  def generate_lookup_node(bytes_code, words_code, name, table)
+  def generate_lookup_node(name, table)
+    bytes_code = @bytes_code
+    words_code = @words_code
     offsets = []
     infos = []
     infomap = {}
@@ -480,24 +508,29 @@ End
   PostMemo = {}
   NextName = "a"
 
-  def generate_node(bytes_code, words_code, name_hint=nil)
-    if n = PreMemo[self]
+  def generate_node(name_hint=nil)
+    if n = PreMemo[@tree]
       return n
     end
 
     table = Array.new(0x100, :invalid)
-    each_firstbyte {|byte, rest|
+    @tree.each {|branch|
+      byte_min, byte_max, child_tree = branch.byte_min, branch.byte_max, branch.child_tree
+      rest = ActionMap.new(child_tree)
       if a = rest.empty_action
-        table[byte] = a
+        table.fill(a, byte_min..byte_max)
       else
         name_hint2 = nil
-        name_hint2 = "#{name_hint}_#{'%02X' % byte}" if name_hint
-        table[byte] = "/*BYTE_LOOKUP*/" + rest.gennode(bytes_code, words_code, name_hint2)
+        if name_hint
+          name_hint2 = "#{name_hint}_#{byte_min == byte_max ? '%02X' % byte_min : '%02Xto%02X' % [byte_min, byte_max]}"
+        end
+        v = "/*BYTE_LOOKUP*/" + rest.gennode(@bytes_code, @words_code, name_hint2)
+        table.fill(v, byte_min..byte_max)
       end
     }
 
     if n = PostMemo[table]
-      return PreMemo[self] = n
+      return PreMemo[@tree] = n
     end
 
     if !name_hint
@@ -505,16 +538,16 @@ End
       NextName.succ!
     end
 
-    PreMemo[self] = PostMemo[table] = name_hint
+    PreMemo[@tree] = PostMemo[table] = name_hint
 
-    generate_lookup_node(bytes_code, words_code, name_hint, table)
+    generate_lookup_node(name_hint, table)
     name_hint
   end
 
   def gennode(bytes_code, words_code, name_hint=nil)
     @bytes_code = bytes_code
     @words_code = words_code
-    name = generate_node(bytes_code, words_code, name_hint)
+    name = generate_node(name_hint)
     @bytes_code = nil
     @words_code = nil
     return name
@@ -649,18 +682,20 @@ def encode_utf8(map)
   r
 end
 
-def transcode_compile_tree(name, from, map)
+def transcode_compile_tree(name, from, map, valid_encoding=nil)
   map = encode_utf8(map)
   h = {}
   map.each {|k, v|
     h[k] = v unless h[k] # use first mapping
   }
-  if valid_encoding = ValidEncoding[from]
-    rects = ActionMap.parse_to_rects(h)
-    undef_rects = ActionMap.parse_to_rects(valid_encoding => :undef)
-    am = ActionMap.merge(rects, undef_rects) {|a1, a2|
-      a1 = a1.empty? ? nil : ActionMap.unambiguous_action(a1)
-      a2 = a2.empty? ? nil : ActionMap.unambiguous_action(a2)
+  valid_encoding = ValidEncoding[from] if valid_encoding == nil
+  if valid_encoding
+    am = ActionMap.merge(h, {valid_encoding => :undef}) {|prefix, as1, as2|
+      a1 = as1.empty? ? nil : ActionMap.unambiguous_action(as1)
+      a2 = as2.empty? ? nil : ActionMap.unambiguous_action(as2)
+      if !a2
+        raise "invalid mapping: #{prefix}"
+      end
       a1 || a2
     }
   else
@@ -675,7 +710,7 @@ end
 TRANSCODERS = []
 TRANSCODE_GENERATED_TRANSCODER_CODE = ''
 
-def transcode_tbl_only(from, to, map)
+def transcode_tbl_only(from, to, map, valid_encoding=nil)
   if VERBOSE_MODE
     if from.empty? || to.empty?
       STDERR.puts "converter for #{from.empty? ? to : from}"
@@ -692,12 +727,12 @@ def transcode_tbl_only(from, to, map)
   else
     tree_name = "from_#{id_from}_to_#{id_to}"
   end
-  real_tree_name, max_input = transcode_compile_tree(tree_name, from, map)
+  real_tree_name, max_input = transcode_compile_tree(tree_name, from, map, valid_encoding)
   return map, tree_name, real_tree_name, max_input
 end
 
-def transcode_tblgen(from, to, map)
-  map, tree_name, real_tree_name, max_input = transcode_tbl_only(from, to, map)
+def transcode_tblgen(from, to, map, valid_encoding=nil)
+  map, tree_name, real_tree_name, max_input = transcode_tbl_only(from, to, map, valid_encoding)
   transcoder_name = "rb_#{tree_name}"
   TRANSCODERS << transcoder_name
   input_unit_length = UnitLength[from]
