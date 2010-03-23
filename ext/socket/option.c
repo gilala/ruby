@@ -148,7 +148,7 @@ sockopt_data(VALUE self)
  *
  * Creates a new Socket::Option object which contains an int as data.
  *
- * The size and endian is dependent on the host. 
+ * The size and endian is dependent on the platform. 
  *
  *   p Socket::Option.int(:INET, :SOCKET, :KEEPALIVE, 1)
  *   #=> #<Socket::Option: INET SOCKET KEEPALIVE 1>
@@ -169,7 +169,7 @@ sockopt_s_int(VALUE klass, VALUE vfamily, VALUE vlevel, VALUE voptname, VALUE vi
  *
  * Returns the data in _sockopt_ as an int.
  *
- * The size and endian is dependent on the host. 
+ * The size and endian is dependent on the platform. 
  *
  *   sockopt = Socket::Option.int(:INET, :SOCKET, :KEEPALIVE, 1)
  *   p sockopt.int => 1
@@ -658,12 +658,16 @@ sockopt_unpack(VALUE self, VALUE template)
     return rb_funcall(sockopt_data(self), rb_intern("unpack"), 1, template);
 }
 
+/*
+ * Document-class: ::Socket::Option
+ *
+ * Socket::Option represents a socket option used by getsockopt and setsockopt
+ * system call.
+ * It contains socket family, protocol level, option name and option value.
+ */
 void
-Init_sockopt(void)
+rsock_init_sockopt(void)
 {
-    /* for rdoc */
-    /* rb_cSocket = rb_define_class("Socket", rb_cBasicSocket); */
-
     rb_cSockOpt = rb_define_class_under(rb_cSocket, "Option", rb_cObject);
     rb_define_method(rb_cSockOpt, "initialize", sockopt_initialize, 4);
     rb_define_method(rb_cSockOpt, "family", sockopt_family_m, 0);

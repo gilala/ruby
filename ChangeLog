@@ -1,6 +1,183 @@
+Tue Mar 23 01:13:59 2010  Tanaka Akira  <akr@fsij.org>
+
+	* ext/socket: use rsock_ prefix for internal initialization functions.
+
+Mon Mar 22 20:32:22 2010  wanabe  <s.wanabe@gmail.com>
+
+	* proc.c (rb_method_location): return attr's location if it is setup.
+	  [Feature #2084]
+
+	* NEWS: follow above.
+
+	* vm_method.c (rb_add_method): save attr's location.
+
+	* gc.c (mark_method_entry): mark attr's location.
+
+	* method.h (rb_method_definition_t): add member to save attr's location.
+
+	* vm_eval.c (vm_call0): follow above.
+
+	* vm_insnhelper.c (vm_call_method): ditto.
+
+	* vm_method.c (rb_method_definition_eq): ditto.
+
+Mon Mar 22 19:31:06 2010  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* lib/date.rb (Date#>>): fixed.  [ruby-core:28011]
+
+Mon Mar 22 18:01:13 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in (RMDIRS): use rmdir -p if possible.
+
+	* Makefile.in ({dist,real}clean-ext): fix for removing ext
+	  directories.
+
+Mon Mar 22 09:06:10 2010  Tanaka Akira  <akr@fsij.org>
+
+	* ext/socket/.document: extracted from ext/.document.
+
+Mon Mar 22 00:50:33 2010  Tanaka Akira  <akr@fsij.org>
+
+	* ext/socket/rubysocket.h (rsock_revlookup_flag): declared.
+
+Mon Mar 22 00:01:24 2010  Alexander Zavorine  <alexandre.zavorine@nokia.com>
+
+	* symbian/setup (config.h): RUBY_EXEC_PREFIX defined.
+
+Sun Mar 21 00:46:29 2010  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* lib/uri/common.rb (URI.encode_www_form_component):
+	  convert strings of HTML5 ASCII incompatible encoding
+	  to UTF-8.
+
+	* lib/uri/common.rb (URI.encode_www_form_component):
+	  "\x83\x41" of Shift_JIS should be encoded as "%83A".
+	  This follows real implementations.
+
+	* lib/uri/common.rb (URI.decode_www_form_component):
+	  use given encoding for force_encoding. [ruby-dev:40721]
+
+Sun Mar 21 21:09:17 2010  Tanaka Akira  <akr@fsij.org>
+
+	* lib/resolv-replace.rb: specify super class for rdoc.
+
+	* lib/ipaddr.rb: ditto.
+
+Sun Mar 21 19:52:27 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* io.c (rb_io_initialize): add autoclose argument to control close
+	  at finalization.  [ruby-core:26222]
+
+	* io.c (rb_io_autoclose_p, rb_io_set_autoclose): new methods.
+
+Sun Mar 21 19:50:04 2010  Tanaka Akira  <akr@fsij.org>
+
+	* ext/socket: make sources rdoc friendly.
+
+Sun Mar 21 17:57:49 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* io.c (IO_RBUF_CAPA_FOR): use large buffer as cbuf if readconv is
+	  needed for performance improvement.  based on a patch by Roger Pack
+	  in [ruby-core:28163].  [ruby-core:28162]
+
+Sun Mar 21 17:14:49 2010  Tanaka Akira  <akr@fsij.org>
+
+	* tool/transcode-tblgen.rb: reuse hash object.
+
+Sun Mar 21 12:32:39 2010  Tanaka Akira  <akr@fsij.org>
+
+	* tool/transcode-tblgen.rb (transcode_compile_tree): make
+	  valid_encoding mandatory unless from_encoding is registered in
+	  ValidEncoding.
+	  (transcode_tbl_only): ditto.
+	  (transcode_tblgen): ditto.
+	  (ValidEncoding): new function.
+
+	* enc/trans/escape.trans: specify valid_encoding.
+
+	* enc/trans/emoji_sjis_docomo.trans: ditto.
+
+	* enc/trans/emoji.trans: ditto.
+
+	* enc/trans/emoji_iso2022_kddi.trans: ditto.
+
+	* enc/trans/big5.trans: ditto.
+
+	* enc/trans/emoji_sjis_softbank.trans: ditto.
+
+	* enc/trans/emoji_sjis_kddi.trans: ditto.
+
+	* enc/trans/chinese.trans: use ValidEncoding() instead of
+	  ValidEncoding[].
+
+Sun Mar 21 09:43:01 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* io.c (IO_[CRW]BUF_CAPA_MIN): replaced magic numbers.
+
+Sun Mar 21 09:22:10 2010  Tanaka Akira  <akr@fsij.org>
+
+	* object.c (rb_obj_hash): use LONG2FIX to avoid Bignum allocation.
+
+Sat Mar 20 22:51:46 2010  Tanaka Akira  <akr@fsij.org>
+
+	* string.c (rb_str_sum): use UCHAR_MAX.
+
+Sat Mar 20 19:16:42 2010  Tanaka Akira  <akr@fsij.org>
+
+	* tool/transcode-tblgen.rb (ActionMap.unambiguous_action): use
+	  Array#delete.
+	  (ActionMap.merge2): defined.
+	  (ActionMap::PostMemo): removed.
+	  (transcode_compile_tree): use ActionMap.merge2.
+
+Sat Mar 20 13:26:09 2010  Tanaka Akira  <akr@fsij.org>
+
+	* array.c (rb_ary_uniq_bang): the array is already unique if the
+	  length is zero or one.
+	  (rb_ary_uniq): ditto.
+
+Sat Mar 20 12:30:54 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib: fixed typo.  a patch by Sho Hashimoto in [ruby-dev:40716].
+
+Sat Mar 20 11:32:18 2010  Tanaka Akira  <akr@fsij.org>
+
+	* tool/transcode-tblgen.rb (each_firstbyte_range): tuned for less
+	  method calls.
+
+Sat Mar 20 00:59:50 2010  wanabe  <s.wanabe@gmail.com>
+
+	* ext/dl/lib/dl/pack.rb (DL#pack): allow LLP64.
+
+Fri Mar 19 05:26:31 2010  Tanaka Akira  <akr@fsij.org>
+
+	* string.c (rb_str_sum): don't call method for each byte.
+
 Thu Mar 18 21:24:21 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* Makefile.in (miniruby): link $(NORMALMAINOBJ).
+
+Thu Mar 18 21:24:21 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* Makefile.in (miniruby): link $(NORMALMAINOBJ).
+
+Thu Mar 18 19:52:27 2010  Tanaka Akira  <akr@fsij.org>
+
+	* tool/transcode-tblgen.rb: scan singleton mappings sequentially.
+
+Thu Mar 18 06:28:32 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in (RUBY_EXEC_PREFIX): added to config.h.
+
+	* ruby.c (ruby_init_loadpath_safe): TMP_RUBY_PREFIX should be
+	  exec_prefix, not rubylibprefix.  [ruby-core:28718]
+
+	* version.c (RUBY_LIB_PREFIX): fallback to RUBY_EXEC_PREFIX.
+
+Thu Mar 18 05:58:27 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/bigdecimal/bigdecimal.c (BigDecimal_{to_i,mod,divmod,div2}):
+	  removed unused variables.
 
 Thu Mar 18 04:40:56 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
@@ -17,22 +194,22 @@ Thu Mar 18 00:58:27 2010  NARUSE, Yui  <naruse@ruby-lang.org>
 
 Thu Mar 18 00:00:58 2010  NARUSE, Yui  <naruse@ruby-lang.org>
 
-	* lib/uri/common.rb (URI#{en,de}code_www_form_component):
-	  renamed from URI#{en,de}code_www_component. [ruby-dev:40672]
+	* lib/uri/common.rb (URI.{en,de}code_www_form_component):
+	  renamed from URI.{en,de}code_www_component. [ruby-dev:40672]
 
-	* lib/uri/common.rb (URI#encode_www_form_component): %-encoded
+	* lib/uri/common.rb (URI.encode_www_form_component): %-encoded
 	  element should have always two hex.
 
-	* lib/uri/common.rb (URI#encode_www_form_component):
+	* lib/uri/common.rb (URI.encode_www_form_component):
 	  better treatment for ASCII incompatible encodings and
 	  encodings whose lead byte may use 7bit.
 
-	* lib/uri/common.rb (URI#decode_www_form_component): add %20.
+	* lib/uri/common.rb (URI.decode_www_form_component): add %20.
 
-	* lib/uri/common.rb (URI#decode_www_form_component): add
+	* lib/uri/common.rb (URI.decode_www_form_component): add
 	  result's encoding as 2nd argument.
 
-	* lib/uri/common.rb (URI#decode_www_form): added.
+	* lib/uri/common.rb (URI.decode_www_form): added.
 
 Wed Mar 17 16:25:53 2010  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 

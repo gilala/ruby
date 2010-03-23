@@ -19,6 +19,17 @@ class Array
   end
 end
 
+class String
+  unless "".respond_to? :start_with?
+    def start_with?(*prefixes)
+      prefixes.each {|prefix|
+        return true if prefix.length <= self.length && prefix == self[0, prefix.length]
+      }
+      false
+    end
+  end
+end
+
 NUM_ELEM_BYTELOOKUP = 2
 
 C_ESC = {
@@ -168,7 +179,7 @@ class ActionMap
     if actions.length == 1
       actions[0]
     else
-      actions = actions.find_all {|action| action != :nomap0 }
+      actions.delete(:nomap0)
       if actions.length == 1
         actions[0]
       else
@@ -178,7 +189,7 @@ class ActionMap
   end
 
   def self.build_tree(rects)
-    expand("", rects) {|prefix, actions|
+    expand(rects) {|prefix, actions|
       unambiguous_action(actions)
     }
   end
@@ -199,7 +210,7 @@ class ActionMap
       all_rects.concat rects.map {|min, max, action| [min, max, [i, action]] }
     }
 
-    tree = expand("", all_rects) {|prefix, actions|
+    tree = expand(all_rects) {|prefix, actions|
       args = Array.new(rects_list.length) { [] }
       actions.each {|i, action|
         args[i] << action
@@ -214,7 +225,46 @@ class ActionMap
     merge_rects(*mappings.map {|m| parse_to_rects(m) }, &block)
   end
 
-  def self.expand(prefix, rects, &block)
+  def self.merge2(map1, map2, &block)
+    rects1 = parse_to_rects(map1)
+    rects2 = parse_to_rects(map2)
+
+    actions = []
+    all_rects = []
+
+    rects1.each {|rect|
+      min, max, action = rect
+      rect[2] = actions.length
+      actions << action
+      all_rects << rect
+    }
+
+    boundary = actions.length
+
+    rects2.each {|rect|
+      min, max, action = rect
+      rect[2] = actions.length
+      actions << action
+      all_rects << rect
+    }
+
+    tree = expand(all_rects) {|prefix, as0|
+      as1 = []
+      as2 = []
+      as0.each {|i|
+        if i < boundary
+          as1 << actions[i]
+        else
+          as2 << actions[i]
+        end
+      }
+      yield(prefix, as1, as2)
+    }
+
+    self.new(tree)
+  end
+
+  def self.expand(rects, &block)
     #numsing = numreg = 0
     #rects.each {|min, max, action| if min == max then numsing += 1 else numreg += 1 end }
     #puts "#{numsing} singleton mappings and #{numreg} region mappings."
@@ -228,48 +278,46 @@ class ActionMap
         region_rects << rect
       end
     }
-    expand_rec(prefix, singleton_rects, region_rects, &block)
+    @singleton_rects = singleton_rects.sort_by {|min, max, action| min }
+    @singleton_rects.reverse!
+    ret = expand_rec("", region_rects, &block)
+    @singleton_rects = nil
+    ret
   end
 
-  def self.expand_rec(prefix, singleton_rects, region_rects, &block)
-    some_mapping = singleton_rects[0] || region_rects[0]
-    return [] if !some_mapping
-    if some_mapping[0].empty?
-      h = {}
-      (singleton_rects + region_rects).each {|min, max, action|
+  TMPHASH = {}
+  def self.expand_rec(prefix, region_rects, &block)
+    return region_rects if region_rects.empty? && !((s_rect = @singleton_rects.last) && s_rect[0].start_with?(prefix))
+    if region_rects.empty? ? s_rect[0].length == prefix.length : region_rects[0][0].empty?
+      h = TMPHASH
+      while (s_rect = @singleton_rects.last) && s_rect[0].start_with?(prefix)
+        min, max, action = @singleton_rects.pop
+        raise ArgumentError, "ambiguous pattern: #{prefix}" if min.length != prefix.length
+        h[action] = true
+      end
+      region_rects.each {|min, max, action|
         raise ArgumentError, "ambiguous pattern: #{prefix}" if !min.empty?
         h[action] = true
       }
-      actions = h.keys
-      act = block.call(prefix, actions)
-      tree = Action.new(act)
+      tree = Action.new(block.call(prefix, h.keys))
+      h.clear
     else
       tree = []
-      each_firstbyte_range(prefix, singleton_rects, region_rects) {|byte_min, byte_max, s_rects2, r_rects2|
+      each_firstbyte_range(prefix, region_rects) {|byte_min, byte_max, r_rects2|
         if byte_min == byte_max
           prefix2 = prefix + "%02X" % byte_min
         else
           prefix2 = prefix + "{%02X-%02X}" % [byte_min, byte_max]
         end
-        child_tree = expand_rec(prefix2, s_rects2, r_rects2, &block)
+        child_tree = expand_rec(prefix2, r_rects2, &block)
         tree << Branch.new(byte_min, byte_max, child_tree)
       }
     end
     return tree
   end
 
-  def self.each_firstbyte_range(prefix, singleton_rects, region_rects)
-    index_from = {}
-
-    singleton_ary = []
-    singleton_rects.each {|seq, _, action|
-      raise ArgumentError, "ambiguous pattern: #{prefix}" if seq.empty?
-      seq_firstbyte = seq[0,2].to_i(16)
-      seq_rest = seq[2..-1]
-      singleton_ary << [seq_firstbyte, [seq_rest, seq_rest, action]]
-      index_from[seq_firstbyte] = true
-      index_from[seq_firstbyte+1] = true
-    }
+  def self.each_firstbyte_range(prefix, region_rects)
+    index_from = TMPHASH
 
     region_ary = []
     region_rects.each {|min, max, action|
@@ -284,31 +332,64 @@ class ActionMap
     }
 
     byte_from = Array.new(index_from.size)
-    index_from.keys.sort.each_with_index {|byte, i|
+    bytes = index_from.keys
+    bytes.sort!
+    bytes.reverse!
+    bytes.each_with_index {|byte, i|
       index_from[byte] = i
       byte_from[i] = byte
     }
 
-    singleton_rects_hash = {}
-    singleton_ary.each {|seq_firstbyte, rest_elt|
-      i = index_from[seq_firstbyte]
-      (singleton_rects_hash[i] ||= []) << rest_elt
-    }
-
-    region_rects_hash = {}
+    region_rects_ary = Array.new(index_from.size) { [] }
     region_ary.each {|min_firstbyte, max_firstbyte, rest_elt|
-      index_from[min_firstbyte].upto(index_from[max_firstbyte+1]-1) {|i|
-        (region_rects_hash[i] ||= []) << rest_elt
+      index_from[min_firstbyte].downto(index_from[max_firstbyte+1]+1) {|i|
+        region_rects_ary[i] << rest_elt
       }
     }
 
-    0.upto(index_from.size-1) {|i|
-      s_rects = singleton_rects_hash[i]
-      r_rects = region_rects_hash[i]
-      if s_rects || r_rects
-        yield byte_from[i], byte_from[i+1]-1, (s_rects || []), (r_rects || [])
+    index_from.clear
+
+    r_rects = region_rects_ary.pop
+    region_byte = byte_from.pop
+    prev_r_start = region_byte
+    prev_r_rects = []
+    while r_rects && (s_rect = @singleton_rects.last) && (seq = s_rect[0]).start_with?(prefix)
+      singleton_byte = seq[prefix.length, 2].to_i(16)
+      min_byte = singleton_byte < region_byte ? singleton_byte : region_byte
+      if prev_r_start < min_byte && !prev_r_rects.empty?
+        yield prev_r_start, min_byte-1, prev_r_rects
       end
-    }
+      if region_byte < singleton_byte
+        prev_r_start = region_byte
+        prev_r_rects = r_rects
+        r_rects = region_rects_ary.pop
+        region_byte = byte_from.pop
+      elsif region_byte > singleton_byte
+        yield singleton_byte, singleton_byte, prev_r_rects
+        prev_r_start = singleton_byte+1
+      else # region_byte == singleton_byte
+        prev_r_start = region_byte+1
+        prev_r_rects = r_rects
+        r_rects = region_rects_ary.pop
+        region_byte = byte_from.pop
+        yield singleton_byte, singleton_byte, prev_r_rects
+      end
+    end
+
+    while r_rects
+      if prev_r_start < region_byte && !prev_r_rects.empty?
+        yield prev_r_start, region_byte-1, prev_r_rects
+      end
+      prev_r_start = region_byte
+      prev_r_rects = r_rects
+      r_rects = region_rects_ary.pop
+      region_byte = byte_from.pop
+    end
+
+    while (s_rect = @singleton_rects.last) && (seq = s_rect[0]).start_with?(prefix)
+      singleton_byte = seq[prefix.length, 2].to_i(16)
+      yield singleton_byte, singleton_byte, []
+    end
   end
 
   def initialize(tree)
@@ -467,6 +548,7 @@ class ActionMap
       end
       offsets[byte] = o
     }
+    infomap.clear
     if !min
       min = max = 0
     end
@@ -505,7 +587,6 @@ End
   end
 
   PreMemo = {}
-  PostMemo = {}
   NextName = "a"
 
   def generate_node(name_hint=nil)
@@ -529,16 +610,12 @@ End
       end
     }
 
-    if n = PostMemo[table]
-      return PreMemo[@tree] = n
-    end
-
     if !name_hint
       name_hint = "fun_" + NextName
       NextName.succ!
     end
 
-    PreMemo[@tree] = PostMemo[table] = name_hint
+    PreMemo[@tree] = name_hint
 
     generate_lookup_node(name_hint, table)
     name_hint
@@ -682,15 +759,19 @@ def encode_utf8(map)
   r
 end
 
-def transcode_compile_tree(name, from, map, valid_encoding=nil)
+UnspecifiedValidEncoding = Object.new
+
+def transcode_compile_tree(name, from, map, valid_encoding)
   map = encode_utf8(map)
   h = {}
   map.each {|k, v|
     h[k] = v unless h[k] # use first mapping
   }
-  valid_encoding = ValidEncoding[from] if valid_encoding == nil
+  if valid_encoding.equal? UnspecifiedValidEncoding
+    valid_encoding = ValidEncoding.fetch(from)
+  end
   if valid_encoding
-    am = ActionMap.merge(h, {valid_encoding => :undef}) {|prefix, as1, as2|
+    am = ActionMap.merge2(h, {valid_encoding => :undef}) {|prefix, as1, as2|
       a1 = as1.empty? ? nil : ActionMap.unambiguous_action(as1)
       a2 = as2.empty? ? nil : ActionMap.unambiguous_action(as2)
       if !a2
@@ -701,6 +782,7 @@ def transcode_compile_tree(name, from, map, valid_encoding=nil)
   else
     am = ActionMap.parse(h)
   end
+  h.clear
 
   max_input = am.max_input_length
   defined_name = am.gennode(TRANSCODE_GENERATED_BYTES_CODE, TRANSCODE_GENERATED_WORDS_CODE, name)
@@ -710,7 +792,7 @@ end
 TRANSCODERS = []
 TRANSCODE_GENERATED_TRANSCODER_CODE = ''
 
-def transcode_tbl_only(from, to, map, valid_encoding=nil)
+def transcode_tbl_only(from, to, map, valid_encoding=UnspecifiedValidEncoding)
   if VERBOSE_MODE
     if from.empty? || to.empty?
       STDERR.puts "converter for #{from.empty? ? to : from}"
@@ -731,7 +813,7 @@ def transcode_tbl_only(from, to, map, valid_encoding=nil)
   return map, tree_name, real_tree_name, max_input
 end
 
-def transcode_tblgen(from, to, map, valid_encoding=nil)
+def transcode_tblgen(from, to, map, valid_encoding=UnspecifiedValidEncoding)
   map, tree_name, real_tree_name, max_input = transcode_tbl_only(from, to, map, valid_encoding)
   transcoder_name = "rb_#{tree_name}"
   TRANSCODERS << transcoder_name
@@ -834,6 +916,10 @@ ValidEncoding = {
                     {81-fe}{40-7e,80-fe}
                     {81-fe}{30-39}{81-fe}{30-39}',
 }
+
+def ValidEncoding(enc)
+  ValidEncoding.fetch(enc)
+end
 
 def set_valid_byte_pattern(encoding, pattern_or_label)
   pattern =

@@ -41,10 +41,12 @@ socks_s_close(VALUE sock)
 #endif
 
 /*
+ * Document-class: ::SOCKSSocket < TCPSocket
+ *
  * SOCKSSocket class
  */
 void
-Init_sockssocket(void)
+rsock_init_sockssocket(void)
 {
 #ifdef SOCKS
     rb_cSOCKSSocket = rb_define_class("SOCKSSocket", rb_cTCPSocket);

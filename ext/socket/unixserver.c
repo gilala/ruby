@@ -136,10 +136,12 @@ unix_sysaccept(VALUE sock)
 #endif
 
 /*
- * UNIXServer class
+ * Document-class: ::UNIXServer < UNIXSocket
+ *
+ * UNIXServer represents a UNIX domain stream server socket.
  */
 void
-Init_unixserver(void)
+rsock_init_unixserver(void)
 {
 #ifdef HAVE_SYS_UN_H
     rb_cUNIXServer = rb_define_class("UNIXServer", rb_cUNIXSocket);
@@ -147,5 +149,6 @@ Init_unixserver(void)
     rb_define_method(rb_cUNIXServer, "accept", unix_accept, 0);
     rb_define_method(rb_cUNIXServer, "accept_nonblock", unix_accept_nonblock, 0);
     rb_define_method(rb_cUNIXServer, "sysaccept", unix_sysaccept, 0);
+    rb_define_method(rb_cUNIXServer, "listen", rsock_sock_listen, 1); /* in socket.c */
 #endif
 }

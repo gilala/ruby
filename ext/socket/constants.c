@@ -138,9 +138,8 @@ rsock_shutdown_how_arg(VALUE how)
  * Socket::Constants module
  */
 void
-Init_socket_constants(void)
+rsock_init_socket_constants(void)
 {
     /* constants */
-    rb_mSockConst = rb_define_module_under(rb_cSocket, "Constants");
     init_constants();
 }

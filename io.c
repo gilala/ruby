@@ -112,12 +112,17 @@ extern void InitVM_File(void);
 
 #define numberof(array) (int)(sizeof(array) / sizeof((array)[0]))
 
+#define IO_RBUF_CAPA_MIN  8192
+#define IO_CBUF_CAPA_MIN  (128*1024)
+#define IO_RBUF_CAPA_FOR(fptr) (NEED_READCONV(fptr) ? IO_CBUF_CAPA_MIN : IO_RBUF_CAPA_MIN)
+#define IO_WBUF_CAPA_MIN  8192
+
 #define orig_stdout (*rb_vm_specific_ptr(rb_vmkey_orig_stdout))
 #define orig_stderr (*rb_vm_specific_ptr(rb_vmkey_orig_stderr))
 
 static ID id_write, id_read, id_getc, id_flush, id_readpartial;
 static VALUE sym_mode, sym_perm, sym_extenc, sym_intenc, sym_encoding, sym_open_args;
-static VALUE sym_textmode, sym_binmode;
+static VALUE sym_textmode, sym_binmode, sym_autoclose;
 
 struct timeval rb_time_interval(VALUE);
 
@@ -197,6 +202,19 @@ static rb_thread_lock_t max_file_descriptor_lock;
 #    endif
 #  endif
 #endif
+
+#if defined(RUBY_TEST_CRLF_ENVIRONMENT) || defined(_WIN32)
+/* Windows */
+# define NEED_NEWLINE_DECORATOR_ON_READ(fptr) (!(fptr->mode & FMODE_BINMODE))
+# define NEED_NEWLINE_DECORATOR_ON_WRITE(fptr) (!(fptr->mode & FMODE_BINMODE))
+# define TEXTMODE_NEWLINE_DECORATOR_ON_WRITE ECONV_CRLF_NEWLINE_DECORATOR
+#else
+/* Unix */
+# define NEED_NEWLINE_DECORATOR_ON_READ(fptr) (fptr->mode & FMODE_TEXTMODE)
+# define NEED_NEWLINE_DECORATOR_ON_WRITE(fptr) 0
+#endif
+#define NEED_READCONV(fptr) (fptr->encs.enc2 != NULL || NEED_NEWLINE_DECORATOR_ON_READ(fptr))
+#define NEED_WRITECONV(fptr) ((fptr->encs.enc != NULL && fptr->encs.enc != rb_ascii8bit_encoding()) || NEED_NEWLINE_DECORATOR_ON_WRITE(fptr) || (fptr->encs.ecflags & (ECONV_DECORATOR_MASK|ECONV_STATEFUL_DECORATOR_MASK)))
 
 #if !defined HAVE_SHUTDOWN && !defined shutdown
 #define shutdown(a,b)	0
@@ -328,16 +346,17 @@ io_ungetbyte(VALUE str, rb_io_t *fptr)
     long len = RSTRING_LEN(str);
 
     if (fptr->rbuf == NULL) {
+        const int min_capa = IO_RBUF_CAPA_FOR(fptr);
         fptr->rbuf_off = 0;
         fptr->rbuf_len = 0;
 #if SIZEOF_LONG > SIZEOF_INT
 	if (len > INT_MAX)
 	    rb_raise(rb_eIOError, "ungetbyte failed");
 #endif
-	if (len > 8192)
+	if (len > min_capa)
 	    fptr->rbuf_capa = (int)len;
 	else
-	    fptr->rbuf_capa = 8192;
+	    fptr->rbuf_capa = min_capa;
         fptr->rbuf = ALLOC_N(char, fptr->rbuf_capa);
     }
     if (fptr->rbuf_capa < len + fptr->rbuf_len) {
@@ -697,19 +716,6 @@ rb_io_wait_writable(int f)
     }
 }
 
-#if defined(RUBY_TEST_CRLF_ENVIRONMENT) || defined(_WIN32)
-/* Windows */
-# define NEED_NEWLINE_DECORATOR_ON_READ(fptr) (!(fptr->mode & FMODE_BINMODE))
-# define NEED_NEWLINE_DECORATOR_ON_WRITE(fptr) (!(fptr->mode & FMODE_BINMODE))
-# define TEXTMODE_NEWLINE_DECORATOR_ON_WRITE ECONV_CRLF_NEWLINE_DECORATOR
-#else
-/* Unix */
-# define NEED_NEWLINE_DECORATOR_ON_READ(fptr) (fptr->mode & FMODE_TEXTMODE)
-# define NEED_NEWLINE_DECORATOR_ON_WRITE(fptr) 0
-#endif
-#define NEED_READCONV(fptr) (fptr->encs.enc2 != NULL || NEED_NEWLINE_DECORATOR_ON_READ(fptr))
-#define NEED_WRITECONV(fptr) ((fptr->encs.enc != NULL && fptr->encs.enc != rb_ascii8bit_encoding()) || NEED_NEWLINE_DECORATOR_ON_WRITE(fptr) || (fptr->encs.ecflags & (ECONV_DECORATOR_MASK|ECONV_STATEFUL_DECORATOR_MASK)))
-
 static void
 make_writeconv(rb_io_t *fptr)
 {
@@ -795,7 +801,7 @@ io_binwrite(VALUE str, rb_io_t *fptr, int nosync)
     if (fptr->wbuf == NULL && !(!nosync && (fptr->mode & FMODE_SYNC))) {
         fptr->wbuf_off = 0;
         fptr->wbuf_len = 0;
-        fptr->wbuf_capa = 8192;
+        fptr->wbuf_capa = IO_WBUF_CAPA_MIN;
         fptr->wbuf = ALLOC_N(char, fptr->wbuf_capa);
 	fptr->write_lock = rb_mutex_new();
     }
@@ -1168,7 +1174,7 @@ io_fillbuf(rb_io_t *fptr)
     if (fptr->rbuf == NULL) {
         fptr->rbuf_off = 0;
         fptr->rbuf_len = 0;
-        fptr->rbuf_capa = 8192;
+        fptr->rbuf_capa = IO_RBUF_CAPA_FOR(fptr);
         fptr->rbuf = ALLOC_N(char, fptr->rbuf_capa);
     }
     if (fptr->rbuf_len == 0) {
@@ -1423,7 +1429,7 @@ rb_io_inspect(VALUE obj)
 {
     rb_io_t *fptr;
     const char *cname;
-    char fd_desc[256];
+    char fd_desc[4+sizeof(int)*3];
     const char *path;
     const char *st = "";
 
@@ -1584,7 +1590,8 @@ make_readconv(rb_io_t *fptr, int size)
             rb_exc_raise(rb_econv_open_exc(sname, dname, ecflags));
         fptr->cbuf_off = 0;
         fptr->cbuf_len = 0;
-        fptr->cbuf_capa = size < 1024 ? 1024 : size;
+	if (size < IO_CBUF_CAPA_MIN) size = IO_CBUF_CAPA_MIN;
+        fptr->cbuf_capa = size;
         fptr->cbuf = ALLOC_N(char, fptr->cbuf_capa);
     }
 }
@@ -6397,6 +6404,9 @@ rb_io_stdio_file(rb_io_t *fptr)
  *    If the value is truth value, same as "b" in argument <code>mode</code>.
  *  :binmode ::
  *    If the value is truth value, same as "t" in argument <code>mode</code>.
+ *  :autoclose ::
+ *    If the value is +false+, the _fd_ will be kept open after this
+ *    +IO+ instance gets finalized.
  *
  *  Also <code>opt</code> can have same keys in <code>String#encode</code> for
  *  controlling conversion between the external encoding and the internal encoding.
@@ -6467,6 +6477,9 @@ rb_io_initialize(int argc, VALUE *argv, VALUE io)
 	rb_exc_raise(rb_class_new_instance(1, &error, rb_eSystemCallError));
     }
 #endif
+    if (!NIL_P(opt) && rb_hash_aref(opt, sym_autoclose) == Qfalse) {
+	fmode |= FMODE_PREP;
+    }
     MakeOpenFile(io, fp);
     fp->fd = fd;
     fp->mode = fmode;
@@ -6558,6 +6571,53 @@ rb_io_s_for_fd(int argc, VALUE *argv, VALUE klass)
 {
     VALUE io = rb_obj_alloc(klass);
     rb_io_initialize(argc, argv, io);
+    return io;
+}
+
+/*
+ *  call-seq:
+ *     ios.autoclose?   => true or false
+ *
+ *  Returns +true+ if the underlying file descriptor of _ios_ will be
+ *  closed automatically at its finalization, otherwise +false+.
+ */
+
+static VALUE
+rb_io_autoclose_p(VALUE io)
+{
+    rb_io_t *fptr;
+    rb_secure(4);
+    GetOpenFile(io, fptr);
+    return (fptr->mode & FMODE_PREP) ? Qfalse : Qtrue;
+}
+
+/*
+ *  call-seq:
+ *     io.autoclose = bool    => true or false
+ *
+ *  Sets auto-close flag.
+ *
+ *     f = open("/dev/null")
+ *     IO.for_fd(f.fileno)
+ *     # ...
+ *     f.gets # may cause IOError
+ *
+ *     f = open("/dev/null")
+ *     IO.for_fd(f.fileno).autoclose = true
+ *     # ...
+ *     f.gets # won't cause IOError
+ */
+
+static VALUE
+rb_io_set_autoclose(VALUE io, VALUE autoclose)
+{
+    rb_io_t *fptr;
+    rb_secure(4);
+    GetOpenFile(io, fptr);
+    if (!RTEST(autoclose))
+	fptr->mode |= FMODE_PREP;
+    else
+	fptr->mode &= ~FMODE_PREP;
     return io;
 }
 
@@ -9976,6 +10036,9 @@ InitVM_IO(void)
     rb_define_method(rb_cIO, "internal_encoding", rb_io_internal_encoding, 0);
     rb_define_method(rb_cIO, "set_encoding", rb_io_set_encoding, -1);
 
+    rb_define_method(rb_cIO, "autoclose?", rb_io_autoclose_p, 0);
+    rb_define_method(rb_cIO, "autoclose=", rb_io_set_autoclose, 1);
+
     rb_define_variable("$stdin", &rb_stdin);
     rb_stdin = prep_stdio(stdin, FMODE_READABLE, rb_cIO, "<STDIN>");
     rb_define_hooked_variable("$stdout", &rb_stdout, 0, stdout_setter);
@@ -10143,4 +10206,5 @@ InitVM_IO(void)
     sym_open_args = ID2SYM(rb_intern("open_args"));
     sym_textmode = ID2SYM(rb_intern("textmode"));
     sym_binmode = ID2SYM(rb_intern("binmode"));
+    sym_autoclose = ID2SYM(rb_intern("autoclose"));
 }

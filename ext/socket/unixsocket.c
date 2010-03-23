@@ -485,10 +485,12 @@ unix_s_socketpair(int argc, VALUE *argv, VALUE klass)
 #endif
 
 /*
- * UNIXSocket class
+ * Document-class: ::UNIXSocket < BasicSocket
+ *
+ * UNIXSocket represents a UNIX domain stream client socket.
  */
 void
-Init_unixsocket(void)
+rsock_init_unixsocket(void)
 {
 #ifdef HAVE_SYS_UN_H
     rb_cUNIXSocket = rb_define_class("UNIXSocket", rb_cBasicSocket);

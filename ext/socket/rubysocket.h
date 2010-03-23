@@ -218,6 +218,8 @@ VALUE rsock_make_ipaddr(struct sockaddr *addr);
 VALUE rsock_ipaddr(struct sockaddr *sockaddr, int norevlookup);
 VALUE rsock_make_hostent(VALUE host, struct addrinfo *addr, VALUE (*ipaddr)(struct sockaddr *, size_t));
 
+int rsock_revlookup_flag(VALUE revlookup, int *norevlookup);
+
 #ifdef HAVE_SYS_UN_H
 const char* rsock_unixpath(struct sockaddr_un *sockaddr, socklen_t len);
 VALUE rsock_unixaddr(struct sockaddr_un *sockaddr, socklen_t len);
@@ -254,25 +256,35 @@ int rsock_connect(int fd, const struct sockaddr *sockaddr, int len, int socks);
 
 VALUE rsock_s_accept(VALUE klass, int fd, struct sockaddr *sockaddr, socklen_t *len);
 VALUE rsock_s_accept_nonblock(VALUE klass, rb_io_t *fptr, struct sockaddr *sockaddr, socklen_t *len);
+VALUE rsock_sock_listen(VALUE sock, VALUE log);
 
 VALUE rsock_sockopt_new(int family, int level, int optname, VALUE data);
+
+#if defined(HAVE_SENDMSG)
+VALUE rsock_bsock_sendmsg(int argc, VALUE *argv, VALUE sock);
+VALUE rsock_bsock_sendmsg_nonblock(int argc, VALUE *argv, VALUE sock);
+#endif
+#if defined(HAVE_RECVMSG)
+VALUE rsock_bsock_recvmsg(int argc, VALUE *argv, VALUE sock);
+VALUE rsock_bsock_recvmsg_nonblock(int argc, VALUE *argv, VALUE sock);
+#endif
 
 #ifdef HAVE_ST_MSG_CONTROL
 void rsock_discard_cmsg_resource(struct msghdr *mh);
 #endif
 
-void Init_basicsocket(void);
-void Init_ipsocket(void);
-void Init_tcpsocket(void);
-void Init_tcpserver(void);
-void Init_sockssocket(void);
-void Init_udpsocket(void);
-void Init_unixsocket(void);
-void Init_unixserver(void);
-void Init_socket_constants(void);
-void Init_ancdata(void);
-void Init_addrinfo(void);
-void Init_sockopt(void);
-void Init_socket_init(void);
+void rsock_init_basicsocket(void);
+void rsock_init_ipsocket(void);
+void rsock_init_tcpsocket(void);
+void rsock_init_tcpserver(void);
+void rsock_init_sockssocket(void);
+void rsock_init_udpsocket(void);
+void rsock_init_unixsocket(void);
+void rsock_init_unixserver(void);
+void rsock_init_socket_constants(void);
+void rsock_init_ancdata(void);
+void rsock_init_addrinfo(void);
+void rsock_init_sockopt(void);
+void rsock_init_socket_init(void);
 
 #endif

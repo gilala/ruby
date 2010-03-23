@@ -129,14 +129,17 @@ tcp_sysaccept(VALUE sock)
 }
 
 /*
- * TCPServer class
+ * Document-class: ::TCPServer < TCPSocket
+ *
+ * TCPServer represents a TCP/IP server socket.
  */
 void
-Init_tcpserver(void)
+rsock_init_tcpserver(void)
 {
     rb_cTCPServer = rb_define_class("TCPServer", rb_cTCPSocket);
     rb_define_method(rb_cTCPServer, "accept", tcp_accept, 0);
     rb_define_method(rb_cTCPServer, "accept_nonblock", tcp_accept_nonblock, 0);
     rb_define_method(rb_cTCPServer, "sysaccept", tcp_sysaccept, 0);
     rb_define_method(rb_cTCPServer, "initialize", tcp_svr_init, -1);
+    rb_define_method(rb_cTCPServer, "listen", rsock_sock_listen, 1); /* in socket.c */
 }

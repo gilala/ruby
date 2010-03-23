@@ -134,13 +134,13 @@ rsock_sock_s_socketpair(int argc, VALUE *argv, VALUE klass)
 
 /*
  * call-seq:
- * 	socket.connect(server_sockaddr) => 0
+ * 	socket.connect(remote_sockaddr) => 0
  * 
- * Requests a connection to be made on the given +server_sockaddr+. Returns 0 if
+ * Requests a connection to be made on the given +remote_sockaddr+. Returns 0 if
  * successful, otherwise an exception is raised.
  *  
  * === Parameter
- * * +server_sockaddr+ - the +struct+ sockaddr contained in a string
+ * * +remote_sockaddr+ - the +struct+ sockaddr contained in a string or Addrinfo object
  * 
  * === Example:
  * 	# Pull down Google's web page
@@ -263,14 +263,14 @@ sock_connect(VALUE sock, VALUE addr)
 
 /*
  * call-seq:
- * 	socket.connect_nonblock(server_sockaddr) => 0
+ * 	socket.connect_nonblock(remote_sockaddr) => 0
  * 
- * Requests a connection to be made on the given +server_sockaddr+ after
+ * Requests a connection to be made on the given +remote_sockaddr+ after
  * O_NONBLOCK is set for the underlying file descriptor.
  * Returns 0 if successful, otherwise an exception is raised.
  *  
  * === Parameter
- * * +server_sockaddr+ - the +struct+ sockaddr contained in a string
+ * * +remote_sockaddr+ - the +struct+ sockaddr contained in a string or Addrinfo object
  * 
  * === Example:
  * 	# Pull down Google's web page
@@ -325,15 +325,22 @@ sock_connect_nonblock(VALUE sock, VALUE addr)
 
 /*
  * call-seq:
- * 	socket.bind(server_sockaddr) => 0
+ * 	socket.bind(local_sockaddr) => 0
  * 
- * Binds to the given +struct+ sockaddr.
+ * Binds to the given local address.
  * 
  * === Parameter
- * * +server_sockaddr+ - the +struct+ sockaddr contained in a string
+ * * +local_sockaddr+ - the +struct+ sockaddr contained in a string or an Addrinfo object
  *
  * === Example
  * 	require 'socket'
+ *
+ * 	# use Addrinfo
+ * 	socket = Socket.new(:INET, :STREAM, 0)
+ * 	socket.bind(Addrinfo.tcp("127.0.0.1", 2222))
+ * 	p socket.local_address #=> #<Addrinfo: 127.0.0.1:2222 TCP>
+ *
+ * 	# use struct sockaddr
  * 	include Socket::Constants
  * 	socket = Socket.new( AF_INET, SOCK_STREAM, 0 )
  * 	sockaddr = Socket.pack_sockaddr_in( 2200, 'localhost' )
@@ -485,8 +492,8 @@ sock_bind(VALUE sock, VALUE addr)
  * * listen manual pages on unix-based systems
  * * listen function in Microsoft's Winsock functions reference
  */
-static VALUE
-sock_listen(VALUE sock, VALUE log)
+VALUE
+rsock_sock_listen(VALUE sock, VALUE log)
 {
     rb_io_t *fptr;
     int backlog;
@@ -507,11 +514,11 @@ sock_listen(VALUE sock, VALUE log)
  * 
  * Receives up to _maxlen_ bytes from +socket+. _flags_ is zero or more
  * of the +MSG_+ options. The first element of the results, _mesg_, is the data
- * received. The second element, _sender_addrinfo_, contains protocol-specific information
- * on the sender.
+ * received. The second element, _sender_addrinfo_, contains protocol-specific
+ * address information of the sender.
  * 
  * === Parameters
- * * +maxlen+ - the number of bytes to receive from the socket
+ * * +maxlen+ - the maximum number of bytes to receive from the socket
  * * +flags+ - zero or more of the +MSG_+ options 
  * 
  * === Example
@@ -620,15 +627,15 @@ sock_recvfrom(int argc, VALUE *argv, VALUE sock)
  * O_NONBLOCK is set for the underlying file descriptor.
  * _flags_ is zero or more of the +MSG_+ options.
  * The first element of the results, _mesg_, is the data received.
- * The second element, _sender_addrinfo_, contains protocol-specific information
- * on the sender.
+ * The second element, _sender_addrinfo_, contains protocol-specific address
+ * information of the sender.
  *
  * When recvfrom(2) returns 0, Socket#recvfrom_nonblock returns
  * an empty string as data.
  * The meaning depends on the socket: EOF on TCP, empty packet on UDP, etc.
  * 
  * === Parameters
- * * +maxlen+ - the number of bytes to receive from the socket
+ * * +maxlen+ - the maximum number of bytes to receive from the socket
  * * +flags+ - zero or more of the +MSG_+ options 
  * 
  * === Example
@@ -689,7 +696,7 @@ sock_recvfrom_nonblock(int argc, VALUE *argv, VALUE sock)
  *   serv = Socket.new(:INET, :STREAM, 0)
  *   serv.listen(5)
  *   c = Socket.new(:INET, :STREAM, 0)
- *   c.connect(serv.local_address)
+ *   c.connect(serv.connect_address)
  *   p serv.accept #=> [#<Socket:fd 6>, #<Addrinfo: 127.0.0.1:48555 TCP>]
  *
  */
@@ -830,10 +837,10 @@ sock_sysaccept(VALUE sock)
  *
  * Returns the hostname.
  *
- * Note that it is not guaranteed to be able to convert to IP address using gethostbyname, getaddrinfo, etc.
- *
  *   p Socket.gethostname #=> "hal"
  *
+ * Note that it is not guaranteed to be able to convert to IP address using gethostbyname, getaddrinfo, etc.
+ * If you need local IP address, use Socket.ip_address_list.
  */
 static VALUE
 sock_gethostname(VALUE obj)
@@ -1097,6 +1104,8 @@ sock_s_getservbyport(int argc, VALUE *argv)
  *   +true+, +:hostname+:  hostname is obtained from numeric address using reverse lookup, which may take a time.
  *   +false+, +:numeric+:  hostname is same as numeric address.
  *   +nil+:              obey to the current +do_not_reverse_lookup+ flag.
+ *
+ * If Addrinfo object is preferred, use Addrinfo.getaddrinfo.
  */
 static VALUE
 sock_s_getaddrinfo(int argc, VALUE *argv)
@@ -1147,6 +1156,8 @@ sock_s_getaddrinfo(int argc, VALUE *argv)
  *   Socket.getnameinfo(Socket.sockaddr_in(80, "127.0.0.1"))       #=> ["localhost", "www"]
  *   Socket.getnameinfo(["AF_INET", 80, "127.0.0.1"])              #=> ["localhost", "www"]
  *   Socket.getnameinfo(["AF_INET", 80, "localhost", "127.0.0.1"]) #=> ["localhost", "www"]
+ *
+ * If Addrinfo object is preferred, use Addrinfo#getnameinfo.
  */
 static VALUE
 sock_s_getnameinfo(int argc, VALUE *argv)
@@ -1780,12 +1791,15 @@ socket_s_ip_address_list(VALUE self)
 #endif
 
 /*
+ * Document-class: ::Socket < BasicSocket
+ *
  * Class +Socket+ provides access to the underlying operating system
  * socket implementations. It can be used to provide more operating system
- * specific functionality than the protocol-specific socket classes but at the
- * expense of greater complexity. In particular, the class handles addresses
- * using +struct+ sockaddr structures packed into Ruby strings, which can be
- * a joy to manipulate.
+ * specific functionality than the protocol-specific socket classes.
+ *
+ * The constants defined under Socket::Constants are also defined under Socket.
+ * For example, Socket::AF_INET is usable as well as Socket::Constants::AF_INET.
+ * See Socket::Constants for the list of constants.
  * 
  * === Exception Handling
  * Ruby's implementation of +Socket+ causes an exception to be raised
@@ -1795,6 +1809,15 @@ socket_s_ip_address_list(VALUE self)
  * information on particular exception is needed please refer to the 
  * Unix manual pages or the Windows WinSock reference.
  * 
+ * === Convenient methods
+ *
+ * Although the general way to create socket is Socket.new,
+ * there are several methods for socket creation for most cases.
+ *
+ * * TCP client socket: Socket.tcp, TCPSocket.open
+ * * TCP server socket: Socket.tcp_server_loop, TCPServer.open
+ * * UNIX client socket: Socket.unix, UNIXSocket.open
+ * * UNIX server socket: Socket.unix_server_loop, UNIXServer.open
  * 
  * === Documentation by
  * * Zach Dennis
@@ -1807,17 +1830,17 @@ socket_s_ip_address_list(VALUE self)
 void
 Init_socket()
 {
-    Init_basicsocket();
+    rsock_init_basicsocket();
 
     rb_cSocket = rb_define_class("Socket", rb_cBasicSocket);
 
-    Init_socket_init();
+    rsock_init_socket_init();
 
     rb_define_method(rb_cSocket, "initialize", sock_initialize, -1);
     rb_define_method(rb_cSocket, "connect", sock_connect, 1);
     rb_define_method(rb_cSocket, "connect_nonblock", sock_connect_nonblock, 1);
     rb_define_method(rb_cSocket, "bind", sock_bind, 1);
-    rb_define_method(rb_cSocket, "listen", sock_listen, 1);
+    rb_define_method(rb_cSocket, "listen", rsock_sock_listen, 1);
     rb_define_method(rb_cSocket, "accept", sock_accept, 0);
     rb_define_method(rb_cSocket, "accept_nonblock", sock_accept_nonblock, 0);
     rb_define_method(rb_cSocket, "sysaccept", sock_sysaccept, 0);
@@ -1844,10 +1867,4 @@ Init_socket()
 #endif
 
     rb_define_singleton_method(rb_cSocket, "ip_address_list", socket_s_ip_address_list, 0);
-
-    /* defined here for rdoc */
-    rb_define_method(rb_cTCPServer, "listen", sock_listen, 1);
-#ifdef HAVE_SYS_UN_H
-    rb_define_method(rb_cUNIXServer, "listen", sock_listen, 1);
-#endif
 }

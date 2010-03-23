@@ -58,14 +58,14 @@ class Addrinfo
   # The socket is returned otherwise.
   #
   #   Addrinfo.tcp("www.ruby-lang.org", 80).connect_from("0.0.0.0", 4649) {|s|
-  #     s.print "GET / HTTP/1.0\r\n\r\n"
-  #     p s.read
+  #     s.print "GET / HTTP/1.0\r\nHost: www.ruby-lang.org\r\n\r\n"
+  #     puts s.read
   #   }
   #
   #   # Addrinfo object can be taken for the argument.
   #   Addrinfo.tcp("www.ruby-lang.org", 80).connect_from(Addrinfo.tcp("0.0.0.0", 4649)) {|s|
-  #     s.print "GET / HTTP/1.0\r\n\r\n"
-  #     p s.read
+  #     s.print "GET / HTTP/1.0\r\nHost: www.ruby-lang.org\r\n\r\n"
+  #     puts s.read
   #   }
   #
   def connect_from(*local_addr_args, &block)
@@ -78,8 +78,8 @@ class Addrinfo
   # The socket is returned otherwise.
   #
   #   Addrinfo.tcp("www.ruby-lang.org", 80).connect {|s|
-  #     s.print "GET / HTTP/1.0\r\n\r\n"
-  #     p s.read
+  #     s.print "GET / HTTP/1.0\r\nHost: www.ruby-lang.org\r\n\r\n"
+  #     puts s.read
   #   }
   #
   def connect(&block)
@@ -92,8 +92,8 @@ class Addrinfo
   # The socket is returned otherwise.
   #
   #   Addrinfo.tcp("0.0.0.0", 4649).connect_to("www.ruby-lang.org", 80) {|s|
-  #     s.print "GET / HTTP/1.0\r\n\r\n"
-  #     p s.read
+  #     s.print "GET / HTTP/1.0\r\nHost: www.ruby-lang.org\r\n\r\n"
+  #     puts s.read
   #   }
   #
   def connect_to(*remote_addr_args, &block)
@@ -158,7 +158,7 @@ class Addrinfo
   end
 end
 
-class BasicSocket
+class BasicSocket < IO
   # Returns an address of the socket suitable for connect in the local machine.
   #
   # This method returns _self_.local_address, except following condition.
@@ -200,7 +200,7 @@ class BasicSocket
   end
 end
 
-class Socket
+class Socket < BasicSocket
   # enable the socket option IPV6_V6ONLY if IPV6_V6ONLY is available.
   def ipv6only!
     if defined? Socket::IPV6_V6ONLY
@@ -220,9 +220,9 @@ class Socket
   # If no block is given, the socket is returned.
   #
   #   Socket.tcp("www.ruby-lang.org", 80) {|sock|
-  #     sock.print "GET / HTTP/1.0\r\n\r\n"
+  #     sock.print "GET / HTTP/1.0\r\nHost: www.ruby-lang.org\r\n\r\n"
   #     sock.close_write
-  #     print sock.read
+  #     puts sock.read
   #   }
   #
   def self.tcp(host, port, local_host=nil, local_port=nil) # :yield: socket
@@ -268,6 +268,7 @@ class Socket
     end
   end
 
+  # :stopdoc:
   def self.ip_sockets_port0(ai_list, reuseaddr)
     begin
       sockets = []
@@ -317,6 +318,7 @@ class Socket
   class << self
     private :tcp_server_sockets_port0
   end
+  # :startdoc:
 
   # creates TCP/IP server sockets for _host_ and _port_.
   # _host_ is optional.
@@ -681,7 +683,7 @@ class Socket
     end
   end
 
-  # creates UNIX server sockets on _path_
+  # creates a UNIX server socket on _path_
   #
   # If no block given, it returns a listening socket.
   #
