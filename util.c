@@ -2124,24 +2124,21 @@ break2:
 		}
 	    }
 
-	    if (*s != 'P' && *s != 'p') {
-		s = s0;
-		goto ret;
-	    }
+	    if (*s == 'P' || *s == 'p') {
+		dsign = 0x2C - *++s; /* +: 2B, -: 2D */
+		if (abs(dsign) == 1) s++;
+		else dsign = 1;
 
-	    dsign = 0x2C - *++s; /* +: 2B, -: 2D */
-	    if (abs(dsign) != 1) {
-		s = s0;
-		goto ret;
+		for (nd = 0; (c = *s) >= '0' && c <= '9'; s++) {
+		    nd *= 10;
+		    nd += c;
+		    nd -= '0';
+		}
+		dval(rv) = ldexp(adj, nd * dsign);
 	    }
-
-	    for (nd = 0, s++; (c = *s) >= '0' && c <= '9'; s++) {
-		nd *= 10;
-		nd += c;
-		nd -= '0';
+	    else {
+		dval(rv) = adj;
 	    }
-
-	    dval(rv) = ldexp(adj, nd * dsign);
 	    goto ret;
 	}
         nz0 = 1;
@@ -3858,6 +3855,148 @@ ruby_each_words(const char *str, void (*func)(const char*, int, void*), void *ar
 	len = (int)(end - str);	/* assume no string exceeds INT_MAX */
 	(*func)(str, len, arg);
     }
+}
+
+/*-
+ * Copyright (c) 2004-2008 David Schultz <das@FreeBSD.ORG>
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+#define	DBL_MANH_SIZE	20
+#define	DBL_MANL_SIZE	32
+#define	INFSTR	"Infinity"
+#define	NANSTR	"NaN"
+#define	DBL_ADJ	(DBL_MAX_EXP - 2)
+#define	SIGFIGS	((DBL_MANT_DIG + 3) / 4 + 1)
+#define dexp_get(u) ((int)(word0(u) >> Exp_shift) & ~Exp_msk1)
+#define dexp_set(u,v) (word0(u) = (((int)(word0(u)) & ~Exp_mask) | (v << Exp_shift)))
+#define dmanh_get(u) ((int)(word0(u) & Frac_mask))
+#define dmanl_get(u) ((int)word1(u))
+
+
+/*
+ * This procedure converts a double-precision number in IEEE format
+ * into a string of hexadecimal digits and an exponent of 2.  Its
+ * behavior is bug-for-bug compatible with dtoa() in mode 2, with the
+ * following exceptions:
+ *
+ * - An ndigits < 0 causes it to use as many digits as necessary to
+ *   represent the number exactly.
+ * - The additional xdigs argument should point to either the string
+ *   "0123456789ABCDEF" or the string "0123456789abcdef", depending on
+ *   which case is desired.
+ * - This routine does not repeat dtoa's mistake of setting decpt
+ *   to 9999 in the case of an infinity or NaN.  INT_MAX is used
+ *   for this purpose instead.
+ *
+ * Note that the C99 standard does not specify what the leading digit
+ * should be for non-zero numbers.  For instance, 0x1.3p3 is the same
+ * as 0x2.6p2 is the same as 0x4.cp3.  This implementation always makes
+ * the leading digit a 1. This ensures that the exponent printed is the
+ * actual base-2 exponent, i.e., ilogb(d).
+ *
+ * Inputs:	d, xdigs, ndigits
+ * Outputs:	decpt, sign, rve
+ */
+char *
+BSD__hdtoa(double d, const char *xdigs, int ndigits, int *decpt, int *sign,
+    char **rve)
+{
+	U u;
+	char *s, *s0;
+	int bufsize;
+	uint32_t manh, manl;
+
+	u.d = d;
+	if (word0(u) & Sign_bit) {
+	    /* set sign for everything, including 0's and NaNs */
+	    *sign = 1;
+	    word0(u) &= ~Sign_bit;  /* clear sign bit */
+	}
+	else
+	    *sign = 0;
+
+	if (isinf(d)) { /* FP_INFINITE */
+	    *decpt = INT_MAX;
+	    return (nrv_alloc(INFSTR, rve, sizeof(INFSTR) - 1));
+	}
+	else if (isnan(d)) { /* FP_NAN */
+	    *decpt = INT_MAX;
+	    return (nrv_alloc(NANSTR, rve, sizeof(NANSTR) - 1));
+	}
+	else if (d == 0.0) { /* FP_ZERO */
+	    *decpt = 1;
+	    return (nrv_alloc("0", rve, 1));
+	}
+	else if (dexp_get(u)) { /* FP_NORMAL */
+	    *decpt = dexp_get(u) - DBL_ADJ;
+	}
+	else { /* FP_SUBNORMAL */
+	    u.d *= 5.363123171977039e+154 /* 0x1p514 */;
+	    *decpt = dexp_get(u) - (514 + DBL_ADJ);
+	}
+
+	if (ndigits == 0)		/* dtoa() compatibility */
+		ndigits = 1;
+
+	/*
+	 * If ndigits < 0, we are expected to auto-size, so we allocate
+	 * enough space for all the digits.
+	 */
+	bufsize = (ndigits > 0) ? ndigits : SIGFIGS;
+	s0 = rv_alloc(bufsize);
+
+	/* Round to the desired number of digits. */
+	if (SIGFIGS > ndigits && ndigits > 0) {
+		float redux = 1.0;
+		int offset = 4 * ndigits + DBL_MAX_EXP - 4 - DBL_MANT_DIG;
+		dexp_set(u, offset);
+		u.d += redux;
+		u.d -= redux;
+		*decpt += dexp_get(u) - offset;
+	}
+
+	manh = dmanh_get(u);
+	manl = dmanl_get(u);
+	*s0 = '1';
+	for (s = s0 + 1; s < s0 + bufsize; s++) {
+		*s = xdigs[(manh >> (DBL_MANH_SIZE - 4)) & 0xf];
+		manh = (manh << 4) | (manl >> (DBL_MANL_SIZE - 4));
+		manl <<= 4;
+	}
+
+	/* If ndigits < 0, we are expected to auto-size the precision. */
+	if (ndigits < 0) {
+		for (ndigits = SIGFIGS; s0[ndigits - 1] == '0'; ndigits--)
+			;
+	}
+
+	s = s0 + ndigits;
+	*s = '\0';
+	if (rve != NULL)
+		*rve = s;
+	return (s0);
 }
 
 #ifdef __cplusplus

@@ -15,9 +15,14 @@ with all sufficient information, see the ChangeLog file.
 
   * Array
     * new method:
-      * Array#sort_by!
+      * Array#keep_if
       * Array#rotate!
       * Array#rotate
+      * Array#select!
+      * Array#sort_by!
+
+    * extended methods:
+      * Array#{uniq,uniq!} can take a block.
 
   * Dir
     * new method:
@@ -42,7 +47,9 @@ with all sufficient information, see the ChangeLog file.
     * New methods:
       * Enumerable#join
       * Enumerable#chunk
+      * Enumerable#collect_concat
       * Enumerable#each_entry
+      * Enumerable#flat_map
       * Enumerable#slice_before
 
   * Enumerator
@@ -82,7 +89,11 @@ with all sufficient information, see the ChangeLog file.
 
   * IO
     * new method:
+      * IO#autoclose=
+      * IO#autoclose?
       * IO#fdatasync
+      * IO#codepoints
+      * IO#each_codepoint
 
     * extended methods:
       * IO.pipe can take a block.
@@ -91,6 +102,11 @@ with all sufficient information, see the ChangeLog file.
       * IO::WaitReadable
       * IO::WaitWritable
         They are used to extend non-blocking exceptions.
+
+  * Kernel
+    * new method:
+      * Kernel#respond_to_missing?
+      * Kernel#singleton_class
 
   * MatchData
     * New method:
@@ -111,6 +127,11 @@ with all sufficient information, see the ChangeLog file.
     * extended methods:
       * string[regexp, name] is supported for named capture.
 
+  * Thread
+    * new methods:
+      * Thread#add_trace_func
+      * Thread#set_trace_func
+
   * Time
     * extended feature:
       * time_t restriction is removed to represent before 1901 and after 2038.
@@ -120,6 +141,7 @@ with all sufficient information, see the ChangeLog file.
 
     * new method:
       * Time#to_r
+      * Time#subsec
       * Time#round
 
     * incompatible changes:
@@ -299,8 +321,10 @@ with all sufficient information, see the ChangeLog file.
     * URI.encode_www_form_component
     * URI.decode_www_form_component
   * Obsoleted methods:
-    * URI#escape
-    * URI#unescape
+    * URI.decode
+    * URI.encode
+    * URI.escape
+    * URI.unescape
 
 * etc
   * new methods:

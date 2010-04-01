@@ -65,9 +65,12 @@ end
 # * <tt> #column(j)                     </tt>
 # * <tt> #collect                       </tt>
 # * <tt> #map                           </tt>
+# * <tt> #each                          </tt>
+# * <tt> #each_with_index               </tt>
 # * <tt> #minor(*param)                 </tt>
 #
 # Properties of a matrix:
+# * <tt> #real?                         </tt>
 # * <tt> #regular?                      </tt>
 # * <tt> #singular?                     </tt>
 # * <tt> #square?                       </tt>
@@ -90,6 +93,15 @@ end
 # * <tt> #transpose                     </tt>
 # * <tt> #t                             </tt>
 #
+# Complex arithmetic:
+# * <tt> conj                           </tt>
+# * <tt> conjugate                      </tt>
+# * <tt> imag                           </tt>
+# * <tt> imaginary                      </tt>
+# * <tt> real                           </tt>
+# * <tt> rect                           </tt>
+# * <tt> rectangular                    </tt>
+#
 # Conversion to other data types:
 # * <tt> #coerce(other)                 </tt>
 # * <tt> #row_vectors                   </tt>
@@ -104,6 +116,7 @@ class Matrix
   @RCS_ID='-$Id: matrix.rb,v 1.13 2001/12/09 14:22:23 keiju Exp keiju $-'
 
 #  extend Exception2MessageMapper
+  include Enumerable
   include ExceptionForMatrix
 
   # instance creations
@@ -241,7 +254,8 @@ class Matrix
   #     => Matrix[[0, 0, 0], [0, 0, 0]]
   #
   def Matrix.empty(row_size = 0, column_size = 0)
-    Matrix.Raise ErrDimensionMismatch if column_size != 0 && row_size != 0
+    Matrix.Raise ArgumentError, "One size must be 0" if column_size != 0 && row_size != 0
+    Matrix.Raise ArgumentError, "Negative size" if column_size < 0 || row_size < 0
 
     new([[]]*row_size, column_size)
   end
@@ -339,6 +353,42 @@ class Matrix
   alias map collect
 
   #
+  # Yields all elements of the matrix, starting with those of the first row,
+  # or returns an Enumerator is no block given
+  #   Matrix[ [1,2], [3,4] ].each { |e| puts e }
+  #     # => prints the numbers 1 to 4
+  #
+  def each(&block) # :yield: e
+    return to_enum(:each) unless block_given?
+    @rows.each do |row|
+      row.each(&block)
+    end
+    self
+  end
+
+  #
+  # Yields all elements of the matrix, starting with those of the first row,
+  # along with the row index and column index,
+  # or returns an Enumerator is no block given
+  #   Matrix[ [1,2], [3,4] ].each_with_index do |e, row, col|
+  #     puts "#{e} at #{row}, #{col}"
+  #   end
+  #     # => 1 at 0, 0
+  #     # => 2 at 0, 1
+  #     # => 3 at 1, 0
+  #     # => 4 at 1, 1
+  #
+  def each_with_index(&block) # :yield: e, row, column
+    return to_enum(:each_with_index) unless block_given?
+    @rows.each_with_index do |row, row_index|
+      row.each_with_index do |e, col_index|
+        yield e, row_index, col_index
+      end
+    end
+    self
+  end
+
+  #
   # Returns a section of the matrix.  The parameters are either:
   # *  start_row, nrows, start_col, ncols; OR
   # *  col_range, row_range
@@ -387,6 +437,21 @@ class Matrix
   #++
 
   #
+  # Returns +true+ if this is an empty matrix, i.e. if the number of rows
+  # or the number of columns is 0.
+  #
+  def empty?
+    column_size == 0 || row_size == 0
+  end
+
+  #
+  # Returns +true+ if all entries of the matrix are real.
+  #
+  def real?
+    all?(&:real?)
+  end
+
+  #
   # Returns +true+ if this is a regular matrix.
   #
   def regular?
@@ -422,15 +487,6 @@ class Matrix
   def eql?(other)
     return false unless Matrix === other
     rows.eql? other.rows
-  end
-
-  def compare_by_row_vectors(rows, comparison = :==)
-    return false unless @rows.size == rows.size
-
-    @rows.size.times do |i|
-      return false unless @rows[i].send(comparison, rows[i])
-    end
-    true
   end
 
   #
@@ -661,8 +717,8 @@ class Matrix
   #++
 
   #
-  # Returns the determinant of the matrix.  If the matrix is not square, the
-  # result is 0. This method's algorithm is Gaussian elimination method
+  # Returns the determinant of the matrix.
+  # This method's algorithm is Gaussian elimination method
   # and using Numeric#quo(). Beware that using Float values, with their
   # usual lack of precision, can affect the value returned by this method.  Use
   # Rational values or Matrix#det_e instead if this is important to you.
@@ -671,7 +727,7 @@ class Matrix
   #     => 45.0
   #
   def determinant
-    return 0 unless square?
+    Matrix.Raise ErrDimensionMismatch unless square?
 
     size = row_size
     a = to_a
@@ -701,8 +757,8 @@ class Matrix
   alias det determinant
 
   #
-  # Returns the determinant of the matrix.  If the matrix is not square, the
-  # result is 0. This method's algorithm is Gaussian elimination method.
+  # Returns the determinant of the matrix.
+  # This method's algorithm is Gaussian elimination method.
   # This method uses Euclidean algorithm. If all elements are integer,
   # really exact value. But, if an element is a float, can't return
   # exact value.
@@ -711,7 +767,7 @@ class Matrix
   #     => 63
   #
   def determinant_e
-    return 0 unless square?
+    Matrix.Raise ErrDimensionMismatch unless square?
 
     size = row_size
     a = to_a
@@ -859,6 +915,62 @@ class Matrix
   alias t transpose
 
   #--
+  # COMPLEX ARITHMETIC -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+  #++
+
+  #
+  # Returns the conjugate of the matrix.
+  #   Matrix[[Complex(1,2), Complex(0,1), 0], [1, 2, 3]]
+  #     => 1+2i   i  0
+  #           1   2  3
+  #   Matrix[[Complex(1,2), Complex(0,1), 0], [1, 2, 3]].conjugate
+  #     => 1-2i  -i  0
+  #           1   2  3
+  #
+  def conjugate
+    collect(&:conjugate)
+  end
+  alias conj conjugate
+
+  #
+  # Returns the imaginary part of the matrix.
+  #   Matrix[[Complex(1,2), Complex(0,1), 0], [1, 2, 3]]
+  #     => 1+2i  i  0
+  #           1  2  3
+  #   Matrix[[Complex(1,2), Complex(0,1), 0], [1, 2, 3]].imaginary
+  #     =>   2i  i  0
+  #           0  0  0
+  #
+  def imaginary
+    collect(&:imaginary)
+  end
+  alias imag imaginary
+
+  #
+  # Returns the real part of the matrix.
+  #   Matrix[[Complex(1,2), Complex(0,1), 0], [1, 2, 3]]
+  #     => 1+2i  i  0
+  #           1  2  3
+  #   Matrix[[Complex(1,2), Complex(0,1), 0], [1, 2, 3]].real
+  #     =>    1  0  0
+  #           1  2  3
+  #
+  def real
+    collect(&:real)
+  end
+
+  #
+  # Returns an array containing matrices corresponding to the real and imaginary
+  # parts of the matrix
+  #
+  # m.rect == [m.real, m.imag]  # ==> true for all matrices m
+  #
+  def rect
+    [real, imag]
+  end
+  alias rectangular rect
+
+  #--
   # CONVERTING -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
   #++
 
@@ -919,22 +1031,20 @@ class Matrix
   # Overrides Object#to_s
   #
   def to_s
-    if row_size == 0 || column_size == 0
+    if empty?
       "Matrix.empty(#{row_size}, #{column_size})"
     else
       "Matrix[" + @rows.collect{|row|
-	"[" + row.collect{|e| e.to_s}.join(", ") + "]"
+        "[" + row.collect{|e| e.to_s}.join(", ") + "]"
       }.join(", ")+"]"
     end
   end
-
-  alias_method :inspect_org, :inspect
 
   #
   # Overrides Object#inspect
   #
   def inspect
-    if row_size == 0 || column_size == 0
+    if empty?
       "Matrix.empty(#{row_size}, #{column_size})"
     else
       "Matrix#{@rows.inspect}"
@@ -1154,6 +1264,7 @@ class Vector
   # Iterate over the elements of this vector and +v+ in conjunction.
   #
   def each2(v) # :yield: e1, e2
+    raise TypeError, "Integer is not like Vector" if v.kind_of?(Integer)
     Vector.Raise ErrDimensionMismatch if size != v.size
     return to_enum(:each2, v) unless block_given?
     size.times do |i|
@@ -1167,6 +1278,7 @@ class Vector
   # in conjunction.
   #
   def collect2(v) # :yield: e1, e2
+    raise TypeError, "Integer is not like Vector" if v.kind_of?(Integer)
     Vector.Raise ErrDimensionMismatch if size != v.size
     return to_enum(:collect2, v) unless block_given?
     size.times.collect do |i|
@@ -1189,10 +1301,6 @@ class Vector
   def eql?(other)
     return false unless Vector === other
     @elements.eql? other.elements
-  end
-
-  def compare_by(elements, comparison = :==)
-    @elements.send(comparison, elements)
   end
 
   #

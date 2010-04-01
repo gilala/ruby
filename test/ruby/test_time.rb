@@ -162,6 +162,27 @@ class TestTime < Test::Unit::TestCase
       assert_equal(999999998, Time.at(-14e-10).nsec)
       assert_equal(999999998, Time.at(-16e-10).nsec)
     end
+
+    t = Time.at(-4611686019).utc
+    assert_equal(1823, t.year)
+
+    t = Time.at(4611686018, 999999).utc
+    assert_equal(2116, t.year)
+    assert_equal("0.999999".to_r, t.subsec)
+
+    t = Time.at(2**40 + "1/3".to_r, 9999999999999).utc
+    assert_equal(36812, t.year)
+    
+    t = Time.at(-0x3fff_ffff_ffff_ffff)
+    assert_equal(-146138510344, t.year)
+    t = Time.at(-0x4000_0000_0000_0000)
+    assert_equal(-146138510344, t.year)
+    t = Time.at(-0x4000_0000_0000_0001)
+    assert_equal(-146138510344, t.year)
+    t = Time.at(-0x5000_0000_0000_0001)
+    assert_equal(-182673138422, t.year)
+    t = Time.at(-0x6000_0000_0000_0000)
+    assert_equal(-219207766501, t.year)
   end
 
   def test_at2
@@ -287,6 +308,9 @@ class TestTime < Test::Unit::TestCase
 
     t = Time.local(2000)
     assert_equal(t.gmt_offset, T2000 - t)
+
+    assert_equal(-4427700000, Time.utc(-4427700000,12,1).year)
+    assert_equal(-2**30+10, Time.utc(-2**30+10,1,1).year)
   end
 
   def test_time_interval
@@ -405,6 +429,11 @@ class TestTime < Test::Unit::TestCase
     assert_equal(Rational(1,3), (t0 + Rational(4,3)).subsec)
     assert_equal(0.5, (t0 + SimpleDelegator.new(1.5)).subsec)
     assert_equal(Rational(1,3), (t0 + SimpleDelegator.new(Rational(4,3))).subsec)
+  end
+
+  def test_minus
+    t = Time.at(-4611686018).utc - 100
+    assert_equal(1823, t.year)
   end
 
   def test_readers
@@ -561,6 +590,26 @@ class TestTime < Test::Unit::TestCase
     assert_equal("JANUARY", T2000.strftime("%#B"))
     assert_equal("JAN", T2000.strftime("%#h"))
     assert_equal("FRIDAY", Time.local(2008,1,4).strftime("%#A"))
+
+    t = Time.utc(2000,3,14, 6,53,"58.979323846".to_r) # Pi Day
+    assert_equal("03/14/2000  6:53:58.97932384600000000000000000000",
+                 t.strftime("%m/%d/%Y %l:%M:%S.%29N"))
+    assert_equal("03/14/2000  6:53:58.9793238460",
+                 t.strftime("%m/%d/%Y %l:%M:%S.%10N"))
+    assert_equal("03/14/2000  6:53:58.979323846",
+                 t.strftime("%m/%d/%Y %l:%M:%S.%9N"))
+    assert_equal("03/14/2000  6:53:58.97932384",
+                 t.strftime("%m/%d/%Y %l:%M:%S.%8N"))
+
+    t = Time.utc(1592,3,14, 6,53,"58.97932384626433832795028841971".to_r) # Pi Day
+    assert_equal("03/14/1592  6:53:58.97932384626433832795028841971",
+                 t.strftime("%m/%d/%Y %l:%M:%S.%29N"))
+    assert_equal("03/14/1592  6:53:58.9793238462",
+                 t.strftime("%m/%d/%Y %l:%M:%S.%10N"))
+    assert_equal("03/14/1592  6:53:58.979323846",
+                 t.strftime("%m/%d/%Y %l:%M:%S.%9N"))
+    assert_equal("03/14/1592  6:53:58.97932384",
+                 t.strftime("%m/%d/%Y %l:%M:%S.%8N"))
   end
 
   def test_delegate

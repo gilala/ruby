@@ -153,6 +153,29 @@ rb_obj_class(VALUE obj)
     return rb_class_real(CLASS_OF(obj));
 }
 
+/*
+ *  call-seq:
+ *     obj.singleton_class    => class
+ *
+ *  Returns the singleton class of <i>obj</i>.  This method creates
+ *  a new singleton class if <i>obj</i> does not have it.
+ *
+ *  If <i>obj</i> is <code>nil</code>, <code>true</code>, or
+ *  <code>false</code>, it returns NilClass, TrueClass, or FalseClass,
+ *  respectively.
+ *  If <i>obj</i> is a Fixnum or a Symbol, it raises a TypeError.
+ *
+ *     Object.new.singleton_class  #=> #<Class:#<Object:0xb7ce1e24>>
+ *     String.singleton_class      #=> #<Class:String>
+ *     nil.singleton_class         #=> NilClass
+ */
+
+static VALUE
+rb_obj_singleton_class(VALUE obj)
+{
+    return rb_singleton_class(obj);
+}
+
 static void
 init_copy(VALUE dest, VALUE obj)
 {
@@ -377,11 +400,11 @@ inspect_obj(VALUE obj, VALUE str, int recur)
  *     Time.new.inspect                 #=> "2008-03-08 19:43:39 +0900"
  */
 
-extern int rb_obj_basic_to_s_p(VALUE);
-
 static VALUE
 rb_obj_inspect(VALUE obj)
 {
+    extern int rb_obj_basic_to_s_p(VALUE);
+
     if (TYPE(obj) == T_OBJECT && rb_obj_basic_to_s_p(obj)) {
         int has_ivar = 0;
         VALUE *ptr = ROBJECT_IVPTR(obj);
@@ -2220,6 +2243,11 @@ rb_cstr_to_dbl(const char *p, int badcheck)
     if (!p) return 0.0;
     q = p;
     while (ISSPACE(*p)) p++;
+
+    if (!badcheck && p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+	return 0.0;
+    }
+
     d = strtod(p, &end);
     if (errno == ERANGE) {
 	OutOfRange();
@@ -2258,6 +2286,11 @@ rb_cstr_to_dbl(const char *p, int badcheck)
 	}
 	*n = '\0';
 	p = buf;
+
+	if (!badcheck && p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+	    return 0.0;
+	}
+
 	d = strtod(p, &end);
 	if (errno == ERANGE) {
 	    OutOfRange();
@@ -2601,6 +2634,7 @@ InitVM_Object(void)
     rb_define_method(rb_mKernel, "<=>", rb_obj_cmp, 1);
 
     rb_define_method(rb_mKernel, "class", rb_obj_class, 0);
+    rb_define_method(rb_mKernel, "singleton_class", rb_obj_singleton_class, 0);
     rb_define_method(rb_mKernel, "clone", rb_obj_clone, 0);
     rb_define_method(rb_mKernel, "dup", rb_obj_dup, 0);
     rb_define_method(rb_mKernel, "initialize_copy", rb_obj_init_copy, 1);

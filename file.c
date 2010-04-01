@@ -126,18 +126,14 @@ rb_get_path_check(VALUE obj, int level)
     if (insecure_obj_p(obj, level)) {
 	rb_insecure_operation();
     }
-    tmp = rb_check_string_type(obj);
-    if (!NIL_P(tmp)) goto exit;
 
     CONST_ID(to_path, "to_path");
-    if (rb_respond_to(obj, to_path)) {
-	tmp = rb_funcall(obj, to_path, 0, 0);
-    }
-    else {
+    tmp = rb_check_funcall(obj, to_path, 0, 0);
+    if (tmp == Qundef) {
 	tmp = obj;
     }
     StringValue(tmp);
-  exit:
+
     tmp = file_path_convert(tmp);
     StringValueCStr(tmp);
     if (obj != tmp && insecure_obj_p(tmp, level)) {
@@ -2897,11 +2893,14 @@ file_expand_path(VALUE fname, VALUE dname, int abs_mode, VALUE result)
 	    p = chompdirsep(skiproot(buf));
     }
     else {
+	size_t len;
 	b = s;
 	do s++; while (isdirsep(*s));
-	p = buf + (s - b);
+	len = s - b;
+	p = buf + len;
 	BUFCHECK(bdiff >= buflen);
-	memset(buf, '/', p - buf);
+	memset(buf, '/', len);
+	rb_str_set_len(result, len);
 	rb_enc_associate(result, rb_enc_check(result, fname));
     }
     if (p > buf && p[-1] == '/')
@@ -3477,8 +3476,14 @@ rb_file_s_basename(int argc, VALUE *argv)
  *     File.dirname("/home/gumby/work/ruby.rb")   #=> "/home/gumby/work"
  */
 
-VALUE
+static VALUE
 rb_file_s_dirname(VALUE klass, VALUE fname)
+{
+    return rb_file_dirname(fname);
+}
+
+VALUE
+rb_file_dirname(VALUE fname)
 {
     const char *name, *root, *p;
     VALUE dirname;

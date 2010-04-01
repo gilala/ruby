@@ -28,6 +28,19 @@ class String
   alias bytesize size unless method_defined?(:bytesize)
 end
 
+class Dir
+  def self.mktmpdir(path)
+    path = File.join(tmpdir, path+"-#{$$}-#{rand(100000)}")
+    begin
+      mkdir(path)
+    rescue Errno::EEXIST
+      path.succ!
+      retry
+    end
+    path
+  end unless respond_to?(:mktmpdir)
+end
+
 $patch_file &&= File.expand_path($patch_file)
 path = ENV["PATH"].split(File::PATH_SEPARATOR)
 %w[YACC BASERUBY RUBY MV MINIRUBY].each do |var|
@@ -124,6 +137,7 @@ def package(rev, destdir)
     v = n
   end
   system("patch -d #{v} -p0 -i #{$patch_file}") if $patch_file
+  "take a breath, and go ahead".scan(/./) {|c|print c; sleep(c == "," ? 0.7 : 0.05)}; puts
   def (clean = []).add(n) push(n); n end
   Dir.chdir(v) do
     File.open(clean.add("cross.rb"), "w") {|f| f.puts "CROSS_COMPILING=true"}
@@ -159,7 +173,7 @@ def package(rev, destdir)
       }
       FileUtils.mkpath(hdrdir = "#{extout}/include/ruby")
       File.open("#{hdrdir}/config.h", "w") {}
-      miniruby = ENV['MINIRUBY'] + " -rcross"
+      miniruby = ENV['MINIRUBY'] + " -r./cross"
       IO.popen("make -f - prereq srcdir=. CHDIR=cd IFCHANGE=tool/ifchange 'MINIRUBY=#{miniruby}' 'RUBY=#{ENV["RUBY"]}'", "w") do |f|
         f.puts(IO.read("Makefile.in").gsub(/^@.*\n/, '').gsub(/@([A-Za-z_]\w*)@/) {ENV[$1]})
         f.puts(commonmk.gsub(/\{[^{}]*\}/, ""))

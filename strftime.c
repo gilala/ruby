@@ -189,15 +189,16 @@ max(int a, int b)
 
 /* strftime --- produce formatted time */
 
-size_t
-rb_strftime(char *s, size_t maxsize, const char *format, const struct vtm *vtm, VALUE timev, int gmt)
+static size_t
+rb_strftime_with_timespec(char *s, size_t maxsize, const char *format, const struct vtm *vtm, VALUE timev, struct timespec *ts, int gmt)
 {
 	char *endp = s + maxsize;
 	char *start = s;
 	const char *sp, *tp;
 	auto char tbuf[100];
 	long off;
-	int i, w;
+	ptrdiff_t i;
+	int w;
 	long y;
 	static short first = 1;
 #ifdef POSIX_SEMANTICS
@@ -305,7 +306,7 @@ rb_strftime(char *s, size_t maxsize, const char *format, const struct vtm *vtm, 
 		} while (0)
 #define STRFTIME(fmt) \
 		do { \
-			i = rb_strftime(s, endp - s, fmt, vtm, timev, gmt); \
+			i = rb_strftime_with_timespec(s, endp - s, fmt, vtm, timev, ts, gmt); \
 			if (!i) return 0; \
 			if (precision > i) {\
 				memmove(s + precision - i, s, i);\
@@ -411,12 +412,12 @@ rb_strftime(char *s, size_t maxsize, const char *format, const struct vtm *vtm, 
 
 		case 'd':	/* day of the month, 01 - 31 */
 			i = range(1, vtm->mday, 31);
-			FMT('0', 2, "d", i);
+			FMT('0', 2, "d", (int)i);
 			continue;
 
 		case 'H':	/* hour, 24-hour clock, 00 - 23 */
 			i = range(0, vtm->hour, 23);
-			FMT('0', 2, "d", i);
+			FMT('0', 2, "d", (int)i);
 			continue;
 
 		case 'I':	/* hour, 12-hour clock, 01 - 12 */
@@ -425,7 +426,7 @@ rb_strftime(char *s, size_t maxsize, const char *format, const struct vtm *vtm, 
 				i = 12;
 			else if (i > 12)
 				i -= 12;
-			FMT('0', 2, "d", i);
+			FMT('0', 2, "d", (int)i);
 			continue;
 
 		case 'j':	/* day of the year, 001 - 366 */
@@ -434,12 +435,12 @@ rb_strftime(char *s, size_t maxsize, const char *format, const struct vtm *vtm, 
 
 		case 'm':	/* month, 01 - 12 */
 			i = range(1, vtm->mon, 12);
-			FMT('0', 2, "d", i);
+			FMT('0', 2, "d", (int)i);
 			continue;
 
 		case 'M':	/* minute, 00 - 59 */
 			i = range(0, vtm->min, 59);
-			FMT('0', 2, "d", i);
+			FMT('0', 2, "d", (int)i);
 			continue;
 
 		case 'p':	/* AM or PM based on 12-hour clock */
@@ -458,15 +459,22 @@ rb_strftime(char *s, size_t maxsize, const char *format, const struct vtm *vtm, 
 			break;
 
 		case 's':
-                        {
+                        if (ts) {
+                                time_t sec = ts->tv_sec;
+                                if (~(time_t)0 <= 0)
+                                    FMT('0', 1, PRI_TIMET_PREFIX"d", sec);
+                                else
+                                    FMT('0', 1, PRI_TIMET_PREFIX"u", sec);
+                        }
+                        else {
                                 VALUE sec = div(timev, INT2FIX(1));
                                 FMTV('0', 1, "d", sec);
-                                continue;
                         }
+                        continue;
 
 		case 'S':	/* second, 00 - 60 */
 			i = range(0, vtm->sec, 60);
-			FMT('0', 2, "d", i);
+			FMT('0', 2, "d", (int)i);
 			continue;
 
 		case 'U':	/* week of year, Sunday is first day of week */
@@ -475,7 +483,7 @@ rb_strftime(char *s, size_t maxsize, const char *format, const struct vtm *vtm, 
 
 		case 'w':	/* weekday, Sunday == 0, 0 - 6 */
 			i = range(0, vtm->wday, 6);
-			FMT('0', 1, "d", i);
+			FMT('0', 1, "d", (int)i);
 			continue;
 
 		case 'W':	/* week of year, Monday is first day of week */
@@ -492,7 +500,7 @@ rb_strftime(char *s, size_t maxsize, const char *format, const struct vtm *vtm, 
 
 		case 'y':	/* year without a century, 00 - 99 */
 			i = NUM2INT(mod(vtm->year, INT2FIX(100)));
-			FMT('0', 2, "d", i);
+			FMT('0', 2, "d", (int)i);
 			continue;
 
 		case 'Y':	/* year with century */
@@ -658,7 +666,7 @@ rb_strftime(char *s, size_t maxsize, const char *format, const struct vtm *vtm, 
 #ifdef SUNOS_EXT
 		case 'k':	/* hour, 24-hour clock, blank pad */
 			i = range(0, vtm->hour, 23);
-			FMT(' ', 2, "d", i);
+			FMT(' ', 2, "d", (int)i);
 			continue;
 
 		case 'l':	/* hour, 12-hour clock, 1 - 12, blank pad */
@@ -667,7 +675,7 @@ rb_strftime(char *s, size_t maxsize, const char *format, const struct vtm *vtm, 
 				i = 12;
 			else if (i > 12)
 				i -= 12;
-			FMT(' ', 2, "d", i);
+			FMT(' ', 2, "d", (int)i);
 			continue;
 #endif
 
@@ -752,15 +760,30 @@ rb_strftime(char *s, size_t maxsize, const char *format, const struct vtm *vtm, 
 			 */
 			w = 9;
 		subsec:
-			{
+                        if (precision <= 0) {
+                            precision = w;
+                        }
+                        NEEDS(precision);
+
+                        if (ts) {
+                                long subsec = ts->tv_nsec;
+                                if (9 < precision) {
+                                        snprintf(s, endp - s, "%09ld", subsec);
+                                        memset(s+9, '0', precision-9);
+                                        s += precision;
+                                }
+                                else {
+                                        int i;
+                                        for (i = 0; i < 9-precision; i++)
+                                                subsec /= 10;
+                                        snprintf(s, endp - s, "%0*ld", precision, subsec);
+                                        s += precision;
+                                }
+                        }
+                        else {
                                 VALUE subsec = mod(timev, INT2FIX(1));
                                 int ww;
                                 long n;
-
-				if (precision <= 0) {
-				    precision = w;
-				}
-				NEEDS(precision);
 
                                 ww = precision;
                                 while (9 <= ww) {
@@ -864,6 +887,18 @@ rb_strftime(char *s, size_t maxsize, const char *format, const struct vtm *vtm, 
 		return (s - start);
 	} else
 		return 0;
+}
+
+size_t
+rb_strftime(char *s, size_t maxsize, const char *format, const struct vtm *vtm, VALUE timev, int gmt)
+{
+    return rb_strftime_with_timespec(s, maxsize, format, vtm, timev, NULL, gmt);
+}
+
+size_t
+rb_strftime_timespec(char *s, size_t maxsize, const char *format, const struct vtm *vtm, struct timespec *ts, int gmt)
+{
+    return rb_strftime_with_timespec(s, maxsize, format, vtm, Qnil, ts, gmt);
 }
 
 /* isleap --- is a year a leap year? */
